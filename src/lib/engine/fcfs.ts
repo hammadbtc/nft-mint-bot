@@ -7,6 +7,8 @@ import { eq, and } from "drizzle-orm";
 
 // Track which collections we're already watching
 const activeWatchers = new Map<string, ReturnType<typeof setInterval>>();
+// Prevent FCFS double-fire: cooldown per collection (30s)
+const fcfsCooldowns = new Map<string, number>();
 
 /**
  * Start watching a collection for its mint-open event.
@@ -54,6 +56,15 @@ export async function startFcfsWatcher(collectionId: string) {
       lastCheckedBlock = currentBlock;
 
       if (logs.length > 0) {
+        // Cooldown guard: prevent double-fire within 30 seconds
+        const now = Date.now();
+        const lastFire = fcfsCooldowns.get(collectionId) || 0;
+        if (now - lastFire < 30_000) {
+          console.log(`FCFS cooldown active for ${collection.name}, skipping`);
+          return;
+        }
+        fcfsCooldowns.set(collectionId, now);
+
         console.log(`🔥 FCFS triggered! ${collection.name} — ${logs.length} events`);
 
         await sendAlert(

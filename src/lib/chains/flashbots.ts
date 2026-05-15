@@ -65,7 +65,10 @@ export async function sendFlashbotsBundle(
   });
 
   if (!targetBlock) {
-    const currentBlock = await authSigner.provider!.getBlockNumber();
+    if (!authSigner.provider) {
+      throw new Error("Flashbots auth signer has no provider — connect it first");
+    }
+    const currentBlock = await authSigner.provider.getBlockNumber();
     targetBlock = currentBlock + 1;
   }
 

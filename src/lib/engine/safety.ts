@@ -2,6 +2,10 @@ import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 
+// Cache safety results (valid for 60 seconds to avoid re-checking every mint)
+const safetyCache = new Map<string, { result: SafetyCheckResult; timestamp: number }>();
+const SAFETY_CACHE_TTL = 60_000; // 60 seconds
+
 // Common honeypot patterns to check
 const HONEYPOT_SIGS = [
   "setMintActive(bool)",        // can pause mint
@@ -108,6 +112,13 @@ export async function checkContractSafety(
   chainId: number,
   provider: ethers.Provider
 ): Promise<SafetyCheckResult> {
+  // Check cache first
+  const cacheKey = `${chainId}:${contractAddress.toLowerCase()}`;
+  const cached = safetyCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < SAFETY_CACHE_TTL) {
+    return cached.result;
+  }
+
   const reasons: string[] = [];
   const warnings: string[] = [];
 
@@ -161,9 +172,13 @@ export async function checkContractSafety(
     warnings.push("Could not verify ERC721 interface support (contract may not implement supportsInterface)");
   }
 
-  return {
+  const result: SafetyCheckResult = {
     safe: reasons.length === 0,
     reasons,
     warnings,
   };
+
+  // Cache the result
+  safetyCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
 }

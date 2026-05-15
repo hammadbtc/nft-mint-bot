@@ -34,10 +34,9 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/stats").then((r) => r.json()),
-      fetch("/api/analytics").then((r) => r.json().catch(() => null)),
-    ]).then(([stats, analytics]) => {
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then((stats) => {
       // Build analytics from stats + recent
       const recentTxns: any[] = [];
 

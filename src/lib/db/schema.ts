@@ -26,6 +26,7 @@ export const wallets = sqliteTable("wallets", {
   keyFormat: text("key_format").notNull().default("private-key"), // private-key | mnemonic | keystore
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   spendLimit: text("spend_limit"), // max ETH this wallet can spend total (in wei, null = unlimited)
+  hdPath: text("hd_path"), // BIP44 derivation path for mnemonic wallets
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

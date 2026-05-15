@@ -56,15 +56,18 @@ export async function processScheduledJobs(maxConcurrent?: number): Promise<numb
     running.push(promise);
 
     if (running.length >= limit) {
-      await Promise.race(running);
-      // Remove completed promises
+      // Wait for at least one to finish
+      const settled = await Promise.race(
+        running.map((p, i) => p.then(() => i).catch(() => i))
+      );
+      // Remove all completed promises
       for (let i = running.length - 1; i >= 0; i--) {
         const p = running[i];
-        const settled = await Promise.race([
-          p.then(() => true),
-          new Promise<boolean>((r) => setTimeout(() => r(false), 0)),
+        const done = await Promise.race([
+          p.then(() => true).catch(() => true),
+          new Promise<boolean>((r) => setTimeout(() => r(false), 10)),
         ]);
-        if (settled) running.splice(i, 1);
+        if (done) running.splice(i, 1);
       }
     }
   }

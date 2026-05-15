@@ -43,6 +43,7 @@ export async function importWallet(input: WalletImport) {
     encryptedKey: encrypted,
     keyFormat: input.keyType,
     spendLimit: input.spendLimit || null,
+    hdPath: input.hdPath || null,
   });
 
   return {
@@ -90,7 +91,8 @@ export async function getSigner(walletId: string, provider: ethers.Provider): Pr
 
   let wallet: ethers.Wallet | ethers.HDNodeWallet;
   if (record.keyFormat === "mnemonic") {
-    wallet = ethers.Wallet.fromPhrase(rawKey);
+    const hdPath = (record as any).hdPath || "m/44'/60'/0'/0/0";
+    wallet = ethers.HDNodeWallet.fromPhrase(rawKey, undefined, hdPath);
   } else {
     wallet = new ethers.Wallet(rawKey);
   }
@@ -116,6 +118,7 @@ export async function listWallets(chainId?: number) {
       keyFormat: schema.wallets.keyFormat,
       active: schema.wallets.active,
       spendLimit: schema.wallets.spendLimit,
+      hdPath: schema.wallets.hdPath,
       createdAt: schema.wallets.createdAt,
     })
     .from(schema.wallets)

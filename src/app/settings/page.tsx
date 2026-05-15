@@ -57,8 +57,6 @@ export default function SettingsPage() {
       });
     }
 
-    if (webhookUrl) process.env.DISCORD_ALERT_WEBHOOK = webhookUrl;
-
     setSaving(false);
     setSaved(true);
     setVaultPassphrase("");

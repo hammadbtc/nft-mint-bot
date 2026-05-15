@@ -51,6 +51,15 @@ function releaseNonce(walletId: string) {
   nonceLock.delete(walletId);
 }
 
+/** Roll back the cached nonce after a pre-broadcast failure. */
+function rollbackNonce(walletId: string) {
+  const cached = nonceCache.get(walletId);
+  if (cached !== undefined && cached > 0) {
+    nonceCache.set(walletId, cached - 1);
+  }
+  nonceLock.delete(walletId);
+}
+
 // ─── Gas Estimation ────────────────────────────────────────────────────
 
 interface GasConfig {
@@ -218,18 +227,28 @@ export async function executeMint(params: MintJobParams) {
     tx.value = BigInt(collection.mintPrice) * BigInt(params.quantity || 1);
   }
 
-  // ─── Balance Check ───────────────────────────────────────────────
+  // ─── Gas Estimation (must run before balance/spend checks) ──────────
+  const gas = await estimateGas(tx, provider);
+  if (params.gasLimit) tx.gasLimit = BigInt(params.gasLimit);
+  else if (gas.gasLimit) tx.gasLimit = gas.gasLimit;
+
+  if (params.maxFeePerGas) tx.maxFeePerGas = BigInt(params.maxFeePerGas);
+  else if (gas.maxFeePerGas) tx.maxFeePerGas = gas.maxFeePerGas;
+
+  if (params.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = BigInt(params.maxPriorityFeePerGas);
+  else if (gas.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = gas.maxPriorityFeePerGas;
+
+  // ─── Balance Check (uses real estimated gas) ─────────────────────
   if (!dryRun) {
-    // ETH balance
     const ethBalance = await provider.getBalance(signer.address);
-    const glEst: bigint = (tx.gasLimit ?? 500_000n) as bigint;
-    const mfpEst: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
-    const estGasCost = glEst * mfpEst;
+    const glB: bigint = (tx.gasLimit ?? 500_000n) as bigint;
+    const mfpB: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
+    const estGasCost = glB * mfpB;
     const txVal: bigint = BigInt(tx.value ?? 0);
     const totalNeeded = txVal + estGasCost;
 
     if (ethBalance < totalNeeded) {
-      releaseNonce(walletId);
+      rollbackNonce(walletId);
       throw new Error(
         `Insufficient ETH balance: have ${ethers.formatEther(ethBalance)} ETH, ` +
         `need ~${ethers.formatEther(totalNeeded)} ETH (value + gas)`
@@ -244,7 +263,7 @@ export async function executeMint(params: MintJobParams) {
       const tokenNeeded = BigInt(collection.mintPrice || "0") * BigInt(params.quantity || 1);
 
       if (tokenBalance < tokenNeeded) {
-        releaseNonce(walletId);
+        rollbackNonce(walletId);
         throw new Error(
           `Insufficient token balance: have ${ethers.formatUnits(tokenBalance, tokenDecimals)}, ` +
           `need ${ethers.formatUnits(tokenNeeded, tokenDecimals)}`
@@ -260,7 +279,7 @@ export async function executeMint(params: MintJobParams) {
           await approveTx.wait(1);
           console.log(`✅ Approval confirmed: ${approveTx.hash}`);
         } catch (err: any) {
-          releaseNonce(walletId);
+          rollbackNonce(walletId);
           throw new Error(`Token approval failed: ${err?.message || err}`);
         }
       }
@@ -270,25 +289,14 @@ export async function executeMint(params: MintJobParams) {
   // ─── Contract Safety Check ─────────────────────────────────────────
   const safety = await checkContractSafety(collection.contractAddress, collection.chainId, provider);
   if (!safety.safe) {
-    releaseNonce(walletId);
+    rollbackNonce(walletId);
     throw new Error(`Safety check failed: ${safety.reasons.join("; ")}`);
   }
   if (safety.warnings.length > 0 && !dryRun) {
     console.warn(`⚠️ Safety warnings for ${collection.name}:`, safety.warnings);
   }
 
-  // Gas estimation
-  const gas = await estimateGas(tx, provider);
-  if (params.gasLimit) tx.gasLimit = BigInt(params.gasLimit);
-  else if (gas.gasLimit) tx.gasLimit = gas.gasLimit;
-
-  if (params.maxFeePerGas) tx.maxFeePerGas = BigInt(params.maxFeePerGas);
-  else if (gas.maxFeePerGas) tx.maxFeePerGas = gas.maxFeePerGas;
-
-  if (params.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = BigInt(params.maxPriorityFeePerGas);
-  else if (gas.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = gas.maxPriorityFeePerGas;
-
-  // ─── Spend limit check ────────────────────────────────────────────
+  // ─── Spend limit check (uses estimated gas from above) ─────────────
   if (!dryRun) {
     const [wallet] = await db
       .select({ spendLimit: schema.wallets.spendLimit })
@@ -298,9 +306,13 @@ export async function executeMint(params: MintJobParams) {
 
     if (wallet?.spendLimit) {
       const spendLimit = BigInt(wallet.spendLimit);
-      const txValue: bigint = BigInt(tx.value ?? 0);
+      const txValueS: bigint = BigInt(tx.value ?? 0);
+      const glS: bigint = (tx.gasLimit ?? 500_000n) as bigint;
+      const mfpS: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
+      const estimatedGasCost = glS * mfpS;
+      const totalCost = txValueS + estimatedGasCost;
 
-      // Calculate total already spent by completed/running jobs
+      // Calculate total already spent
       const [spent] = await db
         .select({
           total: sql<number>`coalesce(sum(cast(${schema.mintAttempts.gasUsed} as integer) * cast(${schema.mintAttempts.effectiveGasPrice} as integer)), 0)`,
@@ -314,15 +326,10 @@ export async function executeMint(params: MintJobParams) {
           )
         );
 
-      // Estimate gas cost: gasLimit * maxFeePerGas
-      const gl: bigint = (tx.gasLimit ?? 500_000n) as bigint;
-      const mfp: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
-      const estimatedGasCost = gl * mfp;
-      const totalCost = txValue + estimatedGasCost;
       const previousSpend = BigInt(spent?.total || 0);
 
       if (previousSpend + totalCost > spendLimit) {
-        releaseNonce(walletId);
+        rollbackNonce(walletId);
         throw new Error(
           `Spend limit exceeded: already spent ${ethers.formatEther(previousSpend)} ETH, ` +
           `this tx would cost ~${ethers.formatEther(totalCost)} ETH, ` +
@@ -335,7 +342,7 @@ export async function executeMint(params: MintJobParams) {
   // Simulate
   const sim = await simulateTx(tx, provider);
   if (!sim.success) {
-    releaseNonce(walletId);
+    rollbackNonce(walletId);
     return {
       status: "simulation_failed",
       error: sim.error,
@@ -345,7 +352,7 @@ export async function executeMint(params: MintJobParams) {
 
   // Dry run: stop after simulation
   if (dryRun) {
-    releaseNonce(walletId);
+    rollbackNonce(walletId);
     return {
       status: "simulation_passed",
       dryRun: true,
@@ -374,6 +381,7 @@ export async function executeMint(params: MintJobParams) {
       response = await signer.sendTransaction(tx);
     }
   } catch (err: any) {
+    // Don't rollback — tx may have been broadcast. But release the lock.
     releaseNonce(walletId);
     throw new Error(`Send failed: ${err?.message || err}`);
   }
