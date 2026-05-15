@@ -26,7 +26,17 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { walletId, collectionId, quantity, gasLimit, maxFeePerGas, maxPriorityFeePerGas, scheduledAt } = body;
+    const {
+      walletId,
+      collectionId,
+      quantity,
+      gasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+      scheduledAt,
+      useFlashbots,
+      dryRun,
+    } = body;
 
     if (!walletId || !collectionId) {
       return NextResponse.json({ error: "walletId and collectionId are required" }, { status: 400 });
@@ -43,12 +53,12 @@ export async function POST(req: NextRequest) {
       maxFeePerGas: maxFeePerGas?.toString(),
       maxPriorityFeePerGas: maxPriorityFeePerGas?.toString(),
       scheduledAt: scheduledAt || null,
+      useFlashbots: useFlashbots ?? false,
+      dryRun: dryRun ?? false,
       status: "pending",
     });
 
-    // If no schedule, execute immediately (async — don't block response)
     if (!scheduledAt) {
-      // Fire and forget — the scheduler or immediate execution
       runMintJob(jobId).catch((err) => console.error(`Job ${jobId} failed:`, err));
     }
 

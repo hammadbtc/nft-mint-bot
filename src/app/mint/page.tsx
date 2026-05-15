@@ -28,6 +28,14 @@ export default function BatchMintPage() {
   const [results, setResults] = useState<any[] | null>(null);
   const [error, setError] = useState("");
 
+  // Gas controls
+  const [useFlashbots, setUseFlashbots] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [gasLimit, setGasLimit] = useState("");
+  const [maxFeePerGas, setMaxFeePerGas] = useState("");
+  const [maxPriorityFeePerGas, setMaxPriorityFeePerGas] = useState("");
+
   const fetchData = () => {
     setLoading(true);
     Promise.all([
@@ -42,7 +50,6 @@ export default function BatchMintPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // Filter wallets by selected collection's chain
   const selectedCol = collections.find((c) => c.id === selectedCollection);
   const compatibleWallets = selectedCol
     ? wallets.filter((w) => w.chainId === selectedCol.chainId)
@@ -80,6 +87,11 @@ export default function BatchMintPage() {
           collectionId: selectedCollection,
           walletIds: Array.from(selectedWalletIds),
           quantity,
+          useFlashbots,
+          dryRun,
+          gasLimit: gasLimit || undefined,
+          maxFeePerGas: maxFeePerGas || undefined,
+          maxPriorityFeePerGas: maxPriorityFeePerGas || undefined,
         }),
       });
       const data = await res.json();
@@ -113,7 +125,7 @@ export default function BatchMintPage() {
               value={selectedCollection}
               onChange={(e) => {
                 setSelectedCollection(e.target.value);
-                setSelectedWalletIds(new Set()); // reset wallet selection
+                setSelectedWalletIds(new Set());
               }}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm"
             >
@@ -138,6 +150,73 @@ export default function BatchMintPage() {
             />
           </div>
 
+          {/* Flashbots & Dry Run toggles */}
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useFlashbots}
+                onChange={(e) => setUseFlashbots(e.target.checked)}
+                className="accent-purple-500"
+              />
+              <span className="text-sm text-zinc-300">🛡️ Flashbots Protect</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={(e) => setDryRun(e.target.checked)}
+                className="accent-yellow-500"
+              />
+              <span className="text-sm text-zinc-300">🔬 Dry Run (simulate only)</span>
+            </label>
+          </div>
+
+          {/* Advanced gas controls */}
+          <div>
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              {showAdvanced ? "▾ Hide" : "▸ Show"} Advanced Gas Settings
+            </button>
+            {showAdvanced && (
+              <div className="mt-3 space-y-3 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Gas Limit (override)</label>
+                  <input
+                    type="text"
+                    value={gasLimit}
+                    onChange={(e) => setGasLimit(e.target.value)}
+                    placeholder="Auto-estimate"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Max Fee Per Gas (wei)</label>
+                  <input
+                    type="text"
+                    value={maxFeePerGas}
+                    onChange={(e) => setMaxFeePerGas(e.target.value)}
+                    placeholder="Auto"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Max Priority Fee (wei)</label>
+                  <input
+                    type="text"
+                    value={maxPriorityFeePerGas}
+                    onChange={(e) => setMaxPriorityFeePerGas(e.target.value)}
+                    placeholder="Auto"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-white text-sm"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Wallet selection */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm text-zinc-400">
@@ -182,17 +261,17 @@ export default function BatchMintPage() {
           >
             {minting ? (
               <span className="flex items-center justify-center gap-2">
-                <span className="animate-spin">⏳</span> Minting...
+                <span className="animate-spin">⏳</span> {dryRun ? "Simulating..." : "Minting..."}
               </span>
             ) : (
-              `🚀 Mint with ${selectedWalletIds.size} wallet${selectedWalletIds.size !== 1 ? "s" : ""}`
+              `${dryRun ? "🔬 Simulate" : "🚀 Mint"} with ${selectedWalletIds.size} wallet${selectedWalletIds.size !== 1 ? "s" : ""}`
             )}
           </button>
         </div>
 
         {/* Right: Results */}
         <div>
-          <h3 className="text-lg font-semibold mb-3">Results</h3>
+          <h3 className="text-lg font-semibold mb-3">Results{dryRun && results ? " (Dry Run)" : ""}</h3>
           {results === null ? (
             <p className="text-zinc-500 text-sm">Results will appear here after minting.</p>
           ) : results.length === 0 ? (
@@ -218,7 +297,7 @@ export default function BatchMintPage() {
                   </div>
                   {r.txHash && (
                     <div className="mt-1 text-xs text-zinc-500">
-                      TX: {r.txHash.slice(0, 10)}...{r.txHash.slice(-8)}
+                      TX: <a href={`https://etherscan.io/tx/${r.txHash}`} target="_blank" className="text-blue-400 hover:underline">{r.txHash.slice(0, 10)}...{r.txHash.slice(-8)}</a>
                     </div>
                   )}
                   {r.error && (

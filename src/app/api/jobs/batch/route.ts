@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db, schema } from "@/lib/db";
 import { batchMint } from "@/lib/engine/mint";
-import { eq } from "drizzle-orm";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { collectionId, walletIds, quantity } = body;
+    const { collectionId, walletIds, quantity, useFlashbots, dryRun } = body;
 
     if (!collectionId || !walletIds || !walletIds.length) {
       return NextResponse.json(
@@ -15,8 +13,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const results = await batchMint(collectionId, walletIds, quantity || 1);
-    return NextResponse.json({ success: true, results });
+    const results = await batchMint(collectionId, walletIds, quantity || 1, useFlashbots, dryRun);
+    return NextResponse.json({ success: true, results, dryRun: dryRun ?? false });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Batch mint failed" }, { status: 500 });
   }

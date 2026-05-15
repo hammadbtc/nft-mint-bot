@@ -4,7 +4,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "MintBot — ACO AutoMint",
-  description: "Multi-chain NFT auto-mint service",
+  description: "Multi-chain NFT auto-mint service with Flashbots, dry-run, and RPC health monitoring",
 };
 
 export default function RootLayout({
@@ -19,13 +19,20 @@ export default function RootLayout({
           {/* Sidebar */}
           <aside className="w-64 bg-zinc-900 border-r border-zinc-800 p-4 flex flex-col gap-1">
             <h1 className="text-lg font-bold text-emerald-400 mb-4">🦾 MintBot</h1>
+
+            <SectionLabel>Core</SectionLabel>
             <NavLink href="/">📊 Dashboard</NavLink>
             <NavLink href="/wallets">👛 Wallets</NavLink>
             <NavLink href="/collections">🎨 Collections</NavLink>
-            <NavLink href="/jobs">⚡ Jobs</NavLink>
             <NavLink href="/mint">🚀 Batch Mint</NavLink>
-            <div className="mt-auto pt-4 border-t border-zinc-800 text-xs text-zinc-500">
-              ACO AutoMint v1.0
+            <NavLink href="/jobs">⚡ Jobs</NavLink>
+
+            <SectionLabel>Infrastructure</SectionLabel>
+            <NavLink href="/rpc">🔌 RPC Health</NavLink>
+
+            <div className="mt-auto pt-4 border-t border-zinc-800 text-xs text-zinc-500 space-y-1">
+              <div>ACO AutoMint v2.0</div>
+              <div>Flashbots • Dry-Run • BIP39</div>
             </div>
           </aside>
 
@@ -34,6 +41,14 @@ export default function RootLayout({
         </div>
       </body>
     </html>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-semibold mt-3 mb-1 px-1">
+      {children}
+    </div>
   );
 }
 

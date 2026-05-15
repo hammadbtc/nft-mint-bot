@@ -3,10 +3,11 @@ import { v4 as uuidv4 } from "uuid";
 import { db, schema } from "@/lib/db";
 import { getSigner } from "@/lib/vault";
 import { getProvider, getChain } from "@/lib/chains";
-import { eq } from "drizzle-orm";
+import { sendPrivateTransaction, sendFlashbotsBundle, hasFlashbotsProtect } from "@/lib/chains/flashbots";
+import { sendAlert } from "@/lib/alerting";
+import { eq, and, desc } from "drizzle-orm";
 
 // ─── Nonce Manager (in-process) ────────────────────────────────────────
-// Per-wallet nonce tracking to avoid nonce gaps
 const nonceLock = new Map<string, Promise<void>>();
 const nonceCache = new Map<string, number>(); // walletId -> next nonce
 
@@ -15,7 +16,6 @@ async function acquireNonce(
   address: string,
   provider: ethers.Provider
 ): Promise<number> {
-  // Wait for any in-flight transaction for this wallet
   while (nonceLock.has(walletId)) {
     await nonceLock.get(walletId);
   }
@@ -27,7 +27,6 @@ async function acquireNonce(
   nonceLock.set(walletId, lock);
 
   try {
-    // Get on-chain nonce, but use our cache if it's higher
     const onChainNonce = await provider.getTransactionCount(address, "pending");
     const cachedNonce = nonceCache.get(walletId) ?? onChainNonce;
     const nonce = Math.max(onChainNonce, cachedNonce);
@@ -58,8 +57,6 @@ async function estimateGas(
   try {
     const feeData = await provider.getFeeData();
     const gasLimit = await provider.estimateGas(tx).catch(() => 300_000n);
-
-    // Add 20% buffer to gas limit
     const bufferedLimit = (gasLimit * 120n) / 100n;
 
     return {
@@ -69,9 +66,7 @@ async function estimateGas(
     };
   } catch (err) {
     console.warn("Gas estimation failed, using defaults:", err);
-    return {
-      gasLimit: 500_000n,
-    };
+    return { gasLimit: 500_000n };
   }
 }
 
@@ -94,6 +89,63 @@ async function simulateTx(
   }
 }
 
+// ─── Cancel Stuck Transaction ──────────────────────────────────────────
+
+/**
+ * Cancel a stuck transaction by sending 0 ETH to self with the same nonce
+ * but much higher gas. This replaces the pending tx in the mempool.
+ */
+export async function cancelStuckTransaction(
+  walletId: string,
+  chainId: number,
+  nonce: number
+): Promise<{ txHash: string }> {
+  const provider = getProvider(chainId);
+  const signer = await getSigner(walletId, provider);
+  const feeData = await provider.getFeeData();
+
+  const cancelTx: ethers.TransactionRequest = {
+    to: signer.address, // send to self
+    value: 0n,
+    nonce,
+    chainId,
+    gasLimit: 21000n,
+    // 2x the current max fee to ensure replacement
+    maxFeePerGas: (feeData.maxFeePerGas ?? 50_000_000_000n) * 2n,
+    maxPriorityFeePerGas: (feeData.maxPriorityFeePerGas ?? 2_000_000_000n) * 2n,
+  };
+
+  const tx = await signer.sendTransaction(cancelTx);
+  return { txHash: tx.hash };
+}
+
+/**
+ * Speed up a stuck transaction by re-sending with higher gas.
+ */
+export async function speedUpTransaction(
+  walletId: string,
+  chainId: number,
+  nonce: number,
+  originalTx: ethers.TransactionRequest
+): Promise<{ txHash: string }> {
+  const provider = getProvider(chainId);
+  const signer = await getSigner(walletId, provider);
+  const feeData = await provider.getFeeData();
+
+  const baseMaxFee = feeData.maxFeePerGas ?? (originalTx.maxFeePerGas as bigint | null) ?? 50_000_000_000n;
+  const baseMaxPriority = feeData.maxPriorityFeePerGas ?? (originalTx.maxPriorityFeePerGas as bigint | null) ?? 2_000_000_000n;
+
+  const speedUpTx: ethers.TransactionRequest = {
+    ...originalTx,
+    nonce,
+    maxFeePerGas: baseMaxFee * 15n / 10n,
+    maxPriorityFeePerGas: baseMaxPriority * 15n / 10n,
+  };
+
+  const tx = await signer.sendTransaction(speedUpTx);
+  return { txHash: tx.hash };
+}
+
 // ─── Mint Job Execution ────────────────────────────────────────────────
 
 export interface MintJobParams {
@@ -103,15 +155,16 @@ export interface MintJobParams {
   gasLimit?: string;
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
+  useFlashbots?: boolean;
+  dryRun?: boolean;
 }
 
 /**
- * Execute a single mint attempt for a job.
+ * Execute a single mint attempt. If dryRun is true, simulates only and returns.
  */
 export async function executeMint(params: MintJobParams) {
-  const { walletId, collectionId } = params;
+  const { walletId, collectionId, dryRun } = params;
 
-  // Fetch collection
   const [collection] = await db
     .select()
     .from(schema.collections)
@@ -124,7 +177,6 @@ export async function executeMint(params: MintJobParams) {
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(walletId, provider);
 
-  // Parse ABI
   let mintAbi: any;
   try {
     mintAbi = JSON.parse(collection.mintAbi);
@@ -133,17 +185,13 @@ export async function executeMint(params: MintJobParams) {
   }
 
   const contract = new ethers.Contract(collection.contractAddress, mintAbi, signer);
-
-  // Build transaction data using the contract interface
   const mintFn = contract.getFunction(collection.mintMethod);
   let txData: string;
 
   try {
-    // Try with quantity param first
     const populated = await mintFn.populateTransaction(params.quantity || 1);
     txData = populated.data!;
   } catch {
-    // Fallback: mint with no args
     const populated = await mintFn.populateTransaction();
     txData = populated.data!;
   }
@@ -157,7 +205,6 @@ export async function executeMint(params: MintJobParams) {
     chainId: collection.chainId,
   };
 
-  // Attach value if mint has a price
   if (collection.mintPrice) {
     tx.value = BigInt(collection.mintPrice) * BigInt(params.quantity || 1);
   }
@@ -177,13 +224,43 @@ export async function executeMint(params: MintJobParams) {
   const sim = await simulateTx(tx, provider);
   if (!sim.success) {
     releaseNonce(walletId);
-    throw new Error(`Simulation failed: ${sim.error}`);
+    return {
+      status: "simulation_failed",
+      error: sim.error,
+      dryRun: dryRun ?? false,
+    };
   }
 
-  // Send
+  // Dry run: stop after simulation
+  if (dryRun) {
+    releaseNonce(walletId);
+    return {
+      status: "simulation_passed",
+      dryRun: true,
+      simulation: {
+        to: tx.to,
+        value: tx.value?.toString(),
+        gasLimit: tx.gasLimit?.toString(),
+        maxFeePerGas: tx.maxFeePerGas?.toString(),
+        nonce,
+        chainId: tx.chainId,
+      },
+    };
+  }
+
+  // ─── Send Transaction ──────────────────────────────────────────────
   let response: ethers.TransactionResponse;
+  let sentVia = "public";
+
   try {
-    response = await signer.sendTransaction(tx);
+    if (params.useFlashbots && hasFlashbotsProtect(collection.chainId)) {
+      // Use Flashbots Protect RPC for private mempool
+      const signed = await signer.signTransaction(tx);
+      response = await sendPrivateTransaction(collection.chainId, signed);
+      sentVia = "flashbots_protect";
+    } else {
+      response = await signer.sendTransaction(tx);
+    }
   } catch (err: any) {
     releaseNonce(walletId);
     throw new Error(`Send failed: ${err?.message || err}`);
@@ -198,12 +275,12 @@ export async function executeMint(params: MintJobParams) {
     gasUsed: receipt?.gasUsed?.toString(),
     effectiveGasPrice: receipt?.gasPrice?.toString(),
     status: receipt?.status === 1 ? "confirmed" : "failed",
+    sentVia,
   };
 }
 
-/**
- * Run a full mint job: create attempt records, execute, handle retries.
- */
+// ─── Job Runner ────────────────────────────────────────────────────────
+
 export async function runMintJob(jobId: string) {
   const [job] = await db
     .select()
@@ -214,7 +291,6 @@ export async function runMintJob(jobId: string) {
   if (!job) throw new Error(`Job ${jobId} not found`);
   if (job.status === "cancelled") return;
 
-  // Mark as running
   await db
     .update(schema.mintJobs)
     .set({ status: "running", startedAt: new Date().toISOString() })
@@ -233,9 +309,31 @@ export async function runMintJob(jobId: string) {
         gasLimit: job.gasLimit || undefined,
         maxFeePerGas: job.maxFeePerGas || undefined,
         maxPriorityFeePerGas: job.maxPriorityFeePerGas || undefined,
+        useFlashbots: job.useFlashbots ?? false,
+        dryRun: job.dryRun ?? false,
       });
 
-      // Log successful attempt
+      // Dry run result
+      if (result.dryRun) {
+        await db.insert(schema.mintAttempts).values({
+          id: attemptId,
+          jobId,
+          status: result.status === "simulation_passed" ? "confirmed" : "failed",
+          error: result.error || null,
+        });
+
+        await db
+          .update(schema.mintJobs)
+          .set({
+            status: result.status === "simulation_passed" ? "completed" : "failed",
+            completedAt: new Date().toISOString(),
+            error: result.error || null,
+          })
+          .where(eq(schema.mintJobs.id, jobId));
+        return result;
+      }
+
+      // Log attempt
       await db.insert(schema.mintAttempts).values({
         id: attemptId,
         jobId,
@@ -246,15 +344,23 @@ export async function runMintJob(jobId: string) {
         blockNumber: result.blockNumber,
       });
 
-      // Update job as complete
+      const finalStatus = result.status === "confirmed" ? "completed" : "failed";
+
       await db
         .update(schema.mintJobs)
         .set({
-          status: result.status === "confirmed" ? "completed" : "failed",
+          status: finalStatus,
           completedAt: new Date().toISOString(),
-          nonce: null, // release nonce track
+          nonce: null,
         })
         .where(eq(schema.mintJobs.id, jobId));
+
+      // Alert on failure
+      if (finalStatus === "failed") {
+        const [wallet] = await db.select({ label: schema.wallets.label }).from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
+        const [collection] = await db.select({ name: schema.collections.name }).from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1);
+        await sendAlert("job_failed", `Job ${jobId.slice(0, 8)} failed: ${wallet?.label || "?"} → ${collection?.name || "?"}`, jobId);
+      }
 
       return result;
     } catch (err: any) {
@@ -277,19 +383,84 @@ export async function runMintJob(jobId: string) {
           .update(schema.mintJobs)
           .set({ status: "failed", completedAt: new Date().toISOString() })
           .where(eq(schema.mintJobs.id, jobId));
+
+        // Alert on final failure
+        const [wallet] = await db.select({ label: schema.wallets.label }).from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
+        const [collection] = await db.select({ name: schema.collections.name }).from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1);
+        await sendAlert("job_failed", `Job ${jobId.slice(0, 8)} exhausted retries: ${wallet?.label || "?"} → ${collection?.name || "?"} — ${err?.message || err}`, jobId);
+
         throw err;
       }
 
-      // Exponential backoff before retry
+      // Exponential backoff
       await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, lastAttempt)));
     }
   }
 }
 
 /**
+ * Mark a job as "stuck" and cancel its pending tx.
+ */
+export async function unstickJob(jobId: string) {
+  const [job] = await db
+    .select()
+    .from(schema.mintJobs)
+    .where(eq(schema.mintJobs.id, jobId))
+    .limit(1);
+
+  if (!job) throw new Error(`Job ${jobId} not found`);
+
+  // Find the wallet and chain
+  const [wallet] = await db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
+  if (!wallet) throw new Error("Wallet not found");
+
+  // Stuck jobs need a cancel tx
+  try {
+    // Get the nonce that was used (from last attempt or estimate)
+    const attempts = await db
+      .select()
+      .from(schema.mintAttempts)
+      .where(eq(schema.mintAttempts.jobId, jobId))
+      .orderBy(desc(schema.mintAttempts.createdAt))
+      .limit(1);
+
+    if (attempts.length > 0) {
+      // Can't easily recover the nonce from a failed attempt, so we'll cancel using
+      // the wallet's current pending nonce
+      const provider = getProvider(wallet.chainId);
+      const signer = await getSigner(job.walletId, provider);
+      const pendingNonce = await provider.getTransactionCount(signer.address, "pending");
+      const latestNonce = await provider.getTransactionCount(signer.address, "latest");
+
+      if (pendingNonce > latestNonce) {
+        // There's a stuck pending tx — cancel it
+        const { txHash } = await cancelStuckTransaction(job.walletId, wallet.chainId, latestNonce);
+        console.log(`🔧 Unstuck job ${jobId.slice(0, 8)}: sent cancel tx ${txHash}`);
+      }
+    }
+
+    await db
+      .update(schema.mintJobs)
+      .set({ status: "cancelled", completedAt: new Date().toISOString(), error: "unstuck by operator" })
+      .where(eq(schema.mintJobs.id, jobId));
+
+    await sendAlert("job_stuck", `Job ${jobId.slice(0, 8)} unstuck and cancelled`, jobId);
+    return { success: true };
+  } catch (err: any) {
+    throw new Error(`Failed to unstick job: ${err?.message}`);
+  }
+}
+
+/**
  * Batch mint: create jobs for all wallets against a collection and execute.
  */
-export async function batchMint(collectionId: string, walletIds: string[], quantity?: number) {
+export async function batchMint(
+  collectionId: string,
+  walletIds: string[],
+  quantity?: number,
+  useFlashbots?: boolean,
+  dryRun?: boolean
+) {
   const results: { walletId: string; jobId: string; status: string; txHash?: string; error?: string }[] = [];
 
   for (const walletId of walletIds) {
@@ -300,6 +471,8 @@ export async function batchMint(collectionId: string, walletIds: string[], quant
       walletId,
       collectionId,
       quantity: quantity || 1,
+      useFlashbots: useFlashbots ?? false,
+      dryRun: dryRun ?? false,
       status: "pending",
     });
 

@@ -5,17 +5,20 @@ import { useEffect, useState } from "react";
 interface Stats {
   wallets: number;
   collections: number;
+  alerts: number;
   jobs: {
     total: number;
     completed: number;
     failed: number;
     pending: number;
     running: number;
+    dryRuns: number;
+    flashbots: number;
   };
   recentActivity: any[];
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+function StatCard({ label, value, color }: { label: string; value: number | string; color: string }) {
   const colors: Record<string, string> = {
     emerald: "border-emerald-500/30 bg-emerald-500/5 text-emerald-400",
     blue: "border-blue-500/30 bg-blue-500/5 text-blue-400",
@@ -23,6 +26,8 @@ function StatCard({ label, value, color }: { label: string; value: number; color
     red: "border-red-500/30 bg-red-500/5 text-red-400",
     yellow: "border-yellow-500/30 bg-yellow-500/5 text-yellow-400",
     purple: "border-purple-500/30 bg-purple-500/5 text-purple-400",
+    orange: "border-orange-500/30 bg-orange-500/5 text-orange-400",
+    pink: "border-pink-500/30 bg-pink-500/5 text-pink-400",
   };
   return (
     <div className={`rounded-xl border p-4 ${colors[color] || colors.emerald}`}>
@@ -57,23 +62,30 @@ export default function DashboardPage() {
     <div>
       <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Wallets" value={stats.wallets} color="emerald" />
         <StatCard label="Collections" value={stats.collections} color="blue" />
         <StatCard label="Total Jobs" value={stats.jobs.total} color="purple" />
         <StatCard label="Completed" value={stats.jobs.completed} color="green" />
         <StatCard label="Failed" value={stats.jobs.failed} color="red" />
         <StatCard label="Pending" value={stats.jobs.pending} color="yellow" />
+        <StatCard label="Flashbots" value={stats.jobs.flashbots} color="purple" />
+        <StatCard label="Dry Runs" value={stats.jobs.dryRuns} color="orange" />
       </div>
 
-      <div className="mb-8">
+      <div className="mb-8 flex gap-6">
         <p className="text-sm text-zinc-400">
           Success rate:{" "}
           <span className="text-white font-semibold">{successRate}%</span>
         </p>
+        {stats.alerts > 0 && (
+          <p className="text-sm text-zinc-400">
+            Alerts:{" "}
+            <span className="text-orange-400 font-semibold">{stats.alerts}</span>
+          </p>
+        )}
       </div>
 
-      {/* Recent Activity */}
       <h3 className="text-lg font-semibold mb-3">Recent Activity</h3>
       {stats.recentActivity.length === 0 ? (
         <p className="text-zinc-500 text-sm">No activity yet. Add wallets and collections to start minting.</p>
@@ -84,6 +96,7 @@ export default function DashboardPage() {
               <tr className="text-left text-zinc-500 border-b border-zinc-800">
                 <th className="pb-2 pr-4">Job</th>
                 <th className="pb-2 pr-4">Status</th>
+                <th className="pb-2 pr-4">Flags</th>
                 <th className="pb-2 pr-4">Created</th>
                 <th className="pb-2">Error</th>
               </tr>
@@ -96,6 +109,12 @@ export default function DashboardPage() {
                   </td>
                   <td className="py-2 pr-4">
                     <StatusBadge status={job.status} />
+                  </td>
+                  <td className="py-2 pr-4">
+                    <div className="flex gap-1">
+                      {job.useFlashbots && <span className="px-1.5 py-0.5 text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/30 rounded">FB</span>}
+                      {job.dryRun && <span className="px-1.5 py-0.5 text-[10px] bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 rounded">DRY</span>}
+                    </div>
                   </td>
                   <td className="py-2 pr-4 text-zinc-500">{job.createdAt}</td>
                   <td className="py-2 text-red-400 text-xs max-w-[200px] truncate">
@@ -120,11 +139,7 @@ function StatusBadge({ status }: { status: string }) {
     cancelled: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
   };
   return (
-    <span
-      className={`px-2 py-0.5 rounded-full text-xs border ${
-        styles[status] || styles.pending
-      }`}
-    >
+    <span className={`px-2 py-0.5 rounded-full text-xs border ${styles[status] || styles.pending}`}>
       {status}
     </span>
   );

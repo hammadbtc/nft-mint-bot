@@ -5,8 +5,6 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 
-// The vault passphrase should come from an env var in production.
-// For dev: hardcoded (NOT for production use)
 function getPassphrase(): string {
   return process.env.VAULT_PASSPHRASE || "dev-passphrase-change-in-production-00000000";
 }
@@ -28,7 +26,6 @@ export function encryptPrivateKey(plaintext: string): string {
   const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const authTag = cipher.getAuthTag();
 
-  // salt (32) + iv (16) + authTag (16) + ciphertext
   const payload = Buffer.concat([salt, iv, authTag, encrypted]);
   return payload.toString("hex");
 }

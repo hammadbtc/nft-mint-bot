@@ -18,6 +18,12 @@ interface Chain {
   symbol: string;
 }
 
+interface DerivedAddress {
+  index: number;
+  path: string;
+  address: string;
+}
+
 export default function WalletsPage() {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [chains, setChains] = useState<Chain[]>([]);
@@ -28,9 +34,13 @@ export default function WalletsPage() {
     chainId: 1,
     keyType: "private-key" as "private-key" | "mnemonic",
     key: "",
+    hdPath: "m/44'/60'/0'/0/0",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [derivedAddresses, setDerivedAddresses] = useState<DerivedAddress[]>([]);
+  const [deriving, setDeriving] = useState(false);
+  const [selectedDerivedIndex, setSelectedDerivedIndex] = useState<number | null>(null);
 
   const fetchData = () => {
     setLoading(true);
@@ -46,21 +56,51 @@ export default function WalletsPage() {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Derive addresses when mnemonic changes
+  const handlePreviewMnemonic = async () => {
+    if (form.keyType !== "mnemonic" || !form.key.trim()) return;
+    setDeriving(true);
+    try {
+      const res = await fetch("/api/wallets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mnemonic: form.key,
+          count: 10,
+          basePath: form.hdPath.replace(/\/\d+$/, ""), // strip trailing index
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDerivedAddresses(data);
+        setSelectedDerivedIndex(0); // default to first
+      }
+    } catch {}
+    setDeriving(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError("");
 
     try {
+      // If mnemonic with selected index, use that HD path
+      const hdPath = form.keyType === "mnemonic" && selectedDerivedIndex !== null
+        ? `${form.hdPath.replace(/\/\d+$/, "")}/${selectedDerivedIndex}`
+        : form.hdPath;
+
       const res = await fetch("/api/wallets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, hdPath }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setShowForm(false);
-      setForm({ label: "", chainId: 1, keyType: "private-key", key: "" });
+      setForm({ label: "", chainId: 1, keyType: "private-key", key: "", hdPath: "m/44'/60'/0'/0/0" });
+      setDerivedAddresses([]);
+      setSelectedDerivedIndex(null);
       fetchData();
     } catch (err: any) {
       setError(err.message);
@@ -121,7 +161,11 @@ export default function WalletsPage() {
               <label className="block text-sm text-zinc-400 mb-1">Key Type</label>
               <select
                 value={form.keyType}
-                onChange={(e) => setForm({ ...form, keyType: e.target.value as any })}
+                onChange={(e) => {
+                  setForm({ ...form, keyType: e.target.value as any });
+                  setDerivedAddresses([]);
+                  setSelectedDerivedIndex(null);
+                }}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm"
               >
                 <option value="private-key">Private Key</option>
@@ -136,18 +180,64 @@ export default function WalletsPage() {
                 type="password"
                 value={form.key}
                 onChange={(e) => setForm({ ...form, key: e.target.value })}
+                onBlur={handlePreviewMnemonic}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm font-mono"
-                placeholder={form.keyType === "mnemonic" ? "word1 word2 word3 ..." : "0x..."}
+                placeholder={form.keyType === "mnemonic" ? "word1 word2 word3 ... (12-24 words)" : "0x..."}
                 required
               />
             </div>
+
+            {/* HD Path */}
+            {form.keyType === "mnemonic" && (
+              <div className="col-span-2">
+                <label className="block text-sm text-zinc-400 mb-1">
+                  Derivation Path
+                  <span className="text-zinc-600 ml-2">(BIP44 standard)</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.hdPath}
+                  onChange={(e) => setForm({ ...form, hdPath: e.target.value })}
+                  onBlur={handlePreviewMnemonic}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm font-mono"
+                />
+              </div>
+            )}
           </div>
+
+          {/* Derived addresses preview */}
+          {form.keyType === "mnemonic" && derivedAddresses.length > 0 && (
+            <div>
+              <label className="block text-sm text-zinc-400 mb-2">
+                Derived Addresses <span className="text-zinc-600">({deriving ? "loading..." : `select one to import`})</span>
+              </label>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {derivedAddresses.map((d) => (
+                  <button
+                    key={d.index}
+                    type="button"
+                    onClick={() => setSelectedDerivedIndex(d.index)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm font-mono transition-colors ${
+                      selectedDerivedIndex === d.index
+                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                        : "bg-zinc-800/50 hover:bg-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    <span className="text-zinc-500 mr-2">#{d.index}</span>
+                    {d.address}
+                    <span className="text-zinc-600 text-xs ml-2">{d.path}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={submitting}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
           >
-            {submitting ? "Importing..." : "Import Wallet"}
+            {submitting ? "Importing..." : `Import Wallet${selectedDerivedIndex !== null ? ` (#${selectedDerivedIndex})` : ""}`}
           </button>
         </form>
       )}

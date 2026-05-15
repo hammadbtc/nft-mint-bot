@@ -9,19 +9,26 @@ export interface WalletImport {
   chainId: number;
   keyType: "private-key" | "mnemonic";
   key: string; // raw private key or mnemonic
+  hdPath?: string; // BIP44 derivation path, e.g. "m/44'/60'/0'/0/0" (default for first ETH account)
 }
 
 /**
- * Import a wallet: derive address, encrypt the key, store in DB.
- * Returns the created wallet record.
+ * Import a wallet: derive address from key/mnemonic, encrypt the raw key, store in DB.
+ * For mnemonics, uses HD derivation with configurable path.
  */
 export async function importWallet(input: WalletImport) {
   let wallet: ethers.Wallet | ethers.HDNodeWallet;
+  let address: string;
 
   if (input.keyType === "mnemonic") {
-    wallet = ethers.Wallet.fromPhrase(input.key) as unknown as ethers.Wallet;
+    // Use HD derivation
+    const hdPath = input.hdPath || "m/44'/60'/0'/0/0"; // default: first ETH account (MetaMask standard)
+    const hdWallet = ethers.HDNodeWallet.fromPhrase(input.key, undefined, hdPath);
+    address = hdWallet.address;
+    wallet = hdWallet;
   } else {
     wallet = new ethers.Wallet(input.key);
+    address = wallet.address;
   }
 
   const encrypted = encryptPrivateKey(input.key);
@@ -30,20 +37,37 @@ export async function importWallet(input: WalletImport) {
   await db.insert(schema.wallets).values({
     id,
     label: input.label,
-    address: wallet.address,
+    address,
     chainId: input.chainId,
     encryptedKey: encrypted,
     keyFormat: input.keyType,
   });
 
-  // Return without the encrypted key
   return {
     id,
     label: input.label,
-    address: wallet.address,
+    address,
     chainId: input.chainId,
     keyFormat: input.keyType,
   };
+}
+
+/**
+ * Derive a list of addresses from a mnemonic (for preview before import).
+ * Returns addresses 0-9 on the default ETH path.
+ */
+export function deriveMnemonicAddresses(
+  mnemonic: string,
+  count = 10,
+  basePath = "m/44'/60'/0'/0"
+): { index: number; path: string; address: string }[] {
+  const results: { index: number; path: string; address: string }[] = [];
+  for (let i = 0; i < count; i++) {
+    const path = `${basePath}/${i}`;
+    const wallet = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, path);
+    results.push({ index: i, path, address: wallet.address });
+  }
+  return results;
 }
 
 /**
@@ -73,22 +97,7 @@ export async function getSigner(walletId: string, provider: ethers.Provider): Pr
 }
 
 /**
- * Get raw decrypted key (use sparingly — only when ethers.Wallet won't work).
- */
-export function getRawKey(walletId: string): string {
-  const rows = db
-    .select()
-    .from(schema.wallets)
-    .where(eq(schema.wallets.id, walletId))
-    .limit(1)
-    .all();
-
-  if (!rows.length) throw new Error(`Wallet ${walletId} not found`);
-  return decryptPrivateKey(rows[0].encryptedKey);
-}
-
-/**
- * List all wallets (without keys).
+ * List wallets (without keys).
  */
 export async function listWallets(chainId?: number) {
   const conditions = [];

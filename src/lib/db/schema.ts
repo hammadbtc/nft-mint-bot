@@ -59,7 +59,7 @@ export const mintJobs = sqliteTable("mint_jobs", {
   collectionId: text("collection_id")
     .notNull()
     .references(() => collections.id),
-  status: text("status").notNull().default("pending"), // pending | running | completed | failed | cancelled
+  status: text("status").notNull().default("pending"), // pending | running | completed | failed | cancelled | stuck
   priority: integer("priority").notNull().default(0),
   gasLimit: text("gas_limit"), // override gas limit
   maxFeePerGas: text("max_fee_per_gas"), // EIP-1559 max fee in wei
@@ -68,6 +68,8 @@ export const mintJobs = sqliteTable("mint_jobs", {
   maxRetries: integer("max_retries").notNull().default(3),
   quantity: integer("quantity").notNull().default(1),
   nonce: integer("nonce"), // tracked nonce used for this job
+  useFlashbots: integer("use_flashbots", { mode: "boolean" }).notNull().default(false),
+  dryRun: integer("dry_run", { mode: "boolean" }).notNull().default(false),
   error: text("error"),
   scheduledAt: text("scheduled_at"), // ISO timestamp for delayed mints
   startedAt: text("started_at"),
@@ -112,6 +114,19 @@ export const rpcHealth = sqliteTable("rpc_health", {
   status: text("status").notNull().default("unknown"), // up | down | slow
   latencyMs: integer("latency_ms"),
   lastChecked: text("last_checked")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+// ─── Alert Log ─────────────────────────────────────────────────────────
+export const alertLog = sqliteTable("alert_log", {
+  id: text("id").primaryKey(), // uuid
+  type: text("type").notNull(), // job_failed | rpc_down | job_stuck | batch_complete
+  message: text("message").notNull(),
+  channel: text("channel").notNull().default("discord"), // discord | email
+  jobId: text("job_id"), // optional ref
+  status: text("status").notNull().default("sent"), // sent | failed | rate_limited
+  createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
 });
