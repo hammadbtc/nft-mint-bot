@@ -33,18 +33,19 @@ export async function processScheduledJobs(maxConcurrent?: number): Promise<numb
   const running: Promise<void>[] = [];
 
   for (const job of pendingJobs) {
-    // Mark as running to prevent double-pick
+    // Mark as running to prevent double-pick (optimistic lock via WHERE status='pending')
     const updated = await db
       .update(schema.mintJobs)
       .set({ status: "running", startedAt: new Date().toISOString() })
       .where(
         and(
           eq(schema.mintJobs.id, job.id),
-          eq(schema.mintJobs.status, "pending") // only if still pending
+          eq(schema.mintJobs.status, "pending")
         )
-      );
+      )
+      .returning({ id: schema.mintJobs.id });
 
-    if (updated.changes === 0) continue; // another worker grabbed it
+    if (updated.length === 0) continue; // another worker grabbed it
 
     const promise = runMintJob(job.id)
       .then(() => { processed++; })

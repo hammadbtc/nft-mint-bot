@@ -1,165 +1,164 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, boolean, serial, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ─── Chains ────────────────────────────────────────────────────────────
-export const chains = sqliteTable("chains", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
+export const chains = pgTable("chains", {
+  id: serial("id").primaryKey(),
+  name: varchar("name").notNull(),
   chainId: integer("chain_id").notNull().unique(),
-  symbol: text("symbol").notNull().default("ETH"),
+  symbol: varchar("symbol").notNull().default("ETH"),
   rpcUrls: text("rpc_urls").notNull(), // JSON array, first is primary
   explorerUrl: text("explorer_url"),
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  active: boolean("active").notNull().default(true),
   createdAt: text("created_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── Wallets ───────────────────────────────────────────────────────────
-export const wallets = sqliteTable("wallets", {
-  id: text("id").primaryKey(), // uuid
-  label: text("label").notNull(),
-  address: text("address").notNull(),
-  chainId: integer("chain_id").notNull().default(1), // default ETH mainnet
+export const wallets = pgTable("wallets", {
+  id: varchar("id").primaryKey(), // uuid
+  label: varchar("label").notNull(),
+  address: varchar("address").notNull(),
+  chainId: integer("chain_id").notNull().default(1),
   encryptedKey: text("encrypted_key").notNull(), // AES-256-GCM encrypted JSON
-  // salt + iv encoded in the encrypted payload, or stored separately
-  keyFormat: text("key_format").notNull().default("private-key"), // private-key | mnemonic | keystore
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  keyFormat: varchar("key_format").notNull().default("private-key"),
+  active: boolean("active").notNull().default(true),
   spendLimit: text("spend_limit"), // max ETH this wallet can spend total (in wei, null = unlimited)
   hdPath: text("hd_path"), // BIP44 derivation path for mnemonic wallets
   createdAt: text("created_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
   updatedAt: text("updated_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── Collections ───────────────────────────────────────────────────────
-export const collections = sqliteTable("collections", {
-  id: text("id").primaryKey(), // uuid
-  name: text("name").notNull(),
-  contractAddress: text("contract_address").notNull(),
+export const collections = pgTable("collections", {
+  id: varchar("id").primaryKey(), // uuid
+  name: varchar("name").notNull(),
+  contractAddress: varchar("contract_address").notNull(),
   chainId: integer("chain_id").notNull(),
-  mintMethod: text("mint_method").notNull().default("mint"), // function name
+  mintMethod: varchar("mint_method").notNull().default("mint"),
   mintAbi: text("mint_abi").notNull(), // JSON: ABI fragment for the mint function
   mintPrice: text("mint_price"), // in wei, as string to avoid overflow
   maxPerWallet: integer("max_per_wallet"),
   maxSupply: integer("max_supply"),
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  active: boolean("active").notNull().default(true),
   // Collection-level defaults (overridable per job)
   defaultGasLimit: text("default_gas_limit"),
   defaultMaxFeePerGas: text("default_max_fee_per_gas"),
   defaultMaxPriorityFeePerGas: text("default_max_priority_fee_per_gas"),
-  defaultUseFlashbots: integer("default_use_flashbots", { mode: "boolean" }).notNull().default(false),
+  defaultUseFlashbots: boolean("default_use_flashbots").notNull().default(false),
   // FCFS mode
-  fcfsEnabled: integer("fcfs_enabled", { mode: "boolean" }).notNull().default(false),
-  fcfsMintOpenSignature: text("fcfs_mint_open_signature"), // event signature to watch
+  fcfsEnabled: boolean("fcfs_enabled").notNull().default(false),
+  fcfsMintOpenSignature: text("fcfs_mint_open_signature"),
   // ERC20 payment
-  paymentToken: text("payment_token"), // ERC20 token address for paid mints (null = native ETH)
+  paymentToken: text("payment_token"),
   // Safety
-  safetyCheck: integer("safety_check", { mode: "boolean" }).notNull().default(true),
+  safetyCheck: boolean("safety_check").notNull().default(true),
   createdAt: text("created_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── Mint Jobs ─────────────────────────────────────────────────────────
-export const mintJobs = sqliteTable("mint_jobs", {
-  id: text("id").primaryKey(), // uuid
-  walletId: text("wallet_id")
+export const mintJobs = pgTable("mint_jobs", {
+  id: varchar("id").primaryKey(), // uuid
+  walletId: varchar("wallet_id")
     .notNull()
     .references(() => wallets.id),
-  collectionId: text("collection_id")
+  collectionId: varchar("collection_id")
     .notNull()
     .references(() => collections.id),
-  status: text("status").notNull().default("pending"), // pending | running | completed | failed | cancelled | stuck
+  status: varchar("status").notNull().default("pending"), // pending | running | completed | failed | cancelled
   priority: integer("priority").notNull().default(0),
-  gasLimit: text("gas_limit"), // override gas limit
-  maxFeePerGas: text("max_fee_per_gas"), // EIP-1559 max fee in wei
+  gasLimit: text("gas_limit"),
+  maxFeePerGas: text("max_fee_per_gas"),
   maxPriorityFeePerGas: text("max_priority_fee_per_gas"),
   retryCount: integer("retry_count").notNull().default(0),
   maxRetries: integer("max_retries").notNull().default(3),
   quantity: integer("quantity").notNull().default(1),
-  nonce: integer("nonce"), // tracked nonce used for this job
-  useFlashbots: integer("use_flashbots", { mode: "boolean" }).notNull().default(false),
-  dryRun: integer("dry_run", { mode: "boolean" }).notNull().default(false),
+  nonce: integer("nonce"),
+  useFlashbots: boolean("use_flashbots").notNull().default(false),
+  dryRun: boolean("dry_run").notNull().default(false),
   error: text("error"),
-  scheduledAt: text("scheduled_at"), // ISO timestamp for delayed mints
+  scheduledAt: text("scheduled_at"),
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
   createdAt: text("created_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── Mint Attempts (Transaction Log) ───────────────────────────────────
-export const mintAttempts = sqliteTable("mint_attempts", {
-  id: text("id").primaryKey(), // uuid
-  jobId: text("job_id")
+export const mintAttempts = pgTable("mint_attempts", {
+  id: varchar("id").primaryKey(), // uuid
+  jobId: varchar("job_id")
     .notNull()
     .references(() => mintJobs.id),
   txHash: text("tx_hash"),
-  status: text("status").notNull(), // submitted | confirmed | failed | replaced
+  status: varchar("status").notNull(), // submitted | confirmed | failed | replaced
   gasUsed: text("gas_used"),
   effectiveGasPrice: text("effective_gas_price"),
   blockNumber: integer("block_number"),
   error: text("error"),
-  rawTx: text("raw_tx"), // for debugging/replay
+  rawTx: text("raw_tx"),
   createdAt: text("created_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── Settings (global key-value) ───────────────────────────────────────
-export const settings = sqliteTable("settings", {
-  key: text("key").primaryKey(),
+export const settings = pgTable("settings", {
+  key: varchar("key").primaryKey(),
   value: text("value").notNull(),
   updatedAt: text("updated_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── RPC Health ────────────────────────────────────────────────────────
-export const rpcHealth = sqliteTable("rpc_health", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const rpcHealth = pgTable("rpc_health", {
+  id: serial("id").primaryKey(),
   chainId: integer("chain_id").notNull(),
   url: text("url").notNull(),
-  status: text("status").notNull().default("unknown"), // up | down | slow
+  status: varchar("status").notNull().default("unknown"), // up | down | slow
   latencyMs: integer("latency_ms"),
   lastChecked: text("last_checked")
     .notNull()
-    .default(sql`(datetime('now'))`),
-});
-
-// ─── Alert Log ─────────────────────────────────────────────────────────
-export const alertLog = sqliteTable("alert_log", {
-  id: text("id").primaryKey(), // uuid
-  type: text("type").notNull(), // job_failed | rpc_down | job_stuck | batch_complete | fcfs_triggered
-  message: text("message").notNull(),
-  channel: text("channel").notNull().default("discord"), // discord | email
-  jobId: text("job_id"), // optional ref
-  status: text("status").notNull().default("sent"), // sent | failed | rate_limited
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
 
 // ─── Contract Safety List ─────────────────────────────────────────────
-export const contractSafetyList = sqliteTable("contract_safety_list", {
-  address: text("address").primaryKey().notNull(), // checksummed
-  list: text("list").notNull(), // whitelist | blacklist
+export const contractSafetyList = pgTable("contract_safety_list", {
+  address: varchar("address").primaryKey().notNull(),
+  list: varchar("list").notNull(), // whitelist | blacklist
   note: text("note"),
   addedAt: text("added_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
+});
+
+// ─── Alert Log ─────────────────────────────────────────────────────────
+export const alertLog = pgTable("alert_log", {
+  id: varchar("id").primaryKey(), // uuid
+  type: varchar("type").notNull(), // job_failed | rpc_down | job_stuck | batch_complete | fcfs_triggered
+  message: text("message").notNull(),
+  channel: varchar("channel").notNull().default("discord"),
+  jobId: text("job_id"),
+  status: varchar("status").notNull().default("sent"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`now()`),
 });
 
 // ─── App Config (runtime-editable settings) ────────────────────────────
-export const appConfig = sqliteTable("app_config", {
-  key: text("key").primaryKey(),
+export const appConfig = pgTable("app_config", {
+  key: varchar("key").primaryKey(),
   value: text("value").notNull(),
   updatedAt: text("updated_at")
     .notNull()
-    .default(sql`(datetime('now'))`),
+    .default(sql`now()`),
 });
