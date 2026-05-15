@@ -97,6 +97,64 @@ export default function CollectionsPage() {
     }
   };
 
+  const [editingCol, setEditingCol] = useState<Collection | null>(null);
+  const [editColForm, setEditColForm] = useState<Record<string, any>>({});
+
+  const startEditCol = (c: Collection) => {
+    setEditingCol(c);
+    setEditColForm({
+      name: c.name,
+      contractAddress: c.contractAddress,
+      chainId: c.chainId,
+      mintMethod: c.mintMethod,
+      mintAbi: "", // don't prefill ABI for safety
+      mintPrice: c.mintPrice || "",
+      paymentToken: "", // don't prefill for safety
+      defaultGasLimit: c.defaultGasLimit || "",
+      defaultMaxFeePerGas: c.defaultMaxFeePerGas || "",
+      defaultMaxPriorityFeePerGas: c.defaultMaxPriorityFeePerGas || "",
+      defaultUseFlashbots: c.defaultUseFlashbots,
+      fcfsMintOpenSignature: c.fcfsMintOpenSignature || "",
+      fcfsEnabled: c.fcfsEnabled,
+    });
+  };
+
+  const saveEditCol = async () => {
+    if (!editingCol) return;
+    try {
+      // Remove empty strings that weren't meant as updates
+      const body: Record<string, any> = {};
+      for (const [k, v] of Object.entries(editColForm)) {
+        if (v !== "" && v !== editingCol[k as keyof Collection]) {
+          body[k] = v;
+        }
+      }
+      // Always send these if changed
+      if (editColForm.name !== editingCol.name) body.name = editColForm.name;
+      if (editColForm.contractAddress !== editingCol.contractAddress) body.contractAddress = editColForm.contractAddress;
+      if (editColForm.mintMethod !== editingCol.mintMethod) body.mintMethod = editColForm.mintMethod;
+      if (editColForm.mintPrice !== (editingCol.mintPrice || "")) body.mintPrice = editColForm.mintPrice;
+      body.defaultUseFlashbots = editColForm.defaultUseFlashbots;
+      body.fcfsMintOpenSignature = editColForm.fcfsMintOpenSignature;
+      body.fcfsEnabled = editColForm.fcfsEnabled;
+
+      const res = await fetch(`/api/collections/${editingCol.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setEditingCol(null);
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this collection?")) return;
     await fetch(`/api/collections/${id}`, { method: "DELETE" });
@@ -282,12 +340,64 @@ export default function CollectionsPage() {
                     )}
                   </td>
                   <td className="py-2">
-                    <button onClick={() => handleDelete(c.id)} className="text-red-400 hover:text-red-300 text-xs">Delete</button>
+                    <div className="flex gap-2">
+                      <button onClick={() => startEditCol(c)} className="text-blue-400 hover:text-blue-300 text-xs">Edit</button>
+                      <button onClick={() => handleDelete(c.id)} className="text-red-400 hover:text-red-300 text-xs">Delete</button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingCol && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setEditingCol(null)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">Edit Collection</h3>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Name</label>
+                  <input type="text" value={editColForm.name} onChange={(e) => setEditColForm({ ...editColForm, name: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Contract</label>
+                  <input type="text" value={editColForm.contractAddress} onChange={(e) => setEditColForm({ ...editColForm, contractAddress: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Mint Method</label>
+                  <input type="text" value={editColForm.mintMethod} onChange={(e) => setEditColForm({ ...editColForm, mintMethod: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Mint Price (ETH)</label>
+                  <input type="text" value={editColForm.mintPrice} onChange={(e) => setEditColForm({ ...editColForm, mintPrice: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm" />
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editColForm.defaultUseFlashbots} onChange={(e) => setEditColForm({ ...editColForm, defaultUseFlashbots: e.target.checked })}
+                    className="accent-purple-500" />
+                  <span className="text-sm">Flashbots</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editColForm.fcfsEnabled} onChange={(e) => setEditColForm({ ...editColForm, fcfsEnabled: e.target.checked })}
+                    className="accent-green-500" />
+                  <span className="text-sm">FCFS</span>
+                </label>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={saveEditCol} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm">Save</button>
+              <button onClick={() => setEditingCol(null)} className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg text-sm">Cancel</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

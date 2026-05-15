@@ -206,6 +206,20 @@ export default function BatchMintPage() {
             </button>
             {showAdvanced && (
               <div className="mt-3 space-y-3 p-3 bg-zinc-900 rounded-lg border border-zinc-800">
+                {/* Gas Presets */}
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-2">Gas Presets</label>
+                  <div className="flex gap-2 flex-wrap">
+                    <button onClick={() => { setMaxFeePerGas("20000000000"); setMaxPriorityFeePerGas("1000000000"); }}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white">🐢 Slow</button>
+                    <button onClick={() => { setMaxFeePerGas("40000000000"); setMaxPriorityFeePerGas("2000000000"); }}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white">🚶 Medium</button>
+                    <button onClick={() => { setMaxFeePerGas("80000000000"); setMaxPriorityFeePerGas("3000000000"); }}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white">🏃 Fast</button>
+                    <button onClick={() => { setMaxFeePerGas("200000000000"); setMaxPriorityFeePerGas("10000000000"); }}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-red-600 hover:bg-red-500 text-white">💀 Apocalypse</button>
+                  </div>
+                </div>
                 <div>
                   <label className="block text-xs text-zinc-500 mb-1">Gas Limit (override)</label>
                   <input
