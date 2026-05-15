@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, contractAddress, chainId, mintMethod, mintAbi, mintPrice, maxPerWallet, maxSupply } = body;
+    const { name, contractAddress, chainId, mintMethod, mintAbi, mintPrice, maxPerWallet, maxSupply, paymentToken, defaultGasLimit, defaultMaxFeePerGas, defaultMaxPriorityFeePerGas, defaultUseFlashbots, fcfsMintOpenSignature } = body;
 
     if (!name || !contractAddress || !chainId || !mintMethod || !mintAbi) {
       return NextResponse.json(
@@ -49,6 +49,12 @@ export async function POST(req: NextRequest) {
       mintPrice: mintPrice?.toString(),
       maxPerWallet: maxPerWallet || null,
       maxSupply: maxSupply || null,
+      paymentToken: paymentToken || null,
+      defaultGasLimit: defaultGasLimit || null,
+      defaultMaxFeePerGas: defaultMaxFeePerGas || null,
+      defaultMaxPriorityFeePerGas: defaultMaxPriorityFeePerGas || null,
+      defaultUseFlashbots: defaultUseFlashbots ?? false,
+      fcfsMintOpenSignature: fcfsMintOpenSignature || null,
     });
 
     const [created] = await db.select().from(schema.collections).where(eq(schema.collections.id, id)).limit(1);

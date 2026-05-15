@@ -5,7 +5,16 @@ import { getSigner } from "@/lib/vault";
 import { getProvider, getChain } from "@/lib/chains";
 import { sendPrivateTransaction, sendFlashbotsBundle, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
+import { checkContractSafety } from "@/lib/engine/safety";
 import { eq, and, desc, sql } from "drizzle-orm";
+
+// ─── ERC20 Minimal ABI ────────────────────────────────────────────────
+const ERC20_ABI = [
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+];
 
 // ─── Nonce Manager (in-process) ────────────────────────────────────────
 const nonceLock = new Map<string, Promise<void>>();
@@ -209,6 +218,65 @@ export async function executeMint(params: MintJobParams) {
     tx.value = BigInt(collection.mintPrice) * BigInt(params.quantity || 1);
   }
 
+  // ─── Balance Check ───────────────────────────────────────────────
+  if (!dryRun) {
+    // ETH balance
+    const ethBalance = await provider.getBalance(signer.address);
+    const glEst: bigint = (tx.gasLimit ?? 500_000n) as bigint;
+    const mfpEst: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
+    const estGasCost = glEst * mfpEst;
+    const txVal: bigint = BigInt(tx.value ?? 0);
+    const totalNeeded = txVal + estGasCost;
+
+    if (ethBalance < totalNeeded) {
+      releaseNonce(walletId);
+      throw new Error(
+        `Insufficient ETH balance: have ${ethers.formatEther(ethBalance)} ETH, ` +
+        `need ~${ethers.formatEther(totalNeeded)} ETH (value + gas)`
+      );
+    }
+
+    // ERC20 token balance if payment token is set
+    if (collection.paymentToken) {
+      const token = new ethers.Contract(collection.paymentToken, ERC20_ABI, provider);
+      const tokenBalance: bigint = await (token as any).balanceOf(signer.address);
+      const tokenDecimals: number = await (token as any).decimals().catch(() => 18);
+      const tokenNeeded = BigInt(collection.mintPrice || "0") * BigInt(params.quantity || 1);
+
+      if (tokenBalance < tokenNeeded) {
+        releaseNonce(walletId);
+        throw new Error(
+          `Insufficient token balance: have ${ethers.formatUnits(tokenBalance, tokenDecimals)}, ` +
+          `need ${ethers.formatUnits(tokenNeeded, tokenDecimals)}`
+        );
+      }
+
+      // Check allowance and approve if needed
+      const allowance: bigint = await (token as any).allowance(signer.address, collection.contractAddress);
+      if (allowance < tokenNeeded) {
+        console.log(`🔓 Approving ${ethers.formatUnits(tokenNeeded, tokenDecimals)} tokens for ${collection.name}...`);
+        try {
+          const approveTx = await (token.connect(signer) as any).approve(collection.contractAddress, tokenNeeded);
+          await approveTx.wait(1);
+          console.log(`✅ Approval confirmed: ${approveTx.hash}`);
+        } catch (err: any) {
+          releaseNonce(walletId);
+          throw new Error(`Token approval failed: ${err?.message || err}`);
+        }
+      }
+    }
+  }
+
+  // ─── Contract Safety Check ─────────────────────────────────────────
+  const safety = await checkContractSafety(collection.contractAddress, collection.chainId, provider);
+  if (!safety.safe) {
+    releaseNonce(walletId);
+    throw new Error(`Safety check failed: ${safety.reasons.join("; ")}`);
+  }
+  if (safety.warnings.length > 0 && !dryRun) {
+    console.warn(`⚠️ Safety warnings for ${collection.name}:`, safety.warnings);
+  }
+
   // Gas estimation
   const gas = await estimateGas(tx, provider);
   if (params.gasLimit) tx.gasLimit = BigInt(params.gasLimit);
@@ -335,10 +403,13 @@ export async function runMintJob(jobId: string) {
   if (!job) throw new Error(`Job ${jobId} not found`);
   if (job.status === "cancelled") return;
 
-  await db
-    .update(schema.mintJobs)
-    .set({ status: "running", startedAt: new Date().toISOString() })
-    .where(eq(schema.mintJobs.id, jobId));
+  // Only mark as running if not already (multi-worker safety)
+  if (job.status !== "running") {
+    await db
+      .update(schema.mintJobs)
+      .set({ status: "running", startedAt: new Date().toISOString() })
+      .where(eq(schema.mintJobs.id, jobId));
+  }
 
   let lastAttempt = job.retryCount;
 

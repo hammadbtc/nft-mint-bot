@@ -53,7 +53,11 @@ export const collections = sqliteTable("collections", {
   defaultUseFlashbots: integer("default_use_flashbots", { mode: "boolean" }).notNull().default(false),
   // FCFS mode
   fcfsEnabled: integer("fcfs_enabled", { mode: "boolean" }).notNull().default(false),
-  fcfsMintOpenSignature: text("fcfs_mint_open_signature"), // event signature to watch, e.g. "MintOpen(uint256)"
+  fcfsMintOpenSignature: text("fcfs_mint_open_signature"), // event signature to watch
+  // ERC20 payment
+  paymentToken: text("payment_token"), // ERC20 token address for paid mints (null = native ETH)
+  // Safety
+  safetyCheck: integer("safety_check", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -136,6 +140,16 @@ export const alertLog = sqliteTable("alert_log", {
   jobId: text("job_id"), // optional ref
   status: text("status").notNull().default("sent"), // sent | failed | rate_limited
   createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+// ─── Contract Safety List ─────────────────────────────────────────────
+export const contractSafetyList = sqliteTable("contract_safety_list", {
+  address: text("address").primaryKey().notNull(), // checksummed
+  list: text("list").notNull(), // whitelist | blacklist
+  note: text("note"),
+  addedAt: text("added_at")
     .notNull()
     .default(sql`(datetime('now'))`),
 });

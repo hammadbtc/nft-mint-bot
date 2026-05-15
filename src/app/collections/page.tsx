@@ -43,6 +43,7 @@ export default function CollectionsPage() {
     mintMethod: "mint",
     mintAbi: "",
     mintPrice: "",
+    paymentToken: "",
     defaultGasLimit: "",
     defaultMaxFeePerGas: "",
     defaultMaxPriorityFeePerGas: "",
@@ -84,7 +85,7 @@ export default function CollectionsPage() {
       setShowForm(false);
       setForm({
         name: "", contractAddress: "", chainId: 1, mintMethod: "mint",
-        mintAbi: "", mintPrice: "", defaultGasLimit: "",
+        mintAbi: "", mintPrice: "", paymentToken: "", defaultGasLimit: "",
         defaultMaxFeePerGas: "", defaultMaxPriorityFeePerGas: "",
         defaultUseFlashbots: false, fcfsMintOpenSignature: "",
       });
@@ -156,9 +157,17 @@ export default function CollectionsPage() {
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" placeholder="mint" />
             </div>
             <div>
-              <label className="block text-sm text-zinc-400 mb-1">Mint Price (ETH)</label>
+              <label className="block text-sm text-zinc-400 mb-1">Mint Price</label>
               <input type="text" value={form.mintPrice} onChange={(e) => setForm({ ...form, mintPrice: e.target.value })}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm" placeholder="0.05" />
+            </div>
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">
+                Payment Token
+                <span className="text-zinc-600 ml-2">ERC20 address (empty = native ETH)</span>
+              </label>
+              <input type="text" value={form.paymentToken} onChange={(e) => setForm({ ...form, paymentToken: e.target.value })}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="0x... (optional)" />
             </div>
           </div>
 
