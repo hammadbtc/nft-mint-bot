@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ethers } from "ethers";
 import { importWallet, listWallets, deriveMnemonicAddresses } from "@/lib/vault";
 
 export async function GET(req: NextRequest) {
@@ -28,7 +29,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const wallet = await importWallet({ label, chainId, keyType, key, hdPath });
+    const wallet = await importWallet({
+      label,
+      chainId: parseInt(chainId),
+      keyType,
+      key,
+      hdPath,
+      spendLimit: body.spendLimit ? ethers.parseEther(body.spendLimit).toString() : undefined,
+    });
     return NextResponse.json(wallet, { status: 201 });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Failed to import wallet" }, { status: 500 });

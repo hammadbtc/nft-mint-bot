@@ -29,10 +29,14 @@ export default function RootLayout({
 
             <SectionLabel>Infrastructure</SectionLabel>
             <NavLink href="/rpc">🔌 RPC Health</NavLink>
+            <NavLink href="/analytics">📈 Analytics</NavLink>
+
+            <SectionLabel>System</SectionLabel>
+            <NavLink href="/settings">⚙️ Settings</NavLink>
 
             <div className="mt-auto pt-4 border-t border-zinc-800 text-xs text-zinc-500 space-y-1">
-              <div>ACO AutoMint v2.0</div>
-              <div>Flashbots • Dry-Run • BIP39</div>
+              <div>ACO AutoMint v2.1</div>
+              <div>FCFS • Scheduled • Analytics</div>
             </div>
           </aside>
 

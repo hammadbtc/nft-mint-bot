@@ -9,7 +9,8 @@ export interface WalletImport {
   chainId: number;
   keyType: "private-key" | "mnemonic";
   key: string; // raw private key or mnemonic
-  hdPath?: string; // BIP44 derivation path, e.g. "m/44'/60'/0'/0/0" (default for first ETH account)
+  hdPath?: string; // BIP44 derivation path
+  spendLimit?: string; // max spend in wei (null = unlimited)
 }
 
 /**
@@ -41,6 +42,7 @@ export async function importWallet(input: WalletImport) {
     chainId: input.chainId,
     encryptedKey: encrypted,
     keyFormat: input.keyType,
+    spendLimit: input.spendLimit || null,
   });
 
   return {
@@ -113,6 +115,7 @@ export async function listWallets(chainId?: number) {
       chainId: schema.wallets.chainId,
       keyFormat: schema.wallets.keyFormat,
       active: schema.wallets.active,
+      spendLimit: schema.wallets.spendLimit,
       createdAt: schema.wallets.createdAt,
     })
     .from(schema.wallets)

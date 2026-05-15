@@ -5,7 +5,7 @@ import { getSigner } from "@/lib/vault";
 import { getProvider, getChain } from "@/lib/chains";
 import { sendPrivateTransaction, sendFlashbotsBundle, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 
 // ─── Nonce Manager (in-process) ────────────────────────────────────────
 const nonceLock = new Map<string, Promise<void>>();
@@ -219,6 +219,50 @@ export async function executeMint(params: MintJobParams) {
 
   if (params.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = BigInt(params.maxPriorityFeePerGas);
   else if (gas.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = gas.maxPriorityFeePerGas;
+
+  // ─── Spend limit check ────────────────────────────────────────────
+  if (!dryRun) {
+    const [wallet] = await db
+      .select({ spendLimit: schema.wallets.spendLimit })
+      .from(schema.wallets)
+      .where(eq(schema.wallets.id, walletId))
+      .limit(1);
+
+    if (wallet?.spendLimit) {
+      const spendLimit = BigInt(wallet.spendLimit);
+      const txValue: bigint = BigInt(tx.value ?? 0);
+
+      // Calculate total already spent by completed/running jobs
+      const [spent] = await db
+        .select({
+          total: sql<number>`coalesce(sum(cast(${schema.mintAttempts.gasUsed} as integer) * cast(${schema.mintAttempts.effectiveGasPrice} as integer)), 0)`,
+        })
+        .from(schema.mintAttempts)
+        .innerJoin(schema.mintJobs, eq(schema.mintAttempts.jobId, schema.mintJobs.id))
+        .where(
+          and(
+            eq(schema.mintJobs.walletId, walletId),
+            eq(schema.mintAttempts.status, "submitted")
+          )
+        );
+
+      // Estimate gas cost: gasLimit * maxFeePerGas
+      const gl: bigint = (tx.gasLimit ?? 500_000n) as bigint;
+      const mfp: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
+      const estimatedGasCost = gl * mfp;
+      const totalCost = txValue + estimatedGasCost;
+      const previousSpend = BigInt(spent?.total || 0);
+
+      if (previousSpend + totalCost > spendLimit) {
+        releaseNonce(walletId);
+        throw new Error(
+          `Spend limit exceeded: already spent ${ethers.formatEther(previousSpend)} ETH, ` +
+          `this tx would cost ~${ethers.formatEther(totalCost)} ETH, ` +
+          `limit is ${ethers.formatEther(spendLimit)} ETH`
+        );
+      }
+    }
+  }
 
   // Simulate
   const sim = await simulateTx(tx, provider);
@@ -459,7 +503,8 @@ export async function batchMint(
   walletIds: string[],
   quantity?: number,
   useFlashbots?: boolean,
-  dryRun?: boolean
+  dryRun?: boolean,
+  scheduledAt?: string
 ) {
   const results: { walletId: string; jobId: string; status: string; txHash?: string; error?: string }[] = [];
 
@@ -473,8 +518,15 @@ export async function batchMint(
       quantity: quantity || 1,
       useFlashbots: useFlashbots ?? false,
       dryRun: dryRun ?? false,
+      scheduledAt: scheduledAt || null,
       status: "pending",
     });
+
+    // If scheduled, don't execute immediately — scheduler picks it up
+    if (scheduledAt) {
+      results.push({ walletId, jobId, status: "scheduled" });
+      continue;
+    }
 
     try {
       const result = await runMintJob(jobId);

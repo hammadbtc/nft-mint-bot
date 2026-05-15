@@ -25,6 +25,7 @@ export const wallets = sqliteTable("wallets", {
   // salt + iv encoded in the encrypted payload, or stored separately
   keyFormat: text("key_format").notNull().default("private-key"), // private-key | mnemonic | keystore
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  spendLimit: text("spend_limit"), // max ETH this wallet can spend total (in wei, null = unlimited)
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -45,6 +46,14 @@ export const collections = sqliteTable("collections", {
   maxPerWallet: integer("max_per_wallet"),
   maxSupply: integer("max_supply"),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  // Collection-level defaults (overridable per job)
+  defaultGasLimit: text("default_gas_limit"),
+  defaultMaxFeePerGas: text("default_max_fee_per_gas"),
+  defaultMaxPriorityFeePerGas: text("default_max_priority_fee_per_gas"),
+  defaultUseFlashbots: integer("default_use_flashbots", { mode: "boolean" }).notNull().default(false),
+  // FCFS mode
+  fcfsEnabled: integer("fcfs_enabled", { mode: "boolean" }).notNull().default(false),
+  fcfsMintOpenSignature: text("fcfs_mint_open_signature"), // event signature to watch, e.g. "MintOpen(uint256)"
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -121,12 +130,21 @@ export const rpcHealth = sqliteTable("rpc_health", {
 // ─── Alert Log ─────────────────────────────────────────────────────────
 export const alertLog = sqliteTable("alert_log", {
   id: text("id").primaryKey(), // uuid
-  type: text("type").notNull(), // job_failed | rpc_down | job_stuck | batch_complete
+  type: text("type").notNull(), // job_failed | rpc_down | job_stuck | batch_complete | fcfs_triggered
   message: text("message").notNull(),
   channel: text("channel").notNull().default("discord"), // discord | email
   jobId: text("job_id"), // optional ref
   status: text("status").notNull().default("sent"), // sent | failed | rate_limited
   createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+// ─── App Config (runtime-editable settings) ────────────────────────────
+export const appConfig = sqliteTable("app_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at")
     .notNull()
     .default(sql`(datetime('now'))`),
 });

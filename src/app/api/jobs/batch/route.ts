@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const results = await batchMint(collectionId, walletIds, quantity || 1, useFlashbots, dryRun);
+    const results = await batchMint(collectionId, walletIds, quantity || 1, useFlashbots, dryRun, body.scheduledAt);
     return NextResponse.json({ success: true, results, dryRun: dryRun ?? false });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Batch mint failed" }, { status: 500 });

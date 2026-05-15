@@ -88,6 +88,48 @@ const CHAINS: Record<number, ChainConfig> = {
     ],
     explorerUrl: "https://snowtrace.io",
   },
+  // ─── Testnets ─────────────────────────────────────────────────────
+  11155111: {
+    id: 11155111,
+    name: "Sepolia (Testnet)",
+    symbol: "sETH",
+    rpcUrls: [
+      `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+      "https://rpc.sepolia.org",
+      "https://sepolia.gateway.tenderly.co",
+    ],
+    explorerUrl: "https://sepolia.etherscan.io",
+  },
+  80002: {
+    id: 80002,
+    name: "Polygon Amoy (Testnet)",
+    symbol: "MATIC",
+    rpcUrls: [
+      `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+      "https://rpc-amoy.polygon.technology",
+    ],
+    explorerUrl: "https://amoy.polygonscan.com",
+  },
+  84532: {
+    id: 84532,
+    name: "Base Sepolia (Testnet)",
+    symbol: "sETH",
+    rpcUrls: [
+      `https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+      "https://sepolia.base.org",
+    ],
+    explorerUrl: "https://sepolia.basescan.org",
+  },
+  421614: {
+    id: 421614,
+    name: "Arbitrum Sepolia (Testnet)",
+    symbol: "sETH",
+    rpcUrls: [
+      `https://arb-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
+      "https://sepolia-rollup.arbitrum.io/rpc",
+    ],
+    explorerUrl: "https://sepolia.arbiscan.io",
+  },
 };
 
 // ─── Provider management ──────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { db, schema } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { eq } from "drizzle-orm";
 
-type AlertType = "job_failed" | "rpc_down" | "job_stuck" | "batch_complete";
+type AlertType = "job_failed" | "rpc_down" | "job_stuck" | "batch_complete" | "fcfs_triggered";
 
 /**
  * Send an alert notification. Currently supports Discord webhook.

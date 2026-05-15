@@ -35,6 +35,8 @@ export default function BatchMintPage() {
   const [gasLimit, setGasLimit] = useState("");
   const [maxFeePerGas, setMaxFeePerGas] = useState("");
   const [maxPriorityFeePerGas, setMaxPriorityFeePerGas] = useState("");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
 
   const fetchData = () => {
     setLoading(true);
@@ -89,6 +91,7 @@ export default function BatchMintPage() {
           quantity,
           useFlashbots,
           dryRun,
+          scheduledAt: scheduleEnabled && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
           gasLimit: gasLimit || undefined,
           maxFeePerGas: maxFeePerGas || undefined,
           maxPriorityFeePerGas: maxPriorityFeePerGas || undefined,
@@ -148,6 +151,27 @@ export default function BatchMintPage() {
               onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm"
             />
+          </div>
+
+          {/* Schedule */}
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer mb-2">
+              <input
+                type="checkbox"
+                checked={scheduleEnabled}
+                onChange={(e) => setScheduleEnabled(e.target.checked)}
+                className="accent-blue-500"
+              />
+              <span className="text-sm text-zinc-300">📅 Schedule Mint</span>
+            </label>
+            {scheduleEnabled && (
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm"
+              />
+            )}
           </div>
 
           {/* Flashbots & Dry Run toggles */}

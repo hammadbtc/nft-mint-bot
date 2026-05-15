@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ethers } from "ethers";
 
 interface Wallet {
   id: string;
@@ -9,6 +10,7 @@ interface Wallet {
   chainId: number;
   keyFormat: string;
   active: boolean;
+  spendLimit: string | null;
   createdAt: string;
 }
 
@@ -35,6 +37,7 @@ export default function WalletsPage() {
     keyType: "private-key" as "private-key" | "mnemonic",
     key: "",
     hdPath: "m/44'/60'/0'/0/0",
+    spendLimit: "", // in ETH, empty = unlimited
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -98,7 +101,7 @@ export default function WalletsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setShowForm(false);
-      setForm({ label: "", chainId: 1, keyType: "private-key", key: "", hdPath: "m/44'/60'/0'/0/0" });
+      setForm({ label: "", chainId: 1, keyType: "private-key", key: "", hdPath: "m/44'/60'/0'/0/0", spendLimit: "" });
       setDerivedAddresses([]);
       setSelectedDerivedIndex(null);
       fetchData();
@@ -187,6 +190,21 @@ export default function WalletsPage() {
               />
             </div>
 
+            {/* Spend limit */}
+            <div>
+              <label className="block text-sm text-zinc-400 mb-1">
+                Spend Limit (ETH)
+                <span className="text-zinc-600 ml-2">empty = unlimited</span>
+              </label>
+              <input
+                type="text"
+                value={form.spendLimit}
+                onChange={(e) => setForm({ ...form, spendLimit: e.target.value })}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm"
+                placeholder="Unlimited"
+              />
+            </div>
+
             {/* HD Path */}
             {form.keyType === "mnemonic" && (
               <div className="col-span-2">
@@ -253,6 +271,7 @@ export default function WalletsPage() {
                 <th className="pb-2 pr-4">Address</th>
                 <th className="pb-2 pr-4">Chain</th>
                 <th className="pb-2 pr-4">Type</th>
+                <th className="pb-2 pr-4">Spend Limit</th>
                 <th className="pb-2">Actions</th>
               </tr>
             </thead>
@@ -267,6 +286,9 @@ export default function WalletsPage() {
                     {chains.find((c) => c.id === w.chainId)?.name || `Chain ${w.chainId}`}
                   </td>
                   <td className="py-2 pr-4 text-zinc-500">{w.keyFormat}</td>
+                  <td className="py-2 pr-4 text-zinc-500 text-xs">
+                    {w.spendLimit ? `${ethers.formatEther(w.spendLimit)} ETH` : "∞"}
+                  </td>
                   <td className="py-2">
                     <button
                       onClick={() => handleDelete(w.id)}
