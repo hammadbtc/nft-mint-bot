@@ -46,11 +46,11 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         <div className="px-5 py-6 border-b border-zinc-800/50">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
-              <span className="text-black font-bold text-xs font-[family-name:var(--font-geist-mono)]">M</span>
+              <span className="text-black font-bold text-xs font-mono">M</span>
             </div>
             <span className="text-white font-semibold text-sm tracking-tight">MintBot</span>
           </div>
-          <div className="mt-1 text-[10px] text-zinc-600 font-[family-name:var(--font-geist-mono)] uppercase tracking-widest">
+          <div className="mt-1 text-[10px] text-zinc-600 font-mono uppercase tracking-widest">
             ACO Automint
           </div>
         </div>
@@ -71,7 +71,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-zinc-800/50">
-          <div className="text-[10px] text-zinc-600 font-[family-name:var(--font-geist-mono)] uppercase tracking-widest leading-relaxed">
+          <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest leading-relaxed">
             v2.3 · Multi-chain
             <br />
             ERC20 · Flashbots
