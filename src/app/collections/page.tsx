@@ -308,27 +308,31 @@ export default function CollectionsPage() {
                 <span className="text-blue-400 font-semibold">✓ Contract found</span>
                 {scanResult.name && <span className="text-zinc-400">— {scanResult.name}</span>}
               </div>
-              {scanResult.mintFunctions?.length > 0 && (
+              {scanResult.mintFunctions?.length > 0 ? (
                 <div className="text-zinc-300">
-                  <span className="text-zinc-500">Mint functions:</span>{" "}
+                  <span className="text-zinc-500">Mint functions auto-filled:</span>{" "}
                   {scanResult.mintFunctions.map((f: any) => (
                     <span key={f.name} className="inline-block mr-2 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-emerald-400 text-xs font-mono">
                       {f.name}({f.inputs.map((i: any) => i.type).join(",")}) {f.stateMutability === "payable" ? "💰" : ""}
                     </span>
                   ))}
                 </div>
+              ) : (
+                <div className="text-yellow-400 text-xs">⚠️ No mint functions detected — you'll need to paste the ABI manually</div>
               )}
-              {scanResult.mintOpenEvents?.length > 0 && (
+              {scanResult.mintOpenEvents?.length > 0 ? (
                 <div className="text-zinc-300">
-                  <span className="text-zinc-500">Mint-open events:</span>{" "}
+                  <span className="text-zinc-500">FCFS event auto-filled:</span>{" "}
                   {scanResult.mintOpenEvents.map((e: any) => (
                     <span key={e.name} className="inline-block mr-2 px-1.5 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded text-purple-400 text-xs font-mono">
                       {e.signature}
                     </span>
                   ))}
                 </div>
+              ) : (
+                <div className="text-yellow-400 text-xs">⚠️ No mint-open events detected — FCFS signature left blank (contract may not emit one)</div>
               )}
-              <div className="text-xs text-zinc-500">ABI, name, and FCFS signature auto-filled above ↑</div>
+              <div className="text-xs text-zinc-500">Name above is the contract name from Etherscan — you can rename it to anything.</div>
             </div>
           )}
 
