@@ -9,83 +9,66 @@ export interface ChainConfig {
 }
 
 /**
- * Default chain configurations with Alchemy free-tier endpoints.
- * Replace YOUR_ALCHEMY_KEY with the actual key via env var.
+ * Build RPC URL list for a chain. Alchemy URLs are only included when
+ * ALCHEMY_API_KEY is set; otherwise they are dropped and public fallbacks
+ * become the primary.
  */
-const ALCHEMY_KEY = process.env.ALCHEMY_API_KEY || "demo";
+function rpc(...urls: (string | false)[]): string[] {
+  return urls.filter((u): u is string => !!u);
+}
+
+const ALCHEMY_KEY = process.env.ALCHEMY_API_KEY;
+const HAS_ALCHEMY = !!(ALCHEMY_KEY && ALCHEMY_KEY.length > 10);
+const al = (path: string) => HAS_ALCHEMY ? `https://${path}.g.alchemy.com/v2/${ALCHEMY_KEY}` : false;
 
 const CHAINS: Record<number, ChainConfig> = {
   1: {
     id: 1,
     name: "Ethereum",
     symbol: "ETH",
-    rpcUrls: [
-      `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://eth.llamarpc.com",
-      "https://rpc.ankr.com/eth",
-    ],
+    rpcUrls: rpc(al("eth-mainnet"), "https://eth.llamarpc.com", "https://rpc.ankr.com/eth"),
     explorerUrl: "https://etherscan.io",
   },
   137: {
     id: 137,
     name: "Polygon",
     symbol: "MATIC",
-    rpcUrls: [
-      `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://polygon.llamarpc.com",
-      "https://rpc.ankr.com/polygon",
-    ],
+    rpcUrls: rpc(al("polygon-mainnet"), "https://polygon.llamarpc.com", "https://rpc.ankr.com/polygon"),
     explorerUrl: "https://polygonscan.com",
   },
   42161: {
     id: 42161,
     name: "Arbitrum",
     symbol: "ETH",
-    rpcUrls: [
-      `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://arb1.arbitrum.io/rpc",
-    ],
+    rpcUrls: rpc(al("arb-mainnet"), "https://arb1.arbitrum.io/rpc"),
     explorerUrl: "https://arbiscan.io",
   },
   10: {
     id: 10,
     name: "Optimism",
     symbol: "ETH",
-    rpcUrls: [
-      `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://mainnet.optimism.io",
-    ],
+    rpcUrls: rpc(al("opt-mainnet"), "https://mainnet.optimism.io"),
     explorerUrl: "https://optimistic.etherscan.io",
   },
   8453: {
     id: 8453,
     name: "Base",
     symbol: "ETH",
-    rpcUrls: [
-      `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://mainnet.base.org",
-    ],
+    rpcUrls: rpc(al("base-mainnet"), "https://mainnet.base.org"),
     explorerUrl: "https://basescan.org",
   },
   56: {
     id: 56,
     name: "BNB Chain",
     symbol: "BNB",
-    rpcUrls: [
-      "https://bsc-dataseed.binance.org",
-      "https://bsc-dataseed1.defibit.io",
-      "https://rpc.ankr.com/bsc",
-    ],
+    rpcUrls: ["https://bsc-dataseed.binance.org", "https://bsc-dataseed1.defibit.io", "https://rpc.ankr.com/bsc"],
     explorerUrl: "https://bscscan.com",
   },
   43114: {
     id: 43114,
     name: "Avalanche C-Chain",
     symbol: "AVAX",
-    rpcUrls: [
-      "https://api.avax.network/ext/bc/C/rpc",
-      "https://rpc.ankr.com/avalanche",
-    ],
+    rpcUrls: ["https://api.avax.network/ext/bc/C/rpc", "https://rpc.ankr.com/avalanche"],
     explorerUrl: "https://snowtrace.io",
   },
   // ─── Testnets ─────────────────────────────────────────────────────
@@ -93,41 +76,28 @@ const CHAINS: Record<number, ChainConfig> = {
     id: 11155111,
     name: "Sepolia (Testnet)",
     symbol: "sETH",
-    rpcUrls: [
-      `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://rpc.sepolia.org",
-      "https://sepolia.gateway.tenderly.co",
-    ],
+    rpcUrls: rpc(al("eth-sepolia"), "https://rpc.sepolia.org", "https://sepolia.gateway.tenderly.co"),
     explorerUrl: "https://sepolia.etherscan.io",
   },
   80002: {
     id: 80002,
     name: "Polygon Amoy (Testnet)",
     symbol: "MATIC",
-    rpcUrls: [
-      `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://rpc-amoy.polygon.technology",
-    ],
+    rpcUrls: rpc(al("polygon-amoy"), "https://rpc-amoy.polygon.technology"),
     explorerUrl: "https://amoy.polygonscan.com",
   },
   84532: {
     id: 84532,
     name: "Base Sepolia (Testnet)",
     symbol: "sETH",
-    rpcUrls: [
-      `https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://sepolia.base.org",
-    ],
+    rpcUrls: rpc(al("base-sepolia"), "https://sepolia.base.org"),
     explorerUrl: "https://sepolia.basescan.org",
   },
   421614: {
     id: 421614,
     name: "Arbitrum Sepolia (Testnet)",
     symbol: "sETH",
-    rpcUrls: [
-      `https://arb-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      "https://sepolia-rollup.arbitrum.io/rpc",
-    ],
+    rpcUrls: rpc(al("arb-sepolia"), "https://sepolia-rollup.arbitrum.io/rpc"),
     explorerUrl: "https://sepolia.arbiscan.io",
   },
 };
