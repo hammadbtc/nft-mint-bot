@@ -44,14 +44,14 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       >
         {/* Logo area */}
         <div className="px-5 py-6 border-b border-zinc-800/50">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
-              <span className="text-black font-bold text-xs font-mono">M</span>
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="MintBot" className="w-8 h-8 rounded" />
+            <div>
+              <div className="text-white font-semibold text-sm tracking-tight leading-tight">MintBot</div>
+              <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest">
+                ACO Automint
+              </div>
             </div>
-            <span className="text-white font-semibold text-sm tracking-tight">MintBot</span>
-          </div>
-          <div className="mt-1 text-[10px] text-zinc-600 font-mono uppercase tracking-widest">
-            ACO Automint
           </div>
         </div>
 
