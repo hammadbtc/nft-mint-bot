@@ -4,16 +4,31 @@ import "./globals.css";
 import Link from "next/link";
 import { useState } from "react";
 
-const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/wallets", label: "Wallets" },
-  { href: "/collections", label: "Collections" },
-  { href: "/mint", label: "Batch Mint" },
-  { href: "/jobs", label: "Jobs" },
-  { href: "/rpc", label: "RPC Health" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/safety", label: "Contract Safety" },
-  { href: "/settings", label: "Settings" },
+const sections = [
+  {
+    label: "CORE",
+    items: [
+      { href: "/", label: "Dashboard" },
+      { href: "/wallets", label: "Wallets" },
+      { href: "/collections", label: "Collections" },
+      { href: "/mint", label: "Batch Mint" },
+      { href: "/jobs", label: "Jobs" },
+    ],
+  },
+  {
+    label: "INFRASTRUCTURE",
+    items: [
+      { href: "/rpc", label: "RPC Health" },
+      { href: "/analytics", label: "Analytics" },
+      { href: "/safety", label: "Contract Safety" },
+    ],
+  },
+  {
+    label: "SYSTEM",
+    items: [
+      { href: "/settings", label: "Settings" },
+    ],
+  },
 ];
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
@@ -46,12 +61,12 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         } lg:translate-x-0 fixed lg:sticky z-40 w-60 h-screen bg-zinc-950 border-r border-zinc-800 flex flex-col transition-transform overflow-y-auto`}
       >
         {/* Logo area */}
-        <div className="px-5 py-6 border-b border-zinc-800/50">
+        <div className="px-5 py-5 border-b border-zinc-800/50">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="MintBot" className="w-8 h-8 rounded" />
-            <div>
-              <div className="text-white font-semibold text-sm tracking-tight leading-tight">MintBot</div>
-              <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest">
+            <img src="/logo.png" alt="MintBot" className="w-9 h-9 rounded-lg flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="text-white font-semibold text-[15px] tracking-tight leading-tight">MintBot</div>
+              <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em]">
                 ACO Automint
               </div>
             </div>
@@ -59,25 +74,32 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setSidebarOpen(false)}
-              className="flex items-center px-3 py-2 rounded-md text-[13px] text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors font-medium tracking-wide"
-            >
-              {item.label}
-            </Link>
+        <nav className="flex-1 px-3 py-4 overflow-y-auto">
+          {sections.map((section) => (
+            <div key={section.label} className="mb-5">
+              <div className="px-3 mb-1.5 text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em] font-medium">
+                {section.label}
+              </div>
+              {section.items.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setSidebarOpen(false)}
+                  className="flex items-center px-3 py-2 rounded-md text-[13px] text-zinc-400 hover:text-white hover:bg-zinc-800/70 transition-colors font-medium tracking-wide"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
           ))}
         </nav>
 
         {/* Footer */}
         <div className="px-5 py-4 border-t border-zinc-800/50">
-          <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest leading-relaxed">
-            v2.3 · Multi-chain
+          <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em] leading-relaxed">
+            v2.3 &middot; Multi-chain
             <br />
-            ERC20 · Flashbots
+            ERC20 &middot; Flashbots &middot; SSE
           </div>
         </div>
       </aside>
