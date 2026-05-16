@@ -52,6 +52,61 @@ export default function CollectionsPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [fetchingContract, setFetchingContract] = useState(false);
+  const [scanResult, setScanResult] = useState<any>(null);
+  const [scanError, setScanError] = useState("");
+
+  const handleFetchContract = async () => {
+    if (!form.contractAddress || form.contractAddress.length < 42) return;
+    setFetchingContract(true);
+    setScanError("");
+    setScanResult(null);
+
+    try {
+      const res = await fetch(`/api/contract-info?address=${form.contractAddress}&chainId=${form.chainId}`);
+      const data = await res.json();
+
+      if (data.error) {
+        setScanError(data.error);
+        return;
+      }
+
+      setScanResult(data);
+
+      // Auto-fill: name
+      if (data.name && !form.name) {
+        setForm((f) => ({ ...f, name: data.name }));
+      }
+
+      // Auto-fill: mint ABI from first payable mint function
+      const bestMint = data.mintFunctions?.[0];
+      if (bestMint) {
+        setForm((f) => ({
+          ...f,
+          mintAbi: JSON.stringify([{
+            type: "function",
+            name: bestMint.name,
+            inputs: bestMint.inputs || [],
+            outputs: [],
+            stateMutability: bestMint.stateMutability,
+          }]),
+          mintMethod: bestMint.name,
+        }));
+      }
+
+      // Auto-fill: first mint-open event
+      if (data.mintOpenEvents?.length > 0) {
+        setForm((f) => ({
+          ...f,
+          fcfsMintOpenSignature: data.mintOpenEvents[0].signature,
+        }));
+      }
+    } catch (err: any) {
+      setScanError(err.message || "Failed to fetch contract info");
+    } finally {
+      setFetchingContract(false);
+    }
+  };
 
   const fetchData = () => {
     setLoading(true);
@@ -89,6 +144,8 @@ export default function CollectionsPage() {
         defaultMaxFeePerGas: "", defaultMaxPriorityFeePerGas: "",
         defaultUseFlashbots: false, fcfsMintOpenSignature: "",
       });
+      setScanResult(null);
+      setScanError("");
       fetchData();
     } catch (err: any) {
       setError(err.message);
@@ -206,8 +263,18 @@ export default function CollectionsPage() {
             </div>
             <div>
               <label className="block text-sm text-zinc-400 mb-1">Contract Address</label>
-              <input type="text" value={form.contractAddress} onChange={(e) => setForm({ ...form, contractAddress: e.target.value })}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="0x..." required />
+              <div className="flex gap-2">
+                <input type="text" value={form.contractAddress} onChange={(e) => setForm({ ...form, contractAddress: e.target.value })}
+                  className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="0x..." required />
+                <button
+                  type="button"
+                  onClick={handleFetchContract}
+                  disabled={fetchingContract || form.contractAddress.length < 42}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                >
+                  {fetchingContract ? "Fetching..." : "🔍 Fetch"}
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm text-zinc-400 mb-1">Mint Function</label>
@@ -228,6 +295,42 @@ export default function CollectionsPage() {
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="0x... (optional)" />
             </div>
           </div>
+
+          {/* Scan results */}
+          {scanError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+              {scanError}
+            </div>
+          )}
+          {scanResult && !scanError && (
+            <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-blue-400 font-semibold">✓ Contract found</span>
+                {scanResult.name && <span className="text-zinc-400">— {scanResult.name}</span>}
+              </div>
+              {scanResult.mintFunctions?.length > 0 && (
+                <div className="text-zinc-300">
+                  <span className="text-zinc-500">Mint functions:</span>{" "}
+                  {scanResult.mintFunctions.map((f: any) => (
+                    <span key={f.name} className="inline-block mr-2 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-emerald-400 text-xs font-mono">
+                      {f.name}({f.inputs.map((i: any) => i.type).join(",")}) {f.stateMutability === "payable" ? "💰" : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {scanResult.mintOpenEvents?.length > 0 && (
+                <div className="text-zinc-300">
+                  <span className="text-zinc-500">Mint-open events:</span>{" "}
+                  {scanResult.mintOpenEvents.map((e: any) => (
+                    <span key={e.name} className="inline-block mr-2 px-1.5 py-0.5 bg-purple-500/10 border border-purple-500/30 rounded text-purple-400 text-xs font-mono">
+                      {e.signature}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="text-xs text-zinc-500">ABI, name, and FCFS signature auto-filled above ↑</div>
+            </div>
+          )}
 
           {/* ABI */}
           <div>
