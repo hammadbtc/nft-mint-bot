@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -12,15 +12,20 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Premium dashboard card accent colors */
+.card-accent-emerald { border-left: 2px solid #10b981; }
+.card-accent-blue    { border-left: 2px solid #3b82f6; }
+.card-accent-purple  { border-left: 2px solid #8b5cf6; }
+.card-accent-amber   { border-left: 2px solid #f59e0b; }
+.card-accent-rose    { border-left: 2px solid #f43f5e; }
+.card-accent-cyan    { border-left: 2px solid #06b6d4; }
+.card-accent-lime    { border-left: 2px solid #84cc16; }
+.card-accent-orange  { border-left: 2px solid #f97316; }

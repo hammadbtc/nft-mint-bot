@@ -1,83 +1,88 @@
 "use client";
 
-import "./globals.css";
 import Link from "next/link";
 import { useState } from "react";
+
+const navItems = [
+  { href: "/", label: "Dashboard" },
+  { href: "/wallets", label: "Wallets" },
+  { href: "/collections", label: "Collections" },
+  { href: "/mint", label: "Batch Mint" },
+  { href: "/jobs", label: "Jobs" },
+  { href: "/rpc", label: "RPC Health" },
+  { href: "/analytics", label: "Analytics" },
+  { href: "/safety", label: "Contract Safety" },
+  { href: "/settings", label: "Settings" },
+];
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <html lang="en" className="dark">
-      <body className="bg-zinc-950 text-zinc-100 min-h-screen">
-        {/* Mobile hamburger */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="lg:hidden fixed top-3 left-3 z-50 p-2 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-400"
-        >
-          {sidebarOpen ? "✕" : "☰"}
-        </button>
+    <div className="flex h-screen">
+      {/* Mobile hamburger */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="lg:hidden fixed top-3 left-3 z-50 p-2 bg-zinc-900 border border-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
+      >
+        {sidebarOpen ? "✕" : "☰"}
+      </button>
 
-        {/* Overlay */}
-        {sidebarOpen && (
-          <div
-            className="lg:hidden fixed inset-0 bg-black/60 z-30"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
+      {/* Overlay */}
+      {sidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/60 z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-        <div className="flex h-screen">
-          <aside
-            className={`${
-              sidebarOpen ? "translate-x-0" : "-translate-x-full"
-            } lg:translate-x-0 fixed lg:relative z-40 w-64 h-screen bg-zinc-900 border-r border-zinc-800 p-4 flex flex-col gap-1 transition-transform overflow-y-auto`}
-          >
-            <h1 className="text-lg font-bold text-emerald-400 mb-4">🦾 MintBot</h1>
-
-            <SectionLabel>Core</SectionLabel>
-            <NavLink href="/" onClick={() => setSidebarOpen(false)}>📊 Dashboard</NavLink>
-            <NavLink href="/wallets" onClick={() => setSidebarOpen(false)}>👛 Wallets</NavLink>
-            <NavLink href="/collections" onClick={() => setSidebarOpen(false)}>🎨 Collections</NavLink>
-            <NavLink href="/mint" onClick={() => setSidebarOpen(false)}>🚀 Batch Mint</NavLink>
-            <NavLink href="/jobs" onClick={() => setSidebarOpen(false)}>⚡ Jobs</NavLink>
-
-            <SectionLabel>Infrastructure</SectionLabel>
-            <NavLink href="/rpc" onClick={() => setSidebarOpen(false)}>🔌 RPC Health</NavLink>
-            <NavLink href="/analytics" onClick={() => setSidebarOpen(false)}>📈 Analytics</NavLink>
-            <NavLink href="/safety" onClick={() => setSidebarOpen(false)}>🛡️ Contract Safety</NavLink>
-
-            <SectionLabel>System</SectionLabel>
-            <NavLink href="/settings" onClick={() => setSidebarOpen(false)}>⚙️ Settings</NavLink>
-
-            <div className="mt-auto pt-4 border-t border-zinc-800 text-xs text-zinc-500 space-y-1">
-              <div>ACO AutoMint v2.2</div>
-              <div>ERC20 • Multi-worker • SSE</div>
+      {/* ── Sidebar ── */}
+      <aside
+        className={`${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        } lg:translate-x-0 fixed lg:sticky z-40 w-60 h-screen bg-zinc-950 border-r border-zinc-800 flex flex-col transition-transform overflow-y-auto`}
+      >
+        {/* Logo area */}
+        <div className="px-5 py-6 border-b border-zinc-800/50">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
+              <span className="text-black font-bold text-xs font-[family-name:var(--font-geist-mono)]">M</span>
             </div>
-          </aside>
-
-          <main className="flex-1 overflow-auto p-4 lg:p-6 pt-14 lg:pt-6">{children}</main>
+            <span className="text-white font-semibold text-sm tracking-tight">MintBot</span>
+          </div>
+          <div className="mt-1 text-[10px] text-zinc-600 font-[family-name:var(--font-geist-mono)] uppercase tracking-widest">
+            ACO Automint
+          </div>
         </div>
-      </body>
-    </html>
-  );
-}
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-semibold mt-3 mb-1 px-1">
-      {children}
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-4 space-y-0.5">
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center px-3 py-2 rounded-md text-[13px] text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors font-medium tracking-wide"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-zinc-800/50">
+          <div className="text-[10px] text-zinc-600 font-[family-name:var(--font-geist-mono)] uppercase tracking-widest leading-relaxed">
+            v2.3 · Multi-chain
+            <br />
+            ERC20 · Flashbots
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <main className="flex-1 overflow-auto p-5 lg:p-8 pt-14 lg:pt-8 bg-zinc-950">
+        {children}
+      </main>
     </div>
-  );
-}
-
-function NavLink({ href, children, onClick }: { href: string; children: React.ReactNode; onClick?: () => void }) {
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className="px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-    >
-      {children}
-    </Link>
   );
 }
