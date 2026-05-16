@@ -95,12 +95,20 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         </nav>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-zinc-800/50">
+        <div className="px-5 py-4 border-t border-zinc-800/50 space-y-3">
           <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em] leading-relaxed">
             v2.3 &middot; Multi-chain
             <br />
             ERC20 &middot; Flashbots &middot; SSE
           </div>
+          <a
+            href="https://x.com/hammadbtc"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-[10px] text-zinc-500 hover:text-white font-mono uppercase tracking-[0.12em] transition-colors"
+          >
+            Powered by <span className="text-zinc-400">@Hammadbtc</span>
+          </a>
         </div>
       </aside>
 
