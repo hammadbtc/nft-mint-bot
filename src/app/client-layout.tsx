@@ -19,7 +19,9 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex h-screen">
+    <html lang="en" className="dark">
+      <body className="bg-zinc-950 text-zinc-100 antialiased">
+        <div className="flex h-screen">
       {/* Mobile hamburger */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -83,6 +85,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       <main className="flex-1 overflow-auto p-5 lg:p-8 pt-14 lg:pt-8 bg-zinc-950">
         {children}
       </main>
-    </div>
+        </div>{/* /flex */}
+      </body>
+    </html>
   );
 }
