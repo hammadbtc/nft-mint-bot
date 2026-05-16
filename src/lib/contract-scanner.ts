@@ -5,22 +5,13 @@
 
 import { getChain, ChainConfig } from "@/lib/chains";
 
-// Etherscan-family API base URLs (all share the same API format)
-const EXPLORER_APIS: Record<number, string> = {
-  1: "https://api.etherscan.io",
-  137: "https://api.polygonscan.com",
-  42161: "https://api.arbiscan.io",
-  10: "https://api-optimistic.etherscan.io",
-  8453: "https://api.basescan.org",
-  56: "https://api.bscscan.com",
-  43114: "https://api.snowtrace.io",
-  11155111: "https://api-sepolia.etherscan.io",
-  80002: "https://api-amoy.polygonscan.com",
-  84532: "https://api-sepolia.basescan.org",
-  421614: "https://api-sepolia.arbiscan.io",
-};
+// Etherscan V2: single unified API endpoint for all 60+ chains
+const ETHERSCAN_V2_BASE = "https://api.etherscan.io/v2/api";
 
 const ETHERSCAN_KEY = process.env.ETHERSCAN_API_KEY || process.env.ALCHEMY_API_KEY || "";
+
+// Chains supported by Etherscan V2 (chainid mapping from https://docs.etherscan.io/supported-chains)
+const ETHERSCAN_CHAIN_IDS = new Set([1, 137, 42161, 10, 8453, 56, 43114, 11155111, 80002, 84532, 421614]);
 
 export interface AbiEntry {
   type: "function" | "event" | "constructor" | "fallback" | "receive";
@@ -126,9 +117,8 @@ export async function fetchContractAbi(
   address: string,
   chainId: number
 ): Promise<{ abi: AbiEntry[]; name: string | null; error: string | null }> {
-  const apiBase = EXPLORER_APIS[chainId];
-  if (!apiBase) {
-    return { abi: [], name: null, error: `No explorer API for chain ${chainId}` };
+  if (!ETHERSCAN_CHAIN_IDS.has(chainId)) {
+    return { abi: [], name: null, error: `Chain ${chainId} not supported by Etherscan V2` };
   }
 
   if (!ETHERSCAN_KEY || ETHERSCAN_KEY.length < 10) {
@@ -136,8 +126,11 @@ export async function fetchContractAbi(
   }
 
   try {
+    // V2: unified endpoint + chainid param
+    const baseParams = `chainid=${chainId}&apikey=${ETHERSCAN_KEY}`;
+
     // Fetch ABI
-    const abiUrl = `${apiBase}/api?module=contract&action=getabi&address=${address}&apikey=${ETHERSCAN_KEY}`;
+    const abiUrl = `${ETHERSCAN_V2_BASE}?module=contract&action=getabi&address=${address}&${baseParams}`;
     const abiRes = await fetch(abiUrl, { signal: AbortSignal.timeout(10000) });
     const abiJson = await abiRes.json();
 
@@ -156,7 +149,7 @@ export async function fetchContractAbi(
     // Fetch contract name from source
     let name: string | null = null;
     try {
-      const srcUrl = `${apiBase}/api?module=contract&action=getsourcecode&address=${address}&apikey=${ETHERSCAN_KEY}`;
+      const srcUrl = `${ETHERSCAN_V2_BASE}?module=contract&action=getsourcecode&address=${address}&${baseParams}`;
       const srcRes = await fetch(srcUrl, { signal: AbortSignal.timeout(10000) });
       const srcJson = await srcRes.json();
       if (srcJson.status === "1" && srcJson.result?.[0]?.ContractName) {
