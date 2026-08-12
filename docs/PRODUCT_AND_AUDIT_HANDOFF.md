@@ -42,6 +42,8 @@ Every supported project has a reviewed adapter/configuration defining accepted d
 
 The full operator procedure and current generic-adapter limitations are documented in `docs/ADDING_A_MINT_PROJECT.md`.
 
+Implemented platform support now includes `opensea-seadrop-v1` for reviewed public SeaDrop phases. It reads the live public-drop price, start/end, per-wallet limit, wallet mint stats and collection supply before constructing `mintPublic(address,address,address,uint256)`. Signed, allowlist and token-gated phases remain unsupported.
+
 ## Reliability rules
 
 - Validate wallet/project/chain compatibility and quantities before creating jobs.
@@ -59,6 +61,7 @@ The full operator procedure and current generic-adapter limitations are document
 - `/` is Mints, `/wallets` is Wallets and `/disperse` is Disperse.
 - The new UI includes theme switching, mint search/results, wallet import/generation and Disperse review scaffolding.
 - The production Next.js build passes.
+- Mint prices are formatted from wei to ETH, current/max supply is read on-chain, and users no longer enter a manual schedule. Upcoming phases automatically show/use the contract opening time; live phases queue for immediate execution. The action is labeled `Schedule mint` in both cases.
 
 ## Implemented backend state
 
@@ -72,14 +75,24 @@ The full operator procedure and current generic-adapter limitations are document
 - Production access fails closed unless Basic Auth or an IP allowlist is configured. Adapter registration requires a separate admin token.
 - Old V1 UI and unused FCFS/scanner/safety/analytics/config APIs were removed.
 - Runtime high-severity dependency findings were patched. Remaining audit findings are moderate and confined to the development-only Drizzle CLI dependency chain.
+- Robinhood Chain mainnet is configured as chain ID 4663 with the official public RPC and Blockscout explorer.
+- Railway predeploy runs an idempotent reviewed-project seed and explicitly disables entries in `config/disabled-projects.json`.
+
+## Current reviewed project state
+
+- Active seed: Cash Rabbits, `0x5b05C950993705416C9069d43Ee70b564a875e40`, OpenSea slug `cash-rabbits`, Robinhood Chain.
+- Historical public configuration observed 2026-08-12: 0.0001 ETH, maximum 10 per wallet, 10,000 max supply, start 20:30:52 UTC on August 12, end 20:30:52 UTC on August 15. The adapter must use fresh chain state, not these recorded values.
+- Removed seed: Hoodiez Brokers. Deployment explicitly marks it inactive and unverified at Hammad's request because he believed it was probably a scam.
+- OpenSea showed Cash Rabbits `safelist_status: not_requested`; Blockscout showed the contract verified and not flagged. These signals do not establish project legitimacy.
 
 ## Verification completed
 
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Unit tests cover randomized encrypted-secret round trips, missing-passphrase failure and reviewed adapter parsing/rejection.
-- Live blockchain execution has intentionally not been enabled or claimed as tested; RPC selection, a real adapter and testnet funds are still required.
+- Five unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, reviewed adapter parsing/rejection and exact SeaDrop calldata shape.
+- Exact Hoodiez public calldata previously passed `eth_call` and gas estimation without broadcasting. Cash Rabbits exact calldata was constructed before its public opening and correctly reverted pre-open. Re-run Cash Rabbits simulation after opening.
+- Live blockchain execution has intentionally not been enabled or claimed as end-to-end tested.
 
 ## Required external configuration before live funds
 
@@ -92,3 +105,5 @@ The full operator procedure and current generic-adapter limitations are document
 ## High-reasoning review checklist
 
 Review schema migrations, secret lifecycle, authorization assumptions, URL/domain matching, adapter transaction construction, allowlist proof/signature handling, nonce allocation, job claiming, idempotency, retry classification, broadcast persistence, receipt interpretation, RPC failover, Disperse totals, gas reserve logic, sweep behavior, logging redaction, dependency audit and restart recovery. Run unit, integration, production build and testnet end-to-end tests before enabling mainnet.
+
+Start by verifying GitHub/local head `be8c6ff`, Railway deploy/predeploy logs, Hoodiez deactivation and Cash Rabbits resolution. Specifically audit two current scheduling concerns: non-dry-run job creation is blocked unless the global live flag is already enabled, and the browser currently sends the adapter start time to the batch API. Decide whether scheduling should be allowed safely while broadcasts remain disabled and enforce launch timing server-side so a modified client cannot bypass it. Do not enable live variables automatically.
