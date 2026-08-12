@@ -58,7 +58,12 @@ export const openseaSeaDropV1: MintAdapter = {
     const provider = getProvider(collection.chainId);
     const { mintPrice, startTime, endTime, maxPerWallet } = await publicDrop(collection, provider);
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
-    const maxSupply = Number(await nft.getFunction("maxSupply").staticCall());
+    const [maxSupplyValue, currentSupplyValue] = await Promise.all([
+      nft.getFunction("maxSupply").staticCall(),
+      nft.getFunction("totalSupply").staticCall(),
+    ]);
+    const maxSupply = Number(maxSupplyValue);
+    const currentSupply = Number(currentSupplyValue);
     const startsAt = startTime > 0n ? new Date(Number(startTime) * 1000).toISOString() : undefined;
     const endsAt = endTime > 0n ? new Date(Number(endTime) * 1000).toISOString() : undefined;
     return {
@@ -72,6 +77,7 @@ export const openseaSeaDropV1: MintAdapter = {
       siteUrl: collection.siteUrl || undefined,
       imageUrl: collection.imageUrl || undefined,
       maxSupply,
+      currentSupply,
       phases: [{
         id: "public",
         name: "Public Mint",

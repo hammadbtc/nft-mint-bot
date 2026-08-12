@@ -24,6 +24,7 @@ export type ResolvedMint = {
   siteUrl?: string;
   imageUrl?: string;
   maxSupply?: number;
+  currentSupply?: number;
   phases: MintPhase[];
   source: "url" | "contract" | "name";
 };
