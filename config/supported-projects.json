@@ -22,5 +22,55 @@
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x5b05c950993705416c9069d43ee70b564a875e40" }
       ]
     }
+  },
+  {
+    "id": "e0c60e48-31b5-4359-91bc-6a8842df6b90",
+    "name": "CHIMPS HOOD",
+    "slug": "chimps-hood",
+    "contractAddress": "0x3a1ACd38650397e93765BCD2D2E9714B074A482e",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "0",
+    "maxPerWallet": 5,
+    "maxSupply": 5000,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/chimps-hood/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/chimps-hood/image_type_logo/49913eac32e319d050a9c60b79b6d0/2049913eac32e319d050a9c60b79b6d0.gif",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public stage",
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/chimps-hood/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x3a1acd38650397e93765bcd2d2e9714b074a482e" }
+      ]
+    }
+  },
+  {
+    "id": "6bbc41fb-1978-4563-b7bf-1454e2a2ecdc",
+    "name": "WEASELS IN STOCK",
+    "slug": "weaselsinstock",
+    "contractAddress": "0x808ef461a7982e0517ca647070BE251f6f115fCC",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "80000000000000",
+    "maxPerWallet": 30,
+    "maxSupply": 6666,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/weaselsinstock/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/weasels-in-stock/image_type_logo/8a6bac3b93b9c3e960d2da14d05806/878a6bac3b93b9c3e960d2da14d05806.png",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "FCFS",
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/weaselsinstock/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x808ef461a7982e0517ca647070be251f6f115fcc" }
+      ]
+    }
   }
 ]

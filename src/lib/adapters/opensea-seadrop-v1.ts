@@ -18,6 +18,7 @@ const COLLECTION_ABI = [
 type SeaDropConfig = {
   seaDropAddress: string;
   feeRecipient: string;
+  publicPhaseName?: string;
   phases?: Array<{ id?: string; name: string; startsAt?: string; endsAt?: string; priceWei?: string; maxPerWallet?: number }>;
   urlMatchers?: Array<{ domain: string; path?: string; pathPrefix?: string }>;
 };
@@ -69,7 +70,7 @@ export const openseaSeaDropV1: MintAdapter = {
 
   async resolve(collection, source): Promise<ResolvedMint> {
     const provider = getProvider(collection.chainId);
-    const { mintPrice, startTime, endTime, maxPerWallet, chainTimestamp } = await publicDrop(collection, provider);
+    const { config, mintPrice, startTime, endTime, maxPerWallet, chainTimestamp } = await publicDrop(collection, provider);
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
     const [maxSupplyValue, currentSupplyValue] = await Promise.all([
       nft.getFunction("maxSupply").staticCall(),
@@ -93,7 +94,7 @@ export const openseaSeaDropV1: MintAdapter = {
       currentSupply,
       phases: [{
         id: "public",
-        name: "Public Mint",
+        name: config.publicPhaseName || "Public Mint",
         status: statusFor(startTime, endTime, chainTimestamp),
         startsAt,
         endsAt,

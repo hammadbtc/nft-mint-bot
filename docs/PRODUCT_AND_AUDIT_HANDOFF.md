@@ -83,6 +83,9 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 ## Current reviewed project state
 
 - Active seed: Cash Rabbits, `0x5b05C950993705416C9069d43Ee70b564a875e40`, OpenSea slug `cash-rabbits`, Robinhood Chain.
+- Active upcoming public-phase seed: CHIMPS HOOD, `0x3a1ACd38650397e93765BCD2D2E9714B074A482e`, OpenSea slug `chimps-hood`, Robinhood Chain. Reviewed public stage: free, maximum 5 per wallet, 5,000 max supply, 2026-08-13 14:00 UTC through 2026-08-14 14:00 UTC.
+- Active upcoming public-phase seed: WEASELS IN STOCK, `0x808ef461a7982e0517ca647070BE251f6f115fCC`, OpenSea slug `weaselsinstock`, Robinhood Chain. Reviewed FCFS public stage: 0.00008 ETH, maximum 30 per wallet, 6,666 max supply, 2026-08-13 10:05 UTC through 2026-09-12 10:05 UTC.
+- CHIMPS HOOD's earlier `Whitelist FCFS` and WEASELS IN STOCK's earlier `TEAM` stage are signed presales and remain unsupported by `opensea-seadrop-v1`. The records intentionally schedule only their on-chain public stages.
 - Historical public configuration observed 2026-08-12: 0.0001 ETH, maximum 10 per wallet, 10,000 max supply, start 20:30:52 UTC on August 12, end 20:30:52 UTC on August 15. The adapter must use fresh chain state, not these recorded values.
 - Removed seed: Hoodiez Brokers. Deployment explicitly marks it inactive and unverified at Hammad's request because he believed it was probably a scam.
 - OpenSea showed Cash Rabbits `safelist_status: not_requested`; Blockscout showed the contract verified and not flagged. These signals do not establish project legitimacy.
@@ -92,7 +95,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Eighteen unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path rejection, reviewed adapter parsing, phase/recovery policy, main/worker mint-wallet eligibility, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
+- Twenty unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path and reviewed-seed rejection, reviewed adapter parsing, phase/recovery policy, main/worker mint-wallet eligibility, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 
