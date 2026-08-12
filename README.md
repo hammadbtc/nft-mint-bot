@@ -10,7 +10,7 @@ Focused, single-user NFT mint automation with three workflows: Mints, Wallets an
 - Review per-wallet task status and results.
 - Import one main wallet, create independent workers beneath it, fund workers and sweep balances back.
 
-Unsupported projects are rejected rather than guessed. Live Disperse transactions are disabled until explicitly enabled after testnet verification.
+Unsupported projects are rejected rather than guessed. Mint and Disperse work can be safely queued while broadcasting is locked; live transactions require both explicit safety gates after verification.
 
 ## Stack
 

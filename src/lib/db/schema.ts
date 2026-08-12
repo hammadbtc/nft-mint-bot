@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, serial, varchar } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, serial, varchar, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ─── Chains ────────────────────────────────────────────────────────────
@@ -34,6 +34,18 @@ export const wallets = pgTable("wallets", {
   updatedAt: text("updated_at")
     .notNull()
     .default(sql`now()`),
+}, (table) => [
+  uniqueIndex("wallets_chain_address_unique").on(table.chainId, sql`lower(${table.address})`),
+  uniqueIndex("wallets_one_main_per_chain").on(table.chainId)
+    .where(sql`${table.role} = 'main'`),
+  index("wallets_parent_idx").on(table.parentWalletId),
+]);
+
+export const walletNonceState = pgTable("wallet_nonce_state", {
+  walletId: varchar("wallet_id").primaryKey().references(() => wallets.id),
+  chainId: integer("chain_id").notNull(),
+  nextNonce: integer("next_nonce").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
 });
 
 // ─── Collections ───────────────────────────────────────────────────────
@@ -97,12 +109,22 @@ export const mintJobs = pgTable("mint_jobs", {
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
   idempotencyKey: varchar("idempotency_key").unique(),
+  batchId: varchar("batch_id"),
+  phaseId: varchar("phase_id"),
+  phaseStartsAt: text("phase_starts_at"),
+  phaseEndsAt: text("phase_ends_at"),
   claimedAt: text("claimed_at"),
+  leaseExpiresAt: text("lease_expires_at"),
   claimToken: varchar("claim_token"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`now()`),
-});
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+}, (table) => [
+  index("mint_jobs_status_schedule_idx").on(table.status, table.scheduledAt),
+  index("mint_jobs_wallet_status_idx").on(table.walletId, table.status),
+  index("mint_jobs_batch_idx").on(table.batchId),
+]);
 
 // ─── Mint Attempts (Transaction Log) ───────────────────────────────────
 export const mintAttempts = pgTable("mint_attempts", {
@@ -111,16 +133,30 @@ export const mintAttempts = pgTable("mint_attempts", {
     .notNull()
     .references(() => mintJobs.id),
   txHash: text("tx_hash"),
-  status: varchar("status").notNull(), // submitted | confirmed | failed | replaced
+  status: varchar("status").notNull(), // simulated | prepared | submitted | confirming | confirmed | failed
+  kind: varchar("kind").notNull().default("mint"), // approval | mint
+  nonce: integer("nonce"),
+  toAddress: text("to_address"),
+  value: text("value").notNull().default("0"),
+  dataHash: text("data_hash"),
+  gasLimit: text("gas_limit"),
+  maxFeePerGas: text("max_fee_per_gas"),
+  maxPriorityFeePerGas: text("max_priority_fee_per_gas"),
   gasUsed: text("gas_used"),
   effectiveGasPrice: text("effective_gas_price"),
   blockNumber: integer("block_number"),
   error: text("error"),
   rawTx: text("raw_tx"),
+  preparedAt: text("prepared_at"),
+  broadcastAt: text("broadcast_at"),
+  confirmedAt: text("confirmed_at"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`now()`),
-});
+}, (table) => [
+  index("mint_attempts_job_idx").on(table.jobId),
+  index("mint_attempts_tx_hash_idx").on(table.txHash),
+]);
 
 // ─── Settings (global key-value) ───────────────────────────────────────
 export const settings = pgTable("settings", {
@@ -181,11 +217,20 @@ export const disperseOperations = pgTable("disperse_operations", {
   mainWalletId: varchar("main_wallet_id").notNull().references(() => wallets.id),
   chainId: integer("chain_id").notNull(),
   status: varchar("status").notNull().default("pending"),
+  idempotencyKey: varchar("idempotency_key").unique(),
+  requestHash: text("request_hash"),
+  previewJson: text("preview_json"),
   amountPerWallet: text("amount_per_wallet"),
   error: text("error"),
+  claimedAt: text("claimed_at"),
+  leaseExpiresAt: text("lease_expires_at"),
+  claimToken: varchar("claim_token"),
   createdAt: text("created_at").notNull().default(sql`now()`),
   completedAt: text("completed_at"),
-});
+  updatedAt: text("updated_at").notNull().default(sql`now()`),
+}, (table) => [
+  index("disperse_operations_status_idx").on(table.status, table.createdAt),
+]);
 
 export const disperseTransfers = pgTable("disperse_transfers", {
   id: varchar("id").primaryKey(),
@@ -194,7 +239,21 @@ export const disperseTransfers = pgTable("disperse_transfers", {
   toWalletId: varchar("to_wallet_id").notNull().references(() => wallets.id),
   amount: text("amount").notNull(),
   status: varchar("status").notNull().default("pending"),
+  nonce: integer("nonce"),
+  gasLimit: text("gas_limit"),
+  maxFeePerGas: text("max_fee_per_gas"),
+  maxPriorityFeePerGas: text("max_priority_fee_per_gas"),
+  gasUsed: text("gas_used"),
+  effectiveGasPrice: text("effective_gas_price"),
+  blockNumber: integer("block_number"),
   txHash: text("tx_hash"),
+  rawTx: text("raw_tx"),
   error: text("error"),
+  preparedAt: text("prepared_at"),
+  broadcastAt: text("broadcast_at"),
+  confirmedAt: text("confirmed_at"),
   createdAt: text("created_at").notNull().default(sql`now()`),
-});
+}, (table) => [
+  index("disperse_transfers_operation_idx").on(table.operationId),
+  index("disperse_transfers_tx_hash_idx").on(table.txHash),
+]);

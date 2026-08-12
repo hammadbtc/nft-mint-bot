@@ -12,6 +12,6 @@ test("SeaDrop public mint calldata matches the reviewed OpenSea transaction shap
   const decoded = iface.decodeFunctionData("mintPublic", data);
   assert.equal(decoded[0], nft);
   assert.equal(decoded[1], recipient);
-  assert.equal(decoded[2], minter);
+  assert.equal(decoded[2], ethers.ZeroAddress);
   assert.equal(decoded[3], 2n);
 });

@@ -22,11 +22,22 @@ function Icon({ name, size = 24 }: { name: string; size?: number }) {
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [dark, setDark] = useState(false);
+  const [engine, setEngine] = useState<{ ready: boolean; liveTransactionsEnabled: boolean } | null>(null);
   useEffect(() => {
     const saved = localStorage.getItem("mintbot-theme");
     const next = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     document.documentElement.dataset.theme = next ? "dark" : "light";
     queueMicrotask(() => setDark(next));
+  }, []);
+  useEffect(() => {
+    let mounted = true;
+    const check = () => fetch("/api/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((status) => { if (mounted) setEngine(status); })
+      .catch(() => { if (mounted) setEngine({ ready: false, liveTransactionsEnabled: false }); });
+    void check();
+    const interval = setInterval(check, 15_000);
+    return () => { mounted = false; clearInterval(interval); };
   }, []);
   const toggleTheme = () => {
     const next = !dark;
@@ -42,7 +53,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
           <header className="topbar">
             <Link href="/" className="brand"><span className="brand-mark"><Icon name="leaf" size={22}/></span><span>MintBot</span></Link>
             <div className="top-actions">
-              <span className="status-dot"><i/> Engine ready</span>
+              <span className="status-dot"><i style={{ background: engine?.ready ? undefined : "var(--danger)" }}/>{engine === null ? "Checking engine…" : engine.ready ? engine.liveTransactionsEnabled ? "Engine live" : "Ready · broadcast locked" : "Engine unavailable"}</span>
               <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">{dark ? "☀" : "☾"}</button>
             </div>
           </header>

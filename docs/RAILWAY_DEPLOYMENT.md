@@ -7,7 +7,7 @@ Create two services in one Railway project:
 1. A PostgreSQL database named `Postgres`.
 2. The MintBot application connected to this GitHub repository.
 
-Keep the MintBot service at exactly **one replica**. The scheduler runs inside the application process; multiple replicas could compete for wallet nonces even though database job claims are atomic.
+Keep the MintBot service at exactly **one replica**. Database claims and nonce reservations are concurrency-safe, but one embedded scheduler keeps operations and observability simple.
 
 `railway.json` configures Railpack, one replica, the production build, pre-deploy environment validation/schema sync, `/api/health`, and restart-on-failure behavior. Generate a public domain for the MintBot service after the first successful deployment.
 
@@ -42,6 +42,7 @@ Never change `VAULT_PASSPHRASE` after wallets have been imported or generated; c
 
 ```env
 ALCHEMY_API_KEY=<Alchemy key>
+ROBINHOOD_RPC_URLS=<optional comma-separated independent HTTPS providers>
 ```
 
 The app has public RPC fallbacks, but a dedicated provider is strongly recommended before testnet or live minting.
@@ -71,7 +72,7 @@ ENABLE_LIVE_TRANSACTIONS=true
 LIVE_TRANSACTIONS_CONFIRMED=I_UNDERSTAND
 ```
 
-The mint engine can broadcast independently of the Disperse flag once jobs are created, so do not register a mainnet adapter or fund wallets before testnet verification.
+Scheduling and Disperse queueing remain available while this gate is locked. The scheduler holds non-dry-run work; both mint and Disperse use the same two-key broadcast gate. Do not fund wallets before testnet verification.
 
 ## Deploy steps
 

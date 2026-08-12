@@ -4,35 +4,137 @@ import { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { formatContractTime } from "@/lib/format-contract-time";
 
-type Wallet = { id:string; label:string; address:string; chainId:number };
-type Collection = { id:string; name:string; contractAddress:string; chainId:number; mintPrice:string|null; maxPerWallet:number|null; maxSupply:number|null; currentSupply:number|null; phaseStatus:string; startsAt:string|null; endsAt:string|null; createdAt:string };
-type Job = { id:string; walletId:string; collectionId:string; status:string; quantity:number; scheduledAt:string|null; createdAt:string; error?:string|null };
+type Wallet = { id: string; label: string; address: string; chainId: number; role: "main" | "worker"; active: boolean };
+type Collection = { id: string; name: string; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseStatus: string; startsAt: string | null; endsAt: string | null; createdAt: string };
+type Attempt = { id: string; kind: "approval" | "mint"; status: string; txHash: string | null; gasUsed: string | null; effectiveGasPrice: string | null; error: string | null };
+type Job = { id: string; batchId: string | null; walletId: string; collectionId: string; status: string; quantity: number; dryRun: boolean; scheduledAt: string | null; createdAt: string; error?: string | null; attempts: Attempt[] };
 
-const short = (v:string) => `${v.slice(0,6)}…${v.slice(-5)}`;
+const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-5)}`;
+async function json(response: Response) {
+  const text = await response.text();
+  let data: unknown;
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(`Server returned an invalid response (${response.status})`); }
+  if (!response.ok) throw new Error(typeof data === "object" && data && "error" in data ? String(data.error) : `Request failed (${response.status})`);
+  return data;
+}
 
 export default function MintsPage() {
-  const [query,setQuery]=useState(""); const [wallets,setWallets]=useState<Wallet[]>([]); const [collections,setCollections]=useState<Collection[]>([]); const [jobs,setJobs]=useState<Job[]>([]);
-  const [project,setProject]=useState<Collection|null>(null); const [selected,setSelected]=useState<Set<string>>(new Set()); const [qty,setQty]=useState(1);
-  const [message,setMessage]=useState(""); const [busy,setBusy]=useState(false); const [expanded,setExpanded]=useState<string|null>(null); const [tab,setTab]=useState("minted");
-  const load=()=>Promise.all([fetch("/api/wallets").then(r=>r.json()),fetch("/api/collections").then(r=>r.json()),fetch("/api/jobs?limit=100").then(r=>r.json())]).then(([w,c,j])=>{setWallets(Array.isArray(w)?w:[]);setCollections(Array.isArray(c)?c:[]);setJobs(Array.isArray(j)?j:[])}).catch(()=>{});
-  useEffect(()=>{load()},[]);
-  const compatible=useMemo(()=>project?wallets.filter(w=>w.chainId===project.chainId):wallets,[wallets,project]);
-  const resolve=async()=>{setBusy(true);setMessage("Scanning supported mint adapters…");try{const response=await fetch("/api/mints/resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input:query})});const data=await response.json();if(!response.ok||!data.supported)throw new Error(data.reason||"This mint isn’t supported yet");const phase=data.phases?.find((item:{status:string})=>item.status==="live")||data.phases?.[0];setProject({id:data.collectionId,name:data.name,contractAddress:data.contractAddress,chainId:data.chainId,mintPrice:phase?.priceWei||null,maxPerWallet:phase?.maxPerWallet||null,maxSupply:data.maxSupply||null,currentSupply:data.currentSupply??null,phaseStatus:phase?.status||"unknown",startsAt:phase?.startsAt||null,endsAt:phase?.endsAt||null,createdAt:""});setMessage("");setSelected(new Set())}catch(error){setProject(null);setMessage(error instanceof Error?error.message:"This mint isn’t supported yet")}finally{setBusy(false)}};
-  const toggle=(id:string)=>setSelected(p=>{const n=new Set(p);if(n.has(id))n.delete(id);else n.add(id);return n});
-  const schedule=async()=>{if(!project||!selected.size)return;setBusy(true);setMessage("");try{const idempotencyKey=crypto.randomUUID();const contractStart=project.startsAt&&Date.parse(project.startsAt)>Date.now()?project.startsAt:undefined;const r=await fetch("/api/jobs/batch",{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify({collectionId:project.id,walletIds:[...selected],quantity:qty,scheduledAt:contractStart})});const d=await r.json();if(!r.ok)throw new Error(d.error);setMessage(`${selected.size} mint task${selected.size>1?"s":""} scheduled ${contractStart?"for the contract opening time":"to run now"}.`);await load()}catch(e){setMessage(e instanceof Error?e.message:"Could not schedule mint")}finally{setBusy(false)}};
-  const formatPrice=(wei:string|null)=>wei?`${ethers.formatEther(wei)} ETH`:"FREE";
-  const groups=useMemo(()=>{const map=new Map<string,Job[]>();jobs.forEach(j=>map.set(j.collectionId,[...(map.get(j.collectionId)||[]),j]));return [...map.entries()]},[jobs]);
+  const [query, setQuery] = useState("");
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [project, setProject] = useState<Collection | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [qty, setQty] = useState(1);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [tab, setTab] = useState("minted");
+
+  const load = async () => {
+    const [walletData, collectionData, jobData] = await Promise.all([
+      fetch("/api/wallets", { cache: "no-store" }).then(json),
+      fetch("/api/collections", { cache: "no-store" }).then(json),
+      fetch("/api/jobs?limit=200", { cache: "no-store" }).then(json),
+    ]);
+    setWallets(Array.isArray(walletData) ? walletData as Wallet[] : []);
+    setCollections(Array.isArray(collectionData) ? collectionData as Collection[] : []);
+    setJobs(Array.isArray(jobData) ? jobData as Job[] : []);
+  };
+
+  useEffect(() => {
+    const initial = setTimeout(() => void load().catch((error) => setMessage(error instanceof Error ? error.message : "Could not load MintBot")), 0);
+    const interval = setInterval(() => void load().catch(() => undefined), 5_000);
+    return () => { clearTimeout(initial); clearInterval(interval); };
+  }, []);
+
+  const compatible = useMemo(
+    () => project ? wallets.filter((wallet) => wallet.chainId === project.chainId && wallet.role === "worker" && wallet.active) : [],
+    [wallets, project],
+  );
+
+  const resolve = async () => {
+    setBusy(true);
+    setMessage("Scanning supported mint adapters…");
+    try {
+      const response = await fetch("/api/mints/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: query }) });
+      const data = await json(response) as Record<string, unknown>;
+      if (!data.supported) throw new Error(String(data.reason || "This mint isn’t supported yet"));
+      const phases = Array.isArray(data.phases) ? data.phases as Array<Record<string, unknown>> : [];
+      const phase = phases.find((item) => item.status === "live") || phases.find((item) => item.status === "upcoming") || phases[0];
+      setProject({
+        id: String(data.collectionId), name: String(data.name), contractAddress: String(data.contractAddress), chainId: Number(data.chainId),
+        mintPrice: phase?.priceWei ? String(phase.priceWei) : null, maxPerWallet: phase?.maxPerWallet ? Number(phase.maxPerWallet) : null,
+        maxSupply: data.maxSupply ? Number(data.maxSupply) : null, currentSupply: data.currentSupply == null ? null : Number(data.currentSupply),
+        phaseStatus: String(phase?.status || "unknown"), startsAt: phase?.startsAt ? String(phase.startsAt) : null,
+        endsAt: phase?.endsAt ? String(phase.endsAt) : null, createdAt: "",
+      });
+      setQty(1);
+      setSelected(new Set());
+      setMessage("");
+    } catch (error) {
+      setProject(null);
+      setMessage(error instanceof Error ? error.message : "This mint isn’t supported yet");
+    } finally { setBusy(false); }
+  };
+
+  const toggle = (id: string) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const schedule = async () => {
+    if (!project || !selected.size) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/jobs/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ collectionId: project.id, walletIds: [...selected], quantity: qty }),
+      });
+      const data = await json(response) as { scheduledAt?: string | null };
+      setMessage(data.scheduledAt
+        ? `${selected.size} mint task${selected.size > 1 ? "s" : ""} queued for the verified contract opening time. Broadcasting can remain locked until your final verification.`
+        : `${selected.size} mint task${selected.size > 1 ? "s" : ""} queued. Broadcasting waits safely if the live gate is locked.`);
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not schedule mint"); }
+    finally { setBusy(false); }
+  };
+
+  const formatPrice = (wei: string | null) => wei ? `${ethers.formatEther(wei)} ETH` : "FREE";
+  const groups = useMemo(() => {
+    const map = new Map<string, Job[]>();
+    for (const job of jobs) {
+      const key = job.batchId || job.id;
+      map.set(key, [...(map.get(key) || []), job]);
+    }
+    return [...map.entries()];
+  }, [jobs]);
+
   return <>
     <div className="page-heading"><div><h1>Mints</h1><p>Paste a supported mint link and we&apos;ll handle the rest.</p></div></div>
-    <div className="search-box"><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&resolve()} placeholder="Paste mint URL, contract, or project name"/><button disabled={busy} onClick={resolve}>{busy?"Checking…":"Find mint →"}</button></div>
-    {message&&<div className="alert" style={{marginBottom:18}}>{message}</div>}
-    {!project?<div className="panel empty"><div><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M20 4c-8 0-14 3.5-14 10 0 3 2 5 5 5 6.5 0 9-7 9-15Z"/><path d="M4 21c2-5 6-8 11-11"/></svg><h2>No mint selected</h2><p>Supported and scheduled mints will appear here.</p></div></div>:
-    <section className="panel mint-card">
-      <div className="mint-hero"><div className="mint-identity"><div className="project-art">◈</div><div className="mint-title"><h2>{project.name}</h2><p>{short(project.contractAddress)} · Chain {project.chainId}</p></div></div><div className="supply"><b>{project.maxSupply?`${(project.currentSupply||0).toLocaleString()} / ${project.maxSupply.toLocaleString()}`:"Live mint"}</b><span>On-chain supply</span><div className="progress"><i style={{width:project.maxSupply?`${Math.min(100,((project.currentSupply||0)/project.maxSupply)*100)}%`:"0%"}}/></div></div></div>
-      <div className="mint-body"><div className="mint-grid"><div className="phase-list"><div className="phase"><div className="phase-top"><h3>PUBLIC</h3><span className="status">{project.phaseStatus==="upcoming"?"Upcoming":"Supported"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(project.mintPrice)}</strong></span><span className="chip">MAX · <strong>{project.maxPerWallet||"—"}</strong></span><span className="chip">ELIGIBLE · <strong>{compatible.length}</strong></span></div></div><div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{fontSize:12}}>Automatic gas</span></div><div className="field" style={{marginTop:12}}><label>Quantity per wallet</label><div className="amount-row"><input type="number" min="1" max={project.maxPerWallet||100} value={qty} onChange={e=>setQty(Math.min(project.maxPerWallet||100,Math.max(1,Number(e.target.value))))}/><button className="secondary-btn" onClick={()=>setQty(project.maxPerWallet||1)}>Max</button></div></div></div></div>
-        <div className="schedule-box"><div className="field"><label>Wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length?compatible.map(w=><label className="wallet-option" key={w.id}><input type="checkbox" checked={selected.has(w.id)} onChange={()=>toggle(w.id)}/><span>{w.label}</span><small>{short(w.address)}</small></label>):<div className="wallet-option muted">No compatible wallets</div>}</div></div><div className="field"><label>Contract schedule</label><div className="alert">{project.phaseStatus==="upcoming"&&project.startsAt?`Automatically scheduled for ${formatContractTime(project.startsAt)}`:formatContractTime(null)}</div></div><button className="primary-btn" disabled={!selected.size||busy} onClick={schedule}>{busy?"Scheduling…":"Schedule mint →"}</button><div className="alert">Transactions are simulated before broadcast. Gas and nonce are handled automatically.</div></div>
-      </div></div>
-    </section>}
-    {groups.length>0&&<section className="scheduled"><div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{fontSize:12}}>{jobs.length} tasks</span></div>{groups.map(([cid,items])=>{const c=collections.find(x=>x.id===cid);const id=cid;const success=items.filter(x=>x.status==="completed").length;return <div className="panel job" key={id}><div className="job-summary" onClick={()=>setExpanded(expanded===id?null:id)}><div className="job-art"/><div className="job-main"><b>{c?.name||"Supported mint"}</b><span>{items.length} wallets · {items.reduce((a,b)=>a+b.quantity,0)} total · {success} hits</span></div><span className="status">{items.some(x=>x.status==="running")?"Running":items.some(x=>x.status==="pending")?"Scheduled":"Finished"}</span><span>{expanded===id?"⌃":"⌄"}</span></div>{expanded===id&&<div className="result-panel"><div className="result-tabs">{["minted","transactions","analytics"].map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t[0].toUpperCase()+t.slice(1)}</button>)}</div>{tab==="analytics"?<div className="summary-box"><div className="summary-line"><span>Total tasks</span><b>{items.length}</b></div><div className="summary-line"><span>Successful hits</span><b className="ok">{success}</b></div><div className="summary-line"><span>Failed</span><b className="failed">{items.filter(x=>x.status==="failed").length}</b></div><div className="summary-line"><span>Hit rate</span><b>{items.length?Math.round(success/items.length*100):0}%</b></div></div>:<table className="result-table"><thead><tr><th>Status</th><th>{tab==="minted"?"Wallet":"Task"}</th><th>Amount</th><th>Result</th></tr></thead><tbody>{items.map(j=>{const w=wallets.find(x=>x.id===j.walletId);return <tr key={j.id}><td className={j.status==="failed"?"failed":"ok"}>{j.status==="failed"?"✕":"✓"}</td><td className="mono">{tab==="minted"?short(w?.address||j.walletId):short(j.id)}</td><td>{j.quantity}</td><td>{j.error||j.status}</td></tr>})}</tbody></table>}</div>}</div>})}</section>}
+    <div className="search-box"><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void resolve()} placeholder="Paste mint URL, contract, or project name"/><button disabled={busy || !query.trim()} onClick={() => void resolve()}>{busy ? "Checking…" : "Find mint →"}</button></div>
+    {message && <div className="alert" style={{ marginBottom: 18 }}>{message}</div>}
+    {!project ? <div className="panel empty"><div><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M20 4c-8 0-14 3.5-14 10 0 3 2 5 5 5 6.5 0 9-7 9-15Z"/><path d="M4 21c2-5 6-8 11-11"/></svg><h2>No mint selected</h2><p>Supported and scheduled mints will appear here.</p></div></div> :
+      <section className="panel mint-card">
+        <div className="mint-hero"><div className="mint-identity"><div className="project-art">◈</div><div className="mint-title"><h2>{project.name}</h2><p>{short(project.contractAddress)} · Chain {project.chainId}</p></div></div><div className="supply"><b>{project.maxSupply ? `${(project.currentSupply || 0).toLocaleString()} / ${project.maxSupply.toLocaleString()}` : "Supported mint"}</b><span>On-chain supply</span><div className="progress"><i style={{ width: project.maxSupply ? `${Math.min(100, ((project.currentSupply || 0) / project.maxSupply) * 100)}%` : "0%" }}/></div></div></div>
+        <div className="mint-body"><div className="mint-grid"><div className="phase-list"><div className="phase"><div className="phase-top"><h3>PUBLIC</h3><span className="status">{project.phaseStatus === "live" ? "Live" : project.phaseStatus === "upcoming" ? "Upcoming" : "Ended"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(project.mintPrice)}</strong></span><span className="chip">MAX · <strong>{project.maxPerWallet || "—"}</strong></span><span className="chip">ELIGIBLE · <strong>{compatible.length}</strong></span></div></div><div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{ fontSize: 12 }}>Automatic gas</span></div><div className="field" style={{ marginTop: 12 }}><label>Quantity per wallet</label><div className="amount-row"><input type="number" min="1" max={project.maxPerWallet || 100} value={qty} onChange={(event) => setQty(Math.min(project.maxPerWallet || 100, Math.max(1, Number(event.target.value) || 1)))}/><button className="secondary-btn" onClick={() => setQty(project.maxPerWallet || 1)}>Max</button></div></div></div></div>
+          <div className="schedule-box"><div className="field"><label>Active worker wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => <label className="wallet-option" key={wallet.id}><input type="checkbox" checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label}</span><small>{short(wallet.address)}</small></label>) : <div className="wallet-option muted">No compatible active workers</div>}</div></div><div className="field"><label>Contract schedule</label><div className="alert">{project.phaseStatus === "upcoming" && project.startsAt ? `Server schedules against ${formatContractTime(project.startsAt)}` : project.phaseStatus === "ended" ? "This reviewed phase has ended." : formatContractTime(null)}</div></div><button className="primary-btn" disabled={!selected.size || busy || project.phaseStatus === "ended"} onClick={() => void schedule()}>{busy ? "Scheduling…" : "Schedule mint →"}</button><div className="alert">Every transaction uses the selected wallet as the simulation sender. A signed transaction is durably recorded before any broadcast.</div></div>
+        </div></div>
+      </section>}
+    {groups.length > 0 && <section className="scheduled"><div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{ fontSize: 12 }}>{jobs.length} tasks</span></div>{groups.map(([batchId, items]) => {
+      const collection = collections.find((item) => item.id === items[0]?.collectionId);
+      const confirmed = items.filter((item) => item.status === "completed" && !item.dryRun).length;
+      const simulated = items.filter((item) => item.status === "completed" && item.dryRun).length;
+      return <div className="panel job" key={batchId}><div className="job-summary" onClick={() => setExpanded(expanded === batchId ? null : batchId)}><div className="job-art"/><div className="job-main"><b>{collection?.name || "Supported mint"}</b><span>{items.length} wallets · {items.reduce((total, item) => total + item.quantity, 0)} total · {confirmed} confirmed{simulated ? ` · ${simulated} simulated` : ""}</span></div><span className="status">{items.some((item) => ["running", "confirming"].includes(item.status)) ? "Running" : items.some((item) => item.status === "pending") ? "Scheduled" : "Finished"}</span><span>{expanded === batchId ? "⌃" : "⌄"}</span></div>{expanded === batchId && <div className="result-panel"><div className="result-tabs">{["minted", "transactions", "analytics"].map((name) => <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>{name[0].toUpperCase() + name.slice(1)}</button>)}</div>{tab === "analytics" ? <div className="summary-box"><div className="summary-line"><span>Total tasks</span><b>{items.length}</b></div><div className="summary-line"><span>Confirmed mints</span><b className="ok">{confirmed}</b></div><div className="summary-line"><span>Simulation-only passes</span><b>{simulated}</b></div><div className="summary-line"><span>Failed</span><b className="failed">{items.filter((item) => item.status === "failed").length}</b></div></div> : <table className="result-table"><thead><tr><th>Status</th><th>{tab === "minted" ? "Wallet" : "Transaction"}</th><th>Amount</th><th>Result</th></tr></thead><tbody>{items.map((job) => {
+        const wallet = wallets.find((item) => item.id === job.walletId);
+        const attempt = job.attempts?.find((item) => item.kind === "mint") || job.attempts?.[0];
+        const status = job.dryRun && job.status === "completed" ? "simulation passed" : attempt?.status || job.status;
+        const gas = attempt?.gasUsed && attempt?.effectiveGasPrice ? `${ethers.formatEther(BigInt(attempt.gasUsed) * BigInt(attempt.effectiveGasPrice))} ETH gas` : null;
+        return <tr key={job.id}><td className={job.status === "failed" ? "failed" : job.status === "completed" ? "ok" : ""}>{job.status === "failed" ? "✕" : job.status === "completed" ? "✓" : "…"}</td><td className="mono">{tab === "minted" ? short(wallet?.address || job.walletId) : attempt?.txHash ? short(attempt.txHash) : "No broadcast"}</td><td>{job.quantity}</td><td>{job.error || attempt?.error || `${status}${gas ? ` · ${gas}` : ""}`}</td></tr>;
+      })}</tbody></table>}</div>}</div>;
+    })}</section>}
   </>;
 }

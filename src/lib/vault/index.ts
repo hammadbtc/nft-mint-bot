@@ -15,48 +15,38 @@ export interface WalletImport {
   parentWalletId?: string;
 }
 
+export function prepareWalletRecord(input: WalletImport) {
+  let wallet: ethers.Wallet | ethers.HDNodeWallet;
+  const hdPath = input.keyType === "mnemonic" ? input.hdPath || "m/44'/60'/0'/0/0" : null;
+  if (input.keyType === "mnemonic") wallet = ethers.HDNodeWallet.fromPhrase(input.key, undefined, hdPath!);
+  else wallet = new ethers.Wallet(input.key);
+
+  const id = uuidv4();
+  return {
+    record: {
+      id,
+      label: input.label,
+      address: wallet.address,
+      chainId: input.chainId,
+      encryptedKey: encryptPrivateKey(input.key),
+      keyFormat: input.keyType,
+      spendLimit: input.spendLimit || null,
+      hdPath,
+      role: input.role || "worker",
+      parentWalletId: input.parentWalletId || null,
+    },
+    publicWallet: { id, label: input.label, address: wallet.address, chainId: input.chainId, keyFormat: input.keyType },
+  };
+}
+
 /**
  * Import a wallet: derive address from key/mnemonic, encrypt the raw key, store in DB.
  * For mnemonics, uses HD derivation with configurable path.
  */
 export async function importWallet(input: WalletImport) {
-  let wallet: ethers.Wallet | ethers.HDNodeWallet;
-  let address: string;
-
-  if (input.keyType === "mnemonic") {
-    // Use HD derivation
-    const hdPath = input.hdPath || "m/44'/60'/0'/0/0"; // default: first ETH account (MetaMask standard)
-    const hdWallet = ethers.HDNodeWallet.fromPhrase(input.key, undefined, hdPath);
-    address = hdWallet.address;
-    wallet = hdWallet;
-  } else {
-    wallet = new ethers.Wallet(input.key);
-    address = wallet.address;
-  }
-
-  const encrypted = encryptPrivateKey(input.key);
-  const id = uuidv4();
-
-  await db.insert(schema.wallets).values({
-    id,
-    label: input.label,
-    address,
-    chainId: input.chainId,
-    encryptedKey: encrypted,
-    keyFormat: input.keyType,
-    spendLimit: input.spendLimit || null,
-    hdPath: input.hdPath || null,
-    role: input.role || "worker",
-    parentWalletId: input.parentWalletId || null,
-  });
-
-  return {
-    id,
-    label: input.label,
-    address,
-    chainId: input.chainId,
-    keyFormat: input.keyType,
-  };
+  const prepared = prepareWalletRecord(input);
+  await db.insert(schema.wallets).values(prepared.record);
+  return prepared.publicWallet;
 }
 
 /**

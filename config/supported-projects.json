@@ -18,8 +18,8 @@
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "urlMatchers": [
-        { "domain": "opensea.io", "pathPrefix": "/collection/cash-rabbits" },
-        { "domain": "robinhoodchain.blockscout.com", "pathPrefix": "/address/0x5b05c950993705416c9069d43ee70b564a875e40" }
+        { "domain": "opensea.io", "path": "/collection/cash-rabbits" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x5b05c950993705416c9069d43ee70b564a875e40" }
       ]
     }
   }

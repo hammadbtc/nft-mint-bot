@@ -6,7 +6,7 @@ type AlertType = "job_failed" | "rpc_down" | "job_stuck" | "batch_complete" | "f
 
 /**
  * Send an alert notification. Currently supports Discord webhook.
- * Configure DISCORD_ALERT_WEBHOOK in .env to enable.
+ * Configure DISCORD_WEBHOOK_URL in .env to enable.
  */
 export async function sendAlert(
   type: AlertType,
@@ -15,7 +15,7 @@ export async function sendAlert(
   channel: "discord" | "email" = "discord"
 ): Promise<void> {
   const id = uuidv4();
-  const webhookUrl = process.env.DISCORD_ALERT_WEBHOOK;
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL || process.env.DISCORD_ALERT_WEBHOOK;
 
   // Log to DB regardless
   await db.insert(schema.alertLog).values({
@@ -24,7 +24,7 @@ export async function sendAlert(
     message,
     channel,
     jobId: jobId || null,
-    status: webhookUrl ? "sent" : "failed",
+    status: webhookUrl ? "pending" : "disabled",
   });
 
   if (!webhookUrl) return;
@@ -56,6 +56,7 @@ export async function sendAlert(
     const resp = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         embeds: [
           {
@@ -74,9 +75,9 @@ export async function sendAlert(
         .update(schema.alertLog)
         .set({ status: resp.status === 429 ? "rate_limited" : "failed" })
         .where(eq(schema.alertLog.id, id));
-    }
+    } else await db.update(schema.alertLog).set({ status: "sent" }).where(eq(schema.alertLog.id, id));
   } catch (err) {
-    console.error("Alert delivery failed:", err);
+    console.error("Alert delivery failed:", err instanceof Error ? err.name : "unknown error");
     await db
       .update(schema.alertLog)
       .set({ status: "failed" })

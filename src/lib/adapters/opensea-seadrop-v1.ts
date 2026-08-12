@@ -4,6 +4,7 @@ import type { MintAdapter, MintPhase, ResolvedMint, SupportedCollection } from "
 
 const SEA_DROP_READ_ABI = [
   "function getPublicDrop(address nftContract) view returns (tuple(uint80 mintPrice,uint48 startTime,uint48 endTime,uint16 maxTotalMintableByWallet,uint16 feeBps,bool restrictFeeRecipients))",
+  "function getAllowedFeeRecipients(address nftContract) view returns (address[])",
 ];
 const SEA_DROP_MINT_ABI = [
   "function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable",
@@ -18,7 +19,7 @@ type SeaDropConfig = {
   seaDropAddress: string;
   feeRecipient: string;
   phases?: Array<{ id?: string; name: string; startsAt?: string; endsAt?: string; priceWei?: string; maxPerWallet?: number }>;
-  urlMatchers?: Array<{ domain: string; pathPrefix?: string }>;
+  urlMatchers?: Array<{ domain: string; path?: string; pathPrefix?: string }>;
 };
 
 function configFor(collection: SupportedCollection): SeaDropConfig {
@@ -31,23 +32,35 @@ function configFor(collection: SupportedCollection): SeaDropConfig {
   return config as SeaDropConfig;
 }
 
-function statusFor(startTime: bigint, endTime: bigint): MintPhase["status"] {
-  const now = BigInt(Math.floor(Date.now() / 1000));
+function statusFor(startTime: bigint, endTime: bigint, now: bigint): MintPhase["status"] {
   if (startTime > 0n && now < startTime) return "upcoming";
-  if (endTime > 0n && now > endTime) return "ended";
+  if (endTime > 0n && now >= endTime) return "ended";
   return "live";
 }
 
 async function publicDrop(collection: SupportedCollection, provider: ethers.Provider) {
   const config = configFor(collection);
   const seaDrop = new ethers.Contract(config.seaDropAddress, SEA_DROP_READ_ABI, provider);
-  const drop = await seaDrop.getFunction("getPublicDrop").staticCall(collection.contractAddress);
+  const [drop, latestBlock] = await Promise.all([
+    seaDrop.getFunction("getPublicDrop").staticCall(collection.contractAddress),
+    provider.getBlock("latest"),
+  ]);
+  if (!latestBlock) throw new Error("RPC did not return the latest block for phase verification");
+  const restrictFeeRecipients = Boolean(drop.restrictFeeRecipients);
+  if (restrictFeeRecipients) {
+    const recipients: string[] = await seaDrop.getFunction("getAllowedFeeRecipients").staticCall(collection.contractAddress);
+    if (!recipients.some((recipient) => recipient.toLowerCase() === config.feeRecipient.toLowerCase())) {
+      throw new Error("The reviewed SeaDrop fee recipient is no longer allowed");
+    }
+  }
   return {
     config,
     mintPrice: BigInt(drop.mintPrice),
     startTime: BigInt(drop.startTime),
     endTime: BigInt(drop.endTime),
     maxPerWallet: Number(drop.maxTotalMintableByWallet),
+    restrictFeeRecipients,
+    chainTimestamp: BigInt(latestBlock.timestamp),
   };
 }
 
@@ -56,7 +69,7 @@ export const openseaSeaDropV1: MintAdapter = {
 
   async resolve(collection, source): Promise<ResolvedMint> {
     const provider = getProvider(collection.chainId);
-    const { mintPrice, startTime, endTime, maxPerWallet } = await publicDrop(collection, provider);
+    const { mintPrice, startTime, endTime, maxPerWallet, chainTimestamp } = await publicDrop(collection, provider);
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
     const [maxSupplyValue, currentSupplyValue] = await Promise.all([
       nft.getFunction("maxSupply").staticCall(),
@@ -81,7 +94,7 @@ export const openseaSeaDropV1: MintAdapter = {
       phases: [{
         id: "public",
         name: "Public Mint",
-        status: statusFor(startTime, endTime),
+        status: statusFor(startTime, endTime, chainTimestamp),
         startsAt,
         endsAt,
         priceWei: mintPrice.toString(),
@@ -93,10 +106,9 @@ export const openseaSeaDropV1: MintAdapter = {
 
   async buildTransaction(collection, signerAddress, quantity, provider) {
     if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Mint quantity must be a positive integer");
-    const { config, mintPrice, startTime, endTime, maxPerWallet } = await publicDrop(collection, provider);
-    const now = BigInt(Math.floor(Date.now() / 1000));
+    const { config, mintPrice, startTime, endTime, maxPerWallet, chainTimestamp: now } = await publicDrop(collection, provider);
     if (startTime > 0n && now < startTime) throw new Error("Public mint has not started");
-    if (endTime > 0n && now > endTime) throw new Error("Public mint has ended");
+    if (endTime > 0n && now >= endTime) throw new Error("Public mint has ended");
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
     const [minted, supply, maxSupply] = await nft.getFunction("getMintStats").staticCall(signerAddress);
     if (BigInt(minted) + BigInt(quantity) > BigInt(maxPerWallet)) throw new Error(`Quantity exceeds the ${maxPerWallet} per-wallet public mint limit`);
@@ -104,7 +116,7 @@ export const openseaSeaDropV1: MintAdapter = {
     const iface = new ethers.Interface(SEA_DROP_MINT_ABI);
     return {
       to: config.seaDropAddress,
-      data: iface.encodeFunctionData("mintPublic", [collection.contractAddress, config.feeRecipient, signerAddress, quantity]),
+      data: iface.encodeFunctionData("mintPublic", [collection.contractAddress, config.feeRecipient, ethers.ZeroAddress, quantity]),
       value: mintPrice * BigInt(quantity),
       chainId: collection.chainId,
     };
@@ -112,5 +124,6 @@ export const openseaSeaDropV1: MintAdapter = {
 };
 
 export function encodeSeaDropPublicMint(collectionAddress: string, feeRecipient: string, signerAddress: string, quantity: number) {
-  return new ethers.Interface(SEA_DROP_MINT_ABI).encodeFunctionData("mintPublic", [collectionAddress, feeRecipient, signerAddress, quantity]);
+  void signerAddress;
+  return new ethers.Interface(SEA_DROP_MINT_ABI).encodeFunctionData("mintPublic", [collectionAddress, feeRecipient, ethers.ZeroAddress, quantity]);
 }

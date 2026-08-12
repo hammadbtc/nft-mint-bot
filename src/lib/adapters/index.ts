@@ -24,15 +24,25 @@ function safeUrl(input: string): URL | null {
   catch { return null; }
 }
 
+function normalizePath(value: string): string {
+  const path = value.replace(/\/{2,}/g, "/").replace(/\/$/, "");
+  return path || "/";
+}
+
+export function exactUrlPathMatches(pathname: string, expected: string): boolean {
+  return normalizePath(pathname).toLowerCase() === normalizePath(expected).toLowerCase();
+}
+
 function urlMatches(collection: SupportedCollection, url: URL): boolean {
   const hostname = normalizeDomain(url.hostname);
   if (!parseDomains(collection.domains).some((domain) => hostname === domain)) return false;
   try {
-    const config = JSON.parse(collection.adapterConfig || "{}") as { urlMatchers?: Array<{ domain?: string; pathPrefix?: string }> };
+    const config = JSON.parse(collection.adapterConfig || "{}") as { urlMatchers?: Array<{ domain?: string; path?: string; pathPrefix?: string }> };
     if (!config.urlMatchers?.length) return true;
     return config.urlMatchers.some((matcher) => {
       if (!matcher.domain || normalizeDomain(matcher.domain) !== hostname) return false;
-      return !matcher.pathPrefix || url.pathname.toLowerCase().startsWith(matcher.pathPrefix.toLowerCase());
+      const reviewedPath = matcher.path || matcher.pathPrefix;
+      return !reviewedPath || exactUrlPathMatches(url.pathname, reviewedPath);
     });
   } catch { return false; }
 }

@@ -1,3 +1,4 @@
+import { ethers } from "ethers";
 import type { MintAdapter, MintPhase, ResolvedMint } from "./types";
 
 type AdapterConfig = {
@@ -9,7 +10,7 @@ function phaseStatus(phase: NonNullable<AdapterConfig["phases"]>[number]): MintP
   const starts = phase.startsAt ? Date.parse(phase.startsAt) : NaN;
   const ends = phase.endsAt ? Date.parse(phase.endsAt) : NaN;
   if (Number.isFinite(starts) && now < starts) return "upcoming";
-  if (Number.isFinite(ends) && now > ends) return "ended";
+  if (Number.isFinite(ends) && now >= ends) return "ended";
   if (Number.isFinite(starts) || Number.isFinite(ends)) return "live";
   return "unknown";
 }
@@ -34,6 +35,25 @@ export const evmContractV1: MintAdapter = {
       slug:collection.slug || undefined, chainId:collection.chainId, contractAddress:collection.contractAddress,
       siteUrl:collection.siteUrl || undefined, imageUrl:collection.imageUrl || undefined,
       maxSupply:collection.maxSupply || undefined, phases, source,
+    };
+  },
+
+  async buildTransaction(collection, _signerAddress, quantity): Promise<ethers.TransactionRequest> {
+    let mintAbi: ethers.InterfaceAbi;
+    try { mintAbi = JSON.parse(collection.mintAbi); }
+    catch { throw new Error("Supported mint has an invalid reviewed ABI"); }
+    const iface = new ethers.Interface(mintAbi);
+    const fragment = iface.getFunction(collection.mintMethod);
+    if (!fragment) throw new Error("Reviewed mint function is missing from the ABI");
+    let data: string;
+    if (fragment.inputs.length === 0) data = iface.encodeFunctionData(fragment, []);
+    else if (fragment.inputs.length === 1 && /^u?int/.test(fragment.inputs[0].type)) data = iface.encodeFunctionData(fragment, [quantity]);
+    else throw new Error("Generic mint adapter only supports a verified quantity argument or no arguments");
+    return {
+      to: collection.contractAddress,
+      data,
+      value: collection.paymentToken ? 0n : BigInt(collection.mintPrice || "0") * BigInt(quantity),
+      chainId: collection.chainId,
     };
   },
 };

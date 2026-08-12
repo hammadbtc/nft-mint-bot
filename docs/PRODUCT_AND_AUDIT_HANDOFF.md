@@ -47,11 +47,11 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 ## Reliability rules
 
 - Validate wallet/project/chain compatibility and quantities before creating jobs.
-- Simulate the exact transaction before broadcast.
+- Simulate and estimate the exact transaction with the signing wallet as `from` before broadcast.
 - Use an idempotency key to prevent duplicate task creation.
 - Claim scheduled jobs atomically and recover stale claims after process restarts.
-- Never retry an ambiguous broadcast as if it were a pre-broadcast failure.
-- Persist transaction hashes as soon as broadcast succeeds.
+- Persist the exact signed raw transaction and precomputed hash before broadcast; reconcile or rebroadcast those exact bytes after ambiguity/restart.
+- Reserve nonces under a PostgreSQL advisory lock shared by Mint and Disperse.
 - Report confirmed success only from a successful receipt.
 - External races, sell-outs, project pauses and provider outages mean a 100% hit rate cannot be guaranteed.
 
@@ -69,13 +69,14 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - One main wallet per network; workers must be independent same-network children of that main.
 - Generated worker keys are returned once with no-cache headers for immediate backup.
 - Exact verified domain/contract/name resolution through a registered adapter; unsupported inputs are rejected.
-- Batch requests validate support, quantity and network, enqueue quickly and use per-wallet idempotency keys.
-- Scheduled jobs are atomically claimed. Transaction hashes are persisted before receipt waiting; ambiguous broadcasts are never retried automatically.
-- Disperse supports only fund-workers and sweep-to-main, requires a fresh exact preview and is disabled for live broadcasting by default.
-- Production access fails closed unless Basic Auth or an IP allowlist is configured. Adapter registration requires a separate admin token.
+- Batch requests validate active verified support, server-resolved phase timing, quantity, worker role and network, then create the whole batch atomically under an idempotency lock.
+- Jobs may be scheduled while broadcasting is locked. The scheduler holds live work until both safety gates are enabled, while dry-runs can execute.
+- Scheduled jobs and Disperse operations use expiring leases and restart recovery. Confirmed ERC-20 approvals resume the mint rather than counting as a completed mint.
+- Disperse supports only fund-workers and sweep-to-main, requires a fresh fingerprinted fee/balance preview, queues atomically, and persists signed transfers before broadcast.
+- Production access fails closed unless Basic Auth or an IP allowlist is configured. Cross-site mutations are rejected, security headers are set, secret comparisons are constant-time and adapter registration requires a separate admin token.
 - Old V1 UI and unused FCFS/scanner/safety/analytics/config APIs were removed.
-- Runtime high-severity dependency findings were patched. Remaining audit findings are moderate and confined to the development-only Drizzle CLI dependency chain.
-- Robinhood Chain mainnet is configured as chain ID 4663 with the official public RPC and Blockscout explorer.
+- `npm audit` reports zero known vulnerabilities after pinning the patched esbuild dependency used by tooling.
+- Robinhood Chain mainnet is configured as chain ID 4663 with Alchemy/custom provider support, official public fallback, request timeouts and RPC failover. Live validation requires a second configured provider.
 - Railway predeploy runs an idempotent reviewed-project seed and explicitly disables entries in `config/disabled-projects.json`.
 
 ## Current reviewed project state
@@ -90,8 +91,8 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Five unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, reviewed adapter parsing/rejection and exact SeaDrop calldata shape.
-- Exact Hoodiez public calldata previously passed `eth_call` and gas estimation without broadcasting. Cash Rabbits exact calldata was constructed before its public opening and correctly reverted pre-open. Re-run Cash Rabbits simulation after opening.
+- Seventeen unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path rejection, reviewed adapter parsing, phase/recovery policy, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
+- Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Live blockchain execution has intentionally not been enabled or claimed as end-to-end tested.
 
 ## Required external configuration before live funds
@@ -106,4 +107,4 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 
 Review schema migrations, secret lifecycle, authorization assumptions, URL/domain matching, adapter transaction construction, allowlist proof/signature handling, nonce allocation, job claiming, idempotency, retry classification, broadcast persistence, receipt interpretation, RPC failover, Disperse totals, gas reserve logic, sweep behavior, logging redaction, dependency audit and restart recovery. Run unit, integration, production build and testnet end-to-end tests before enabling mainnet.
 
-Start by verifying GitHub/local head `be8c6ff`, Railway deploy/predeploy logs, Hoodiez deactivation and Cash Rabbits resolution. Specifically audit two current scheduling concerns: non-dry-run job creation is blocked unless the global live flag is already enabled, and the browser currently sends the adapter start time to the batch API. Decide whether scheduling should be allowed safely while broadcasts remain disabled and enforce launch timing server-side so a modified client cannot bypass it. Do not enable live variables automatically.
+Verify the Railway deploy/predeploy logs, database hardening migration, Hoodiez deactivation, Cash Rabbits resolution, authenticated `/api/status`, locked broadcast badge and server-derived scheduling. Do not enable live variables automatically.

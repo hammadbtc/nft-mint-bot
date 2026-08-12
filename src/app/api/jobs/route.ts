@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get("status");
@@ -9,5 +9,10 @@ export async function GET(req: NextRequest) {
   const rows = await db.select().from(schema.mintJobs)
     .where(status ? eq(schema.mintJobs.status, status) : undefined)
     .orderBy(desc(schema.mintJobs.createdAt)).limit(limit);
-  return NextResponse.json(rows, { headers:{"Cache-Control":"no-store"} });
+  const attempts = rows.length
+    ? await db.select().from(schema.mintAttempts).where(inArray(schema.mintAttempts.jobId, rows.map((row) => row.id))).orderBy(desc(schema.mintAttempts.createdAt))
+    : [];
+  const byJob = new Map<string, typeof attempts>();
+  for (const attempt of attempts) byJob.set(attempt.jobId, [...(byJob.get(attempt.jobId) || []), { ...attempt, rawTx: null }]);
+  return NextResponse.json(rows.map((row) => ({ ...row, attempts: byJob.get(row.id) || [] })), { headers:{"Cache-Control":"no-store"} });
 }

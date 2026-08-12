@@ -21,12 +21,24 @@ const ALCHEMY_KEY = process.env.ALCHEMY_API_KEY;
 const HAS_ALCHEMY = !!(ALCHEMY_KEY && ALCHEMY_KEY.length > 10);
 const al = (path: string) => HAS_ALCHEMY ? `https://${path}.g.alchemy.com/v2/${ALCHEMY_KEY}` : false;
 
+function envRpcList(name: string): string[] {
+  return (process.env[name] || "").split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+function uniqueRpc(...urls: (string | false | undefined)[]): string[] {
+  return [...new Set(urls.filter((value): value is string => Boolean(value)))];
+}
+
 const CHAINS: Record<number, ChainConfig> = {
   4663: {
     id: 4663,
     name: "Robinhood Chain",
     symbol: "ETH",
-    rpcUrls: ["https://rpc.mainnet.chain.robinhood.com"],
+    rpcUrls: uniqueRpc(
+      ...envRpcList("ROBINHOOD_RPC_URLS"),
+      al("robinhood-mainnet"),
+      "https://rpc.mainnet.chain.robinhood.com",
+    ),
     explorerUrl: "https://robinhoodchain.blockscout.com",
   },
   1: {
@@ -113,12 +125,26 @@ const CHAINS: Record<number, ChainConfig> = {
 
 // In-memory provider cache
 const providerCache = new Map<string, ethers.JsonRpcProvider>();
+const failoverProviderCache = new Map<number, ethers.FallbackProvider>();
+
+function providerForUrl(url: string, chainId: number): ethers.JsonRpcProvider {
+  const request = new ethers.FetchRequest(url);
+  request.timeout = 12_000;
+  return new ethers.JsonRpcProvider(request, chainId, {
+    staticNetwork: true,
+    batchMaxCount: 1,
+  });
+}
 
 /**
  * Get a provider for a chain. Tries primary RPC first, falls back to alternates.
  * Caches the working provider.
  */
-export function getProvider(chainId: number): ethers.JsonRpcProvider {
+export function getProvider(chainId: number): ethers.Provider {
+  return getFailoverProvider(chainId);
+}
+
+export function getPrimaryProvider(chainId: number): ethers.JsonRpcProvider {
   const cacheKey = `chain-${chainId}`;
   if (providerCache.has(cacheKey)) {
     return providerCache.get(cacheKey)!;
@@ -128,9 +154,7 @@ export function getProvider(chainId: number): ethers.JsonRpcProvider {
   if (!chain) throw new Error(`Unknown chain ID: ${chainId}`);
 
   // Use first (primary) RPC URL
-  const provider = new ethers.JsonRpcProvider(chain.rpcUrls[0], chainId, {
-    staticNetwork: true, // avoids extra eth_chainId calls
-  });
+  const provider = providerForUrl(chain.rpcUrls[0], chainId);
 
   providerCache.set(cacheKey, provider);
   return provider;
@@ -140,14 +164,21 @@ export function getProvider(chainId: number): ethers.JsonRpcProvider {
  * Get a provider with built-in failover across all configured RPCs.
  */
 export function getFailoverProvider(chainId: number): ethers.FallbackProvider {
+  const cached = failoverProviderCache.get(chainId);
+  if (cached) return cached;
   const chain = CHAINS[chainId];
   if (!chain) throw new Error(`Unknown chain ID: ${chainId}`);
 
-  const providers = chain.rpcUrls.map(
-    (url) => new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true })
-  );
+  const providers = chain.rpcUrls.map((url, index) => ({
+    provider: providerForUrl(url, chainId),
+    priority: index + 1,
+    weight: 1,
+    stallTimeout: 1_000,
+  }));
 
-  return new ethers.FallbackProvider(providers, 1); // quorum of 1 = first success
+  const provider = new ethers.FallbackProvider(providers, undefined, { quorum: 1 });
+  failoverProviderCache.set(chainId, provider);
+  return provider;
 }
 
 /**
@@ -178,7 +209,7 @@ export async function checkRpcHealth(chainId: number): Promise<
   const results = await Promise.allSettled(
     chain.rpcUrls.map(async (url) => {
       const start = Date.now();
-      const provider = new ethers.JsonRpcProvider(url, chainId);
+      const provider = providerForUrl(url, chainId);
       await provider.getBlockNumber();
       return { url, status: "up" as const, latencyMs: Date.now() - start };
     })

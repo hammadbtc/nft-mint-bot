@@ -31,4 +31,19 @@ if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && process.env.LIVE_TRANSACT
   process.exit(1);
 }
 
+const robinhoodRpcUrls = (process.env.ROBINHOOD_RPC_URLS || "").split(",").map((value) => value.trim()).filter(Boolean);
+for (const value of robinhoodRpcUrls) {
+  try {
+    if (new URL(value).protocol !== "https:") throw new Error();
+  } catch {
+    console.error("Every ROBINHOOD_RPC_URLS entry must be a valid HTTPS URL");
+    process.exit(1);
+  }
+}
+
+if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && !process.env.ALCHEMY_API_KEY?.trim() && robinhoodRpcUrls.length === 0) {
+  console.error("Live Robinhood operation requires ALCHEMY_API_KEY or a second HTTPS endpoint in ROBINHOOD_RPC_URLS");
+  process.exit(1);
+}
+
 console.log("Environment validation passed");

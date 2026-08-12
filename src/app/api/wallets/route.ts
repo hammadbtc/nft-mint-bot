@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { ethers } from "ethers";
 import { z } from "zod";
 import { db, schema } from "@/lib/db";
-import { importWallet, listWallets, deriveMnemonicAddresses } from "@/lib/vault";
+import { importWallet, listWallets, prepareWalletRecord } from "@/lib/vault";
 import { eq } from "drizzle-orm";
+import { safeErrorMessage } from "@/lib/safety";
 
 const importSchema = z.object({
   label: z.string().trim().min(1).max(80),
@@ -24,9 +25,9 @@ const generateSchema = z.object({
 });
 
 async function assertMainWallet(id: string, chainId: number) {
-  const [parent] = await db.select({ id: schema.wallets.id, role: schema.wallets.role, chainId: schema.wallets.chainId })
+  const [parent] = await db.select({ id: schema.wallets.id, role: schema.wallets.role, chainId: schema.wallets.chainId, active: schema.wallets.active })
     .from(schema.wallets).where(eq(schema.wallets.id, id)).limit(1);
-  if (!parent || parent.role !== "main") throw new Error("A valid main wallet is required");
+  if (!parent || parent.role !== "main" || !parent.active) throw new Error("An active main wallet is required");
   if (parent.chainId !== chainId) throw new Error("Main and worker wallets must use the same network");
 }
 
@@ -42,10 +43,11 @@ export async function POST(req: NextRequest) {
     if (typeof body === "object" && body !== null && "action" in body && body.action === "generate") {
       const input = generateSchema.parse(body);
       await assertMainWallet(input.parentWalletId, input.chainId);
-      const generated: Array<{ id:string; label:string; address:string; chainId:number; privateKey:string }> = [];
+      const generated: Array<{ id:string; label:string; address:string; chainId:number; keyFormat:"private-key"|"mnemonic"; privateKey:string }> = [];
+      const records: ReturnType<typeof prepareWalletRecord>["record"][] = [];
       for (let index = 0; index < input.count; index++) {
         const fresh = ethers.Wallet.createRandom();
-        const saved = await importWallet({
+        const prepared = prepareWalletRecord({
           label: `${input.prefix} ${String(index + 1).padStart(2, "0")}`,
           chainId: input.chainId,
           keyType: "private-key",
@@ -53,8 +55,10 @@ export async function POST(req: NextRequest) {
           role: "worker",
           parentWalletId: input.parentWalletId,
         });
-        generated.push({ ...saved, privateKey: fresh.privateKey });
+        records.push(prepared.record);
+        generated.push({ ...prepared.publicWallet, privateKey: fresh.privateKey });
       }
+      await db.transaction(async (tx) => { await tx.insert(schema.wallets).values(records); });
       return NextResponse.json(
         { wallets: generated, count: input.count, warning: "Private keys are returned once. Back them up now." },
         { status: 201, headers: { "Cache-Control": "no-store, no-cache, must-revalidate", Pragma: "no-cache" } },
@@ -76,16 +80,7 @@ export async function POST(req: NextRequest) {
     const wallet = await importWallet(input);
     return NextResponse.json(wallet, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error: unknown) {
-    const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "Wallet operation failed";
-    return NextResponse.json({ error: message }, { status: 400 });
-  }
-}
-
-export async function PUT(req: NextRequest) {
-  try {
-    const body = z.object({ mnemonic:z.string().min(1), count:z.number().int().min(1).max(100).default(10), basePath:z.string().optional() }).parse(await req.json());
-    return NextResponse.json(deriveMnemonicAddresses(body.mnemonic, body.count, body.basePath), { headers: { "Cache-Control": "no-store" } });
-  } catch (error: unknown) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to derive addresses" }, { status: 400 });
+    const message = error instanceof z.ZodError ? error.issues[0]?.message : safeErrorMessage(error, "Wallet operation failed");
+    return NextResponse.json({ error: message }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 }

@@ -1,650 +1,501 @@
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { ethers } from "ethers";
-import { v4 as uuidv4 } from "uuid";
 import { db, schema } from "@/lib/db";
-import { getSigner } from "@/lib/vault";
+import { getMintAdapter } from "@/lib/adapters";
+import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
+import { recoveredJobStatus, selectExecutionPhase } from "@/lib/mint-policy";
 import { getProvider } from "@/lib/chains";
 import { sendPrivateTransaction, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
-import { eq, and, desc, sql } from "drizzle-orm";
-import { getMintAdapter } from "@/lib/adapters";
+import { getSigner } from "@/lib/vault";
+import {
+  broadcastPreparedTransaction,
+  exactSimulationRequest,
+  prepareSignedTransaction,
+  waitForReceipt,
+} from "@/lib/transactions";
+import {
+  isPermanentMintError,
+  liveTransactionsEnabled,
+  requireLiveTransactions,
+  safeErrorMessage,
+  stableHash,
+} from "@/lib/safety";
 
-// ─── ERC20 Minimal ABI ────────────────────────────────────────────────
 const ERC20_ABI = [
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner,address spender) view returns (uint256)",
+  "function approve(address spender,uint256 amount) returns (bool)",
   "function balanceOf(address account) view returns (uint256)",
   "function decimals() view returns (uint8)",
 ];
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "object" && error !== null) {
-    const value = error as Record<string, unknown>;
-    if (typeof value.reason === "string") return value.reason;
-    if (typeof value.message === "string") return value.message;
+const JOB_LEASE_MS = 120_000;
+
+class MintNotOpenError extends Error {
+  constructor(readonly scheduledAt: string) {
+    super(`Mint is scheduled for ${scheduledAt}`);
   }
-  return String(error);
 }
 
-class AmbiguousBroadcastError extends Error {}
+type JobRow = typeof schema.mintJobs.$inferSelect;
+type AttemptRow = typeof schema.mintAttempts.$inferSelect;
 
-// ─── Nonce Manager (in-process) ────────────────────────────────────────
-const nonceLock = new Map<string, Promise<void>>();
-const nonceCache = new Map<string, number>(); // walletId -> next nonce
+type ExecutionResult = {
+  status: "confirmed" | "failed" | "confirming" | "simulation_passed";
+  txHash?: string;
+  error?: string;
+  dryRun?: boolean;
+  gasUsed?: string;
+  effectiveGasPrice?: string;
+  blockNumber?: number;
+};
 
-async function acquireNonce(
+async function resolvePhase(collection: SupportedCollection): Promise<MintPhase> {
+  const adapter = getMintAdapter(collection.adapterKey);
+  if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
+  const resolved = await adapter.resolve(collection, "name");
+  return selectExecutionPhase(resolved.phases);
+}
+
+async function loadExecutionState(jobId: string) {
+  const [job] = await db.select().from(schema.mintJobs).where(eq(schema.mintJobs.id, jobId)).limit(1);
+  if (!job) throw new Error(`Mint job ${jobId} was not found`);
+  const [[collection], [wallet]] = await Promise.all([
+    db.select().from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1),
+    db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1),
+  ]);
+  if (!collection || !collection.active || !collection.verified) throw new Error("Mint support is disabled or no longer verified");
+  if (!wallet || !wallet.active || wallet.role !== "worker" || !wallet.parentWalletId) throw new Error("An active worker wallet is required");
+  if (wallet.chainId !== collection.chainId) throw new Error("Worker wallet and mint network no longer match");
+  return { job, collection, wallet };
+}
+
+async function applyGas(
+  request: ethers.TransactionRequest,
+  provider: ethers.Provider,
+  from: string,
+  overrides?: Pick<JobRow, "gasLimit" | "maxFeePerGas" | "maxPriorityFeePerGas">,
+): Promise<ethers.TransactionRequest> {
+  const exact = exactSimulationRequest(request, from);
+  const [estimated, fees] = await Promise.all([
+    provider.estimateGas(exact),
+    provider.getFeeData(),
+  ]);
+  const gasLimit = overrides?.gasLimit ? BigInt(overrides.gasLimit) : (estimated * 120n) / 100n;
+  const result: ethers.TransactionRequest = { ...request, gasLimit };
+  if (overrides?.maxFeePerGas) result.maxFeePerGas = BigInt(overrides.maxFeePerGas);
+  else if (fees.maxFeePerGas != null) result.maxFeePerGas = fees.maxFeePerGas;
+  if (overrides?.maxPriorityFeePerGas) result.maxPriorityFeePerGas = BigInt(overrides.maxPriorityFeePerGas);
+  else if (fees.maxPriorityFeePerGas != null) result.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
+  if (result.maxFeePerGas == null && fees.gasPrice != null) result.gasPrice = fees.gasPrice;
+  return result;
+}
+
+async function simulateExact(request: ethers.TransactionRequest, provider: ethers.Provider, from: string): Promise<void> {
+  try {
+    await provider.call(exactSimulationRequest(request, from));
+  } catch (error) {
+    throw new Error(`Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`);
+  }
+}
+
+function maximumGasCost(request: ethers.TransactionRequest): bigint {
+  const gasLimit = BigInt(request.gasLimit ?? 0);
+  const fee = BigInt(request.maxFeePerGas ?? request.gasPrice ?? 0);
+  return gasLimit * fee;
+}
+
+async function assertBalanceAndSpendLimit(
   walletId: string,
   address: string,
-  provider: ethers.Provider
-): Promise<number> {
-  while (nonceLock.has(walletId)) {
-    await nonceLock.get(walletId);
+  request: ethers.TransactionRequest,
+  provider: ethers.Provider,
+  current?: { jobId: string; kind: "approval" | "mint" },
+): Promise<void> {
+  const required = BigInt(request.value ?? 0) + maximumGasCost(request);
+  const balance = await provider.getBalance(address);
+  if (balance < required) {
+    throw new Error(`Insufficient native balance: have ${ethers.formatEther(balance)}, need up to ${ethers.formatEther(required)}`);
   }
 
-  let resolve: () => void;
-  const lock = new Promise<void>((r) => {
-    resolve = r;
-  });
-  nonceLock.set(walletId, lock);
+  const [wallet] = await db.select({ spendLimit: schema.wallets.spendLimit }).from(schema.wallets)
+    .where(eq(schema.wallets.id, walletId)).limit(1);
+  if (!wallet?.spendLimit) return;
+  const rows = await db.execute(sql<{ total: string }>`
+    select coalesce(sum(
+      cast(a.value as numeric) +
+      case when a.status = 'confirmed'
+        then coalesce(cast(a.gas_used as numeric), 0) * coalesce(cast(a.effective_gas_price as numeric), 0)
+        else coalesce(cast(a.gas_limit as numeric), 0) * coalesce(cast(a.max_fee_per_gas as numeric), 0)
+      end
+    ), 0)::text as total
+    from mint_attempts a
+    join mint_jobs j on j.id = a.job_id
+    where j.wallet_id = ${walletId}
+      and a.status in ('prepared', 'submitted', 'confirming', 'confirmed')
+      ${current ? sql`and not (a.job_id = ${current.jobId} and a.kind = ${current.kind})` : sql``}
+  `);
+  const [{ total = "0" } = {}] = rows as unknown as Array<{ total?: string }>;
+  const reservedOrSpent = BigInt(total);
+  if (reservedOrSpent + required > BigInt(wallet.spendLimit)) {
+    throw new Error("Worker wallet spend limit would be exceeded");
+  }
+}
 
+async function latestRecoverableAttempt(jobId: string, kind: "approval" | "mint"): Promise<AttemptRow | undefined> {
+  const [attempt] = await db.select().from(schema.mintAttempts)
+    .where(and(eq(schema.mintAttempts.jobId, jobId), eq(schema.mintAttempts.kind, kind)))
+    .orderBy(desc(schema.mintAttempts.createdAt)).limit(1);
+  return attempt && attempt.txHash && attempt.rawTx && ["prepared", "submitted", "confirming"].includes(attempt.status)
+    ? attempt
+    : undefined;
+}
+
+async function sendDurableAttempt(args: {
+  job: JobRow;
+  kind: "approval" | "mint";
+  request: ethers.TransactionRequest;
+  signer: ethers.Signer;
+  provider: ethers.Provider;
+}): Promise<ExecutionResult> {
+  const { job, kind, request, signer, provider } = args;
+  let attempt = await latestRecoverableAttempt(job.id, kind);
+
+  if (!attempt) {
+    const attemptId = randomUUID();
+    const prepared = await prepareSignedTransaction(
+      job.walletId,
+      Number(request.chainId),
+      signer,
+      provider,
+      request,
+      async (signed, tx) => {
+        await tx.insert(schema.mintAttempts).values({
+          id: attemptId,
+          jobId: job.id,
+          kind,
+          status: "prepared",
+          nonce: signed.nonce,
+          txHash: signed.txHash,
+          rawTx: signed.rawTx,
+          toAddress: String(signed.request.to || ""),
+          value: BigInt(signed.request.value ?? 0).toString(),
+          dataHash: stableHash(String(signed.request.data || "0x")),
+          gasLimit: signed.request.gasLimit?.toString() || null,
+          maxFeePerGas: signed.request.maxFeePerGas?.toString() || signed.request.gasPrice?.toString() || null,
+          maxPriorityFeePerGas: signed.request.maxPriorityFeePerGas?.toString() || null,
+          preparedAt: new Date().toISOString(),
+        });
+      },
+    );
+    [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.id, attemptId)).limit(1);
+    if (!attempt) throw new Error("Prepared transaction was not durably recorded");
+    if (attempt.txHash?.toLowerCase() !== prepared.txHash.toLowerCase()) throw new Error("Prepared transaction hash mismatch");
+  }
+
+  const receiptBeforeBroadcast = await provider.getTransactionReceipt(attempt.txHash!).catch(() => null);
+  if (receiptBeforeBroadcast) return finalizeAttempt(attempt.id, receiptBeforeBroadcast);
+
+  requireLiveTransactions();
   try {
-    const onChainNonce = await provider.getTransactionCount(address, "pending");
-    const cachedNonce = nonceCache.get(walletId) ?? onChainNonce;
-    const nonce = Math.max(onChainNonce, cachedNonce);
-    nonceCache.set(walletId, nonce + 1);
-    return nonce;
-  } finally {
-    nonceLock.delete(walletId);
-    resolve!();
+    if (job.useFlashbots && hasFlashbotsProtect(Number(request.chainId))) {
+      const response = await sendPrivateTransaction(Number(request.chainId), attempt.rawTx!);
+      if (response.hash.toLowerCase() !== attempt.txHash!.toLowerCase()) throw new Error("Private relay returned an unexpected hash");
+    } else {
+      await broadcastPreparedTransaction(provider, attempt.rawTx!, attempt.txHash!);
+    }
+    await db.update(schema.mintAttempts).set({ status: "submitted", broadcastAt: new Date().toISOString(), error: null })
+      .where(eq(schema.mintAttempts.id, attempt.id));
+  } catch (error) {
+    const existing = await provider.getTransaction(attempt.txHash!).catch(() => null);
+    await db.update(schema.mintAttempts).set({
+      status: existing ? "submitted" : "prepared",
+      broadcastAt: existing ? new Date().toISOString() : attempt.broadcastAt,
+      error: safeErrorMessage(error, "Broadcast failed; the same signed transaction will be reconciled"),
+    }).where(eq(schema.mintAttempts.id, attempt.id));
+    if (!existing) throw error;
   }
-}
 
-function releaseNonce(walletId: string) {
-  nonceLock.delete(walletId);
-}
-
-/** Roll back the cached nonce after a pre-broadcast failure. */
-function rollbackNonce(walletId: string) {
-  const cached = nonceCache.get(walletId);
-  if (cached !== undefined && cached > 0) {
-    nonceCache.set(walletId, cached - 1);
+  const receipt = await waitForReceipt(provider, attempt.txHash!);
+  if (!receipt) {
+    await db.update(schema.mintAttempts).set({ status: "confirming" }).where(eq(schema.mintAttempts.id, attempt.id));
+    return { status: "confirming", txHash: attempt.txHash! };
   }
-  nonceLock.delete(walletId);
+  return finalizeAttempt(attempt.id, receipt);
 }
 
-// ─── Gas Estimation ────────────────────────────────────────────────────
-
-interface GasConfig {
-  gasLimit?: bigint;
-  maxFeePerGas?: bigint;
-  maxPriorityFeePerGas?: bigint;
-}
-
-async function estimateGas(
-  tx: ethers.TransactionRequest,
-  provider: ethers.Provider
-): Promise<GasConfig> {
-  try {
-    const feeData = await provider.getFeeData();
-    const gasLimit = await provider.estimateGas(tx).catch(() => 300_000n);
-    const bufferedLimit = (gasLimit * 120n) / 100n;
-
-    return {
-      gasLimit: bufferedLimit,
-      maxFeePerGas: feeData.maxFeePerGas ?? undefined,
-      maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? undefined,
-    };
-  } catch (err) {
-    console.warn("Gas estimation failed, using defaults:", err);
-    return { gasLimit: 500_000n };
-  }
-}
-
-// ─── Simulation ────────────────────────────────────────────────────────
-
-async function simulateTx(
-  tx: ethers.TransactionRequest,
-  provider: ethers.Provider
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    await provider.call({
-      ...tx,
-      gasLimit: tx.gasLimit || 1_000_000n,
-    });
-    return { success: true };
-  } catch (err: unknown) {
-    const message = errorMessage(err);
-    console.warn("Simulation failed:", message);
-    return { success: false, error: message };
-  }
-}
-
-// ─── Cancel Stuck Transaction ──────────────────────────────────────────
-
-/**
- * Cancel a stuck transaction by sending 0 ETH to self with the same nonce
- * but much higher gas. This replaces the pending tx in the mempool.
- */
-export async function cancelStuckTransaction(
-  walletId: string,
-  chainId: number,
-  nonce: number
-): Promise<{ txHash: string }> {
-  const provider = getProvider(chainId);
-  const signer = await getSigner(walletId, provider);
-  const feeData = await provider.getFeeData();
-
-  const cancelTx: ethers.TransactionRequest = {
-    to: signer.address, // send to self
-    value: 0n,
-    nonce,
-    chainId,
-    gasLimit: 21000n,
-    // 2x the current max fee to ensure replacement
-    maxFeePerGas: (feeData.maxFeePerGas ?? 50_000_000_000n) * 2n,
-    maxPriorityFeePerGas: (feeData.maxPriorityFeePerGas ?? 2_000_000_000n) * 2n,
+async function finalizeAttempt(attemptId: string, receipt: ethers.TransactionReceipt): Promise<ExecutionResult> {
+  const confirmed = receipt.status === 1;
+  await db.update(schema.mintAttempts).set({
+    status: confirmed ? "confirmed" : "failed",
+    gasUsed: receipt.gasUsed.toString(),
+    effectiveGasPrice: receipt.gasPrice.toString(),
+    blockNumber: receipt.blockNumber,
+    confirmedAt: new Date().toISOString(),
+    rawTx: null,
+    error: confirmed ? null : "Transaction receipt reported failure",
+  }).where(eq(schema.mintAttempts.id, attemptId));
+  return {
+    status: confirmed ? "confirmed" : "failed",
+    txHash: receipt.hash,
+    blockNumber: receipt.blockNumber,
+    gasUsed: receipt.gasUsed.toString(),
+    effectiveGasPrice: receipt.gasPrice.toString(),
+    error: confirmed ? undefined : "Transaction receipt reported failure",
   };
-
-  const tx = await signer.sendTransaction(cancelTx);
-  return { txHash: tx.hash };
 }
 
-/**
- * Speed up a stuck transaction by re-sending with higher gas.
- */
-export async function speedUpTransaction(
-  walletId: string,
-  chainId: number,
-  nonce: number,
-  originalTx: ethers.TransactionRequest
-): Promise<{ txHash: string }> {
-  const provider = getProvider(chainId);
-  const signer = await getSigner(walletId, provider);
-  const feeData = await provider.getFeeData();
+async function ensureErc20Approval(
+  job: JobRow,
+  collection: SupportedCollection,
+  request: ethers.TransactionRequest,
+  signer: ethers.Signer,
+  provider: ethers.Provider,
+): Promise<ExecutionResult | null> {
+  if (!collection.paymentToken) return null;
+  const owner = await signer.getAddress();
+  const spender = String(request.to || collection.contractAddress);
+  const needed = BigInt(collection.mintPrice || "0") * BigInt(job.quantity);
+  const token = new ethers.Contract(collection.paymentToken, ERC20_ABI, provider);
+  const [balance, allowance] = await Promise.all([
+    token.getFunction("balanceOf").staticCall(owner).then(BigInt),
+    token.getFunction("allowance").staticCall(owner, spender).then(BigInt),
+  ]);
+  if (balance < needed) throw new Error("Insufficient payment-token balance");
+  if (allowance >= needed) return null;
+  if (job.dryRun) throw new Error("Dry run requires a payment-token approval before exact mint simulation");
 
-  const baseMaxFee = feeData.maxFeePerGas ?? (originalTx.maxFeePerGas as bigint | null) ?? 50_000_000_000n;
-  const baseMaxPriority = feeData.maxPriorityFeePerGas ?? (originalTx.maxPriorityFeePerGas as bigint | null) ?? 2_000_000_000n;
-
-  const speedUpTx: ethers.TransactionRequest = {
-    ...originalTx,
-    nonce,
-    maxFeePerGas: baseMaxFee * 15n / 10n,
-    maxPriorityFeePerGas: baseMaxPriority * 15n / 10n,
-  };
-
-  const tx = await signer.sendTransaction(speedUpTx);
-  return { txHash: tx.hash };
+  const approvalData = new ethers.Interface(ERC20_ABI).encodeFunctionData("approve", [spender, needed]);
+  let approval = await applyGas({ to: collection.paymentToken, data: approvalData, value: 0n, chainId: collection.chainId }, provider, owner);
+  await simulateExact(approval, provider, owner);
+  await assertBalanceAndSpendLimit(job.walletId, owner, approval, provider, { jobId: job.id, kind: "approval" });
+  approval = { ...approval, chainId: collection.chainId };
+  const result = await sendDurableAttempt({ job, kind: "approval", request: approval, signer, provider });
+  if (result.status !== "confirmed") return result;
+  return null;
 }
 
-// ─── Mint Job Execution ────────────────────────────────────────────────
-
-export interface MintJobParams {
-  walletId: string;
-  collectionId: string;
-  quantity?: number;
-  gasLimit?: string;
-  maxFeePerGas?: string;
-  maxPriorityFeePerGas?: string;
-  useFlashbots?: boolean;
-  dryRun?: boolean;
-  attemptId?: string;
-  jobId?: string;
-}
-
-/**
- * Execute a single mint attempt. If dryRun is true, simulates only and returns.
- */
-export async function executeMint(params: MintJobParams) {
-  const { walletId, collectionId, dryRun } = params;
-
-  const [collection] = await db
-    .select()
-    .from(schema.collections)
-    .where(eq(schema.collections.id, collectionId))
-    .limit(1);
-
-  if (!collection) throw new Error(`Collection ${collectionId} not found`);
+export async function executeMint(jobId: string): Promise<ExecutionResult> {
+  const { job, collection } = await loadExecutionState(jobId);
+  const phase = await resolvePhase(collection);
+  if (phase.status === "upcoming" && phase.startsAt) throw new MintNotOpenError(phase.startsAt);
+  if (phase.status !== "live") throw new Error("The reviewed mint phase is not live");
+  if (phase.endsAt && Date.now() >= Date.parse(phase.endsAt)) throw new Error("The reviewed mint phase has ended");
+  if (phase.maxPerWallet && job.quantity > phase.maxPerWallet) throw new Error("Quantity exceeds the current on-chain wallet limit");
 
   const provider = getProvider(collection.chainId);
-  const signer = await getSigner(walletId, provider);
-
+  const signer = await getSigner(job.walletId, provider);
+  const address = await signer.getAddress();
   const adapter = getMintAdapter(collection.adapterKey);
-  let tx: ethers.TransactionRequest;
-  if (adapter?.buildTransaction) {
-    tx = await adapter.buildTransaction(collection, signer.address, params.quantity || 1, provider);
-  } else {
-    let mintAbi: ethers.InterfaceAbi;
-    try { mintAbi = JSON.parse(collection.mintAbi); }
-    catch { throw new Error(`Invalid ABI for collection ${collection.name}`); }
-    const contract = new ethers.Contract(collection.contractAddress, mintAbi, signer);
-    const mintFn = contract.getFunction(collection.mintMethod);
-    let txData: string;
-    try { txData = (await mintFn.populateTransaction(params.quantity || 1)).data!; }
-    catch { txData = (await mintFn.populateTransaction()).data!; }
-    tx = { to: collection.contractAddress, data: txData, chainId: collection.chainId };
-    if (collection.mintPrice) tx.value = BigInt(collection.mintPrice) * BigInt(params.quantity || 1);
-  }
+  if (!adapter?.buildTransaction) throw new Error("Mint adapter cannot build a reviewed transaction");
 
-  // ─── Gas Estimation (must run before balance/spend checks) ──────────
-  const gas = await estimateGas(tx, provider);
-  if (params.gasLimit) tx.gasLimit = BigInt(params.gasLimit);
-  else if (gas.gasLimit) tx.gasLimit = gas.gasLimit;
+  let request = await adapter.buildTransaction(collection, address, job.quantity, provider);
+  request = await applyGas(request, provider, address, job);
+  const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
+  if (approvalResult) return approvalResult;
+  await simulateExact(request, provider, address);
 
-  if (params.maxFeePerGas) tx.maxFeePerGas = BigInt(params.maxFeePerGas);
-  else if (gas.maxFeePerGas) tx.maxFeePerGas = gas.maxFeePerGas;
-
-  if (params.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = BigInt(params.maxPriorityFeePerGas);
-  else if (gas.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = gas.maxPriorityFeePerGas;
-
-  // ─── Balance Check (uses real estimated gas) ─────────────────────
-  if (!dryRun) {
-    const ethBalance = await provider.getBalance(signer.address);
-    const glB: bigint = (tx.gasLimit ?? 500_000n) as bigint;
-    const mfpB: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
-    const estGasCost = glB * mfpB;
-    const txVal: bigint = BigInt(tx.value ?? 0);
-    const totalNeeded = txVal + estGasCost;
-
-    if (ethBalance < totalNeeded) {
-      throw new Error(
-        `Insufficient ETH balance: have ${ethers.formatEther(ethBalance)} ETH, ` +
-        `need ~${ethers.formatEther(totalNeeded)} ETH (value + gas)`
-      );
-    }
-
-    // ERC20 token balance if payment token is set
-    if (collection.paymentToken) {
-      const token = new ethers.Contract(collection.paymentToken, ERC20_ABI, provider);
-      const tokenBalance = BigInt(await token.getFunction("balanceOf").staticCall(signer.address));
-      const tokenDecimals = Number(await token.getFunction("decimals").staticCall().catch(() => 18));
-      const tokenNeeded = BigInt(collection.mintPrice || "0") * BigInt(params.quantity || 1);
-
-      if (tokenBalance < tokenNeeded) {
-        throw new Error(
-          `Insufficient token balance: have ${ethers.formatUnits(tokenBalance, tokenDecimals)}, ` +
-          `need ${ethers.formatUnits(tokenNeeded, tokenDecimals)}`
-        );
-      }
-
-      // Check allowance and approve if needed
-      const allowance = BigInt(await token.getFunction("allowance").staticCall(signer.address, collection.contractAddress));
-      if (allowance < tokenNeeded) {
-        console.log(`🔓 Approving ${ethers.formatUnits(tokenNeeded, tokenDecimals)} tokens for ${collection.name}...`);
-        try {
-          const approveTx = await token.connect(signer).getFunction("approve").send(collection.contractAddress, tokenNeeded);
-          await approveTx.wait(1);
-          console.log(`✅ Approval confirmed: ${approveTx.hash}`);
-        } catch (err: unknown) {
-          throw new Error(`Token approval failed: ${errorMessage(err)}`);
-        }
-      }
-    }
-  }
-
-  // Reserve the mint nonce only after any ERC-20 approval transaction has confirmed.
-  const nonce = await acquireNonce(walletId, signer.address, provider);
-  tx.nonce = nonce;
-
-  // ─── Spend limit check (uses estimated gas from above) ─────────────
-  if (!dryRun) {
-    const [wallet] = await db
-      .select({ spendLimit: schema.wallets.spendLimit })
-      .from(schema.wallets)
-      .where(eq(schema.wallets.id, walletId))
-      .limit(1);
-
-    if (wallet?.spendLimit) {
-      const spendLimit = BigInt(wallet.spendLimit);
-      const txValueS: bigint = BigInt(tx.value ?? 0);
-      const glS: bigint = (tx.gasLimit ?? 500_000n) as bigint;
-      const mfpS: bigint = (tx.maxFeePerGas ?? 50_000_000_000n) as bigint;
-      const estimatedGasCost = glS * mfpS;
-      const totalCost = txValueS + estimatedGasCost;
-
-      // Calculate total already spent
-      const [spent] = await db
-        .select({
-          total: sql<number>`coalesce(sum(cast(${schema.mintAttempts.gasUsed} as integer) * cast(${schema.mintAttempts.effectiveGasPrice} as integer)), 0)`,
-        })
-        .from(schema.mintAttempts)
-        .innerJoin(schema.mintJobs, eq(schema.mintAttempts.jobId, schema.mintJobs.id))
-        .where(
-          and(
-            eq(schema.mintJobs.walletId, walletId),
-            eq(schema.mintAttempts.status, "submitted")
-          )
-        );
-
-      const previousSpend = BigInt(spent?.total || 0);
-
-      if (previousSpend + totalCost > spendLimit) {
-        rollbackNonce(walletId);
-        throw new Error(
-          `Spend limit exceeded: already spent ${ethers.formatEther(previousSpend)} ETH, ` +
-          `this tx would cost ~${ethers.formatEther(totalCost)} ETH, ` +
-          `limit is ${ethers.formatEther(spendLimit)} ETH`
-        );
-      }
-    }
-  }
-
-  // Simulate
-  const sim = await simulateTx(tx, provider);
-  if (!sim.success) {
-    rollbackNonce(walletId);
-    return {
-      status: "simulation_failed",
-      error: sim.error,
-      dryRun: dryRun ?? false,
-    };
-  }
-
-  // Dry run: stop after simulation
-  if (dryRun) {
-    rollbackNonce(walletId);
-    return {
-      status: "simulation_passed",
-      dryRun: true,
-      simulation: {
-        to: tx.to,
-        value: tx.value?.toString(),
-        gasLimit: tx.gasLimit?.toString(),
-        maxFeePerGas: tx.maxFeePerGas?.toString(),
-        nonce,
-        chainId: tx.chainId,
-      },
-    };
-  }
-
-  if (process.env.ENABLE_LIVE_TRANSACTIONS !== "true") {
-    rollbackNonce(walletId);
-    throw new Error("Live mint transactions are disabled until testnet verification is complete");
-  }
-
-  // ─── Send Transaction ──────────────────────────────────────────────
-  let response: ethers.TransactionResponse;
-  let sentVia = "public";
-
-  try {
-    if (params.useFlashbots && hasFlashbotsProtect(collection.chainId)) {
-      // Use Flashbots Protect RPC for private mempool
-      const signed = await signer.signTransaction(tx);
-      response = await sendPrivateTransaction(collection.chainId, signed);
-      sentVia = "flashbots_protect";
-    } else {
-      response = await signer.sendTransaction(tx);
-    }
-  } catch (err: unknown) {
-    // Don't rollback — tx may have been broadcast. But release the lock.
-    releaseNonce(walletId);
-    throw new AmbiguousBroadcastError(`Broadcast outcome is unknown and will not be retried automatically: ${errorMessage(err)}`);
-  }
-
-  // Persist the hash before waiting. A receipt timeout must never cause a duplicate mint.
-  if (params.attemptId && params.jobId) {
+  if (job.dryRun) {
     await db.insert(schema.mintAttempts).values({
-      id: params.attemptId,
-      jobId: params.jobId,
-      txHash: response.hash,
-      status: "submitted",
-    }).onConflictDoUpdate({
-      target: schema.mintAttempts.id,
-      set: { txHash: response.hash, status: "submitted" },
+      id: randomUUID(),
+      jobId: job.id,
+      kind: "mint",
+      status: "simulated",
+      toAddress: String(request.to || ""),
+      value: BigInt(request.value ?? 0).toString(),
+      dataHash: stableHash(String(request.data || "0x")),
+      gasLimit: request.gasLimit?.toString() || null,
+      maxFeePerGas: request.maxFeePerGas?.toString() || request.gasPrice?.toString() || null,
+      maxPriorityFeePerGas: request.maxPriorityFeePerGas?.toString() || null,
+      preparedAt: new Date().toISOString(),
+      confirmedAt: new Date().toISOString(),
     });
+    return { status: "simulation_passed", dryRun: true };
   }
-
-  // Wait for confirmation
-  const receipt = await response.wait(1);
-
-  if (params.attemptId) {
-    await db.update(schema.mintAttempts).set({
-      status: receipt?.status === 1 ? "confirmed" : "failed",
-      gasUsed: receipt?.gasUsed?.toString(),
-      effectiveGasPrice: receipt?.gasPrice?.toString(),
-      blockNumber: receipt?.blockNumber,
-    }).where(eq(schema.mintAttempts.id, params.attemptId));
-  }
-
-  return {
-    txHash: response.hash,
-    blockNumber: receipt?.blockNumber,
-    gasUsed: receipt?.gasUsed?.toString(),
-    effectiveGasPrice: receipt?.gasPrice?.toString(),
-    status: receipt?.status === 1 ? "confirmed" : "failed",
-    sentVia,
-  };
+  await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
+  return sendDurableAttempt({ job, kind: "mint", request, signer, provider });
 }
 
-// ─── Job Runner ────────────────────────────────────────────────────────
+export async function runMintJob(jobId: string): Promise<ExecutionResult | undefined> {
+  const [initial] = await db.select().from(schema.mintJobs).where(eq(schema.mintJobs.id, jobId)).limit(1);
+  if (!initial || initial.status === "cancelled" || initial.status === "completed" || initial.status === "failed") return;
+  let attempt = initial.retryCount;
 
-export async function runMintJob(jobId: string) {
-  const [job] = await db
-    .select()
-    .from(schema.mintJobs)
-    .where(eq(schema.mintJobs.id, jobId))
-    .limit(1);
-
-  if (!job) throw new Error(`Job ${jobId} not found`);
-  if (job.status === "cancelled") return;
-
-  // Only mark as running if not already (multi-worker safety)
-  if (job.status !== "running") {
-    await db
-      .update(schema.mintJobs)
-      .set({ status: "running", startedAt: new Date().toISOString() })
-      .where(eq(schema.mintJobs.id, jobId));
-  }
-
-  let lastAttempt = job.retryCount;
-
-  while (lastAttempt < job.maxRetries) {
-    const attemptId = uuidv4();
-
+  while (attempt < initial.maxRetries) {
     try {
-      const result = await executeMint({
-        walletId: job.walletId,
-        collectionId: job.collectionId,
-        quantity: job.quantity || 1,
-        gasLimit: job.gasLimit || undefined,
-        maxFeePerGas: job.maxFeePerGas || undefined,
-        maxPriorityFeePerGas: job.maxPriorityFeePerGas || undefined,
-        useFlashbots: job.useFlashbots ?? false,
-        dryRun: job.dryRun ?? false,
-        attemptId,
-        jobId,
-      });
-
-      // Dry run result
-      if (result.dryRun) {
-        await db.insert(schema.mintAttempts).values({
-          id: attemptId,
-          jobId,
-          status: result.status === "simulation_passed" ? "confirmed" : "failed",
-          error: result.error || null,
-        });
-
-        await db
-          .update(schema.mintJobs)
-          .set({
-            status: result.status === "simulation_passed" ? "completed" : "failed",
-            completedAt: new Date().toISOString(),
-            error: result.error || null,
-          })
+      const result = await executeMint(jobId);
+      const now = new Date().toISOString();
+      if (result.status === "confirming") {
+        await db.update(schema.mintJobs).set({ status: "confirming", updatedAt: now, error: null })
           .where(eq(schema.mintJobs.id, jobId));
         return result;
       }
-
-      const finalStatus = result.status === "confirmed" ? "completed" : "failed";
-
-      await db
-        .update(schema.mintJobs)
-        .set({
-          status: finalStatus,
-          completedAt: new Date().toISOString(),
-          nonce: null,
+      const completed = result.status === "confirmed" || result.status === "simulation_passed";
+      await db.update(schema.mintJobs).set({
+        status: completed ? "completed" : "failed",
+        completedAt: now,
+        updatedAt: now,
+        claimToken: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        error: result.error || null,
+      }).where(eq(schema.mintJobs.id, jobId));
+      return result;
+    } catch (error) {
+      const message = safeErrorMessage(error, "Mint execution failed");
+      if (error instanceof MintNotOpenError) {
+        await db.update(schema.mintJobs).set({
+          status: "pending",
+          scheduledAt: error.scheduledAt,
+          phaseStartsAt: error.scheduledAt,
           claimToken: null,
           claimedAt: null,
-        })
+          leaseExpiresAt: null,
+          updatedAt: new Date().toISOString(),
+          error: null,
+        }).where(eq(schema.mintJobs.id, jobId));
+        return;
+      }
+
+      const recoverable = await latestRecoverableAttempt(jobId, "mint") || await latestRecoverableAttempt(jobId, "approval");
+      if (!liveTransactionsEnabled() && recoverable) {
+        await db.update(schema.mintJobs).set({ status: "confirming", error: message, updatedAt: new Date().toISOString() })
+          .where(eq(schema.mintJobs.id, jobId));
+        return { status: "confirming", txHash: recoverable.txHash || undefined, error: message };
+      }
+
+      attempt += 1;
+      const permanent = isPermanentMintError(message);
+      await db.update(schema.mintJobs).set({ retryCount: attempt, error: message, updatedAt: new Date().toISOString() })
         .where(eq(schema.mintJobs.id, jobId));
-
-      // Alert on failure
-      if (finalStatus === "failed") {
-        const [wallet] = await db.select({ label: schema.wallets.label }).from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
-        const [collection] = await db.select({ name: schema.collections.name }).from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1);
-        await sendAlert("job_failed", `Job ${jobId.slice(0, 8)} failed: ${wallet?.label || "?"} → ${collection?.name || "?"}`, jobId);
+      if (permanent || attempt >= initial.maxRetries) {
+        await db.update(schema.mintJobs).set({
+          status: "failed",
+          completedAt: new Date().toISOString(),
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+        }).where(eq(schema.mintJobs.id, jobId));
+        await sendAlert("job_failed", `Mint job ${jobId.slice(0, 8)} failed: ${message}`, jobId);
+        throw error;
       }
-
-      return result;
-    } catch (err: unknown) {
-      const [broadcast] = await db.select({ txHash:schema.mintAttempts.txHash })
-        .from(schema.mintAttempts).where(eq(schema.mintAttempts.id, attemptId)).limit(1);
-      if (broadcast?.txHash) {
-        const message = `Broadcast as ${broadcast.txHash}; confirmation is unknown and will not be retried automatically: ${errorMessage(err)}`;
-        await db.update(schema.mintJobs).set({ status:"failed", completedAt:new Date().toISOString(), error:message })
-          .where(eq(schema.mintJobs.id, jobId));
-        await db.update(schema.mintAttempts).set({ error:message }).where(eq(schema.mintAttempts.id, attemptId));
-        throw new Error(message);
-      }
-      if (err instanceof AmbiguousBroadcastError) {
-        const message = err.message;
-        await db.insert(schema.mintAttempts).values({ id:attemptId, jobId, status:"failed", error:message }).onConflictDoNothing();
-        await db.update(schema.mintJobs).set({ status:"failed", completedAt:new Date().toISOString(), error:message, claimToken:null, claimedAt:null })
-          .where(eq(schema.mintJobs.id, jobId));
-        throw err;
-      }
-      lastAttempt++;
-
-      await db.insert(schema.mintAttempts).values({
-        id: attemptId,
-        jobId,
-        status: "failed",
-        error: errorMessage(err),
-      });
-
-      await db
-        .update(schema.mintJobs)
-        .set({ retryCount: lastAttempt, error: errorMessage(err) })
-        .where(eq(schema.mintJobs.id, jobId));
-
-      if (lastAttempt >= job.maxRetries) {
-        await db
-          .update(schema.mintJobs)
-          .set({ status: "failed", completedAt: new Date().toISOString(), claimToken:null, claimedAt:null })
-          .where(eq(schema.mintJobs.id, jobId));
-
-        // Alert on final failure
-        const [wallet] = await db.select({ label: schema.wallets.label }).from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
-        const [collection] = await db.select({ name: schema.collections.name }).from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1);
-        await sendAlert("job_failed", `Job ${jobId.slice(0, 8)} exhausted retries: ${wallet?.label || "?"} → ${collection?.name || "?"} — ${errorMessage(err)}`, jobId);
-
-        throw err;
-      }
-
-      // Exponential backoff
-      await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, lastAttempt)));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(8_000, 500 * 2 ** attempt)));
     }
   }
 }
 
-/**
- * Mark a job as "stuck" and cancel its pending tx.
- */
-export async function unstickJob(jobId: string) {
-  const [job] = await db
-    .select()
-    .from(schema.mintJobs)
-    .where(eq(schema.mintJobs.id, jobId))
-    .limit(1);
-
-  if (!job) throw new Error(`Job ${jobId} not found`);
-
-  // Find the wallet and chain
-  const [wallet] = await db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
-  if (!wallet) throw new Error("Wallet not found");
-
-  // Stuck jobs need a cancel tx
-  try {
-    // Get the nonce that was used (from last attempt or estimate)
-    const attempts = await db
-      .select()
-      .from(schema.mintAttempts)
-      .where(eq(schema.mintAttempts.jobId, jobId))
-      .orderBy(desc(schema.mintAttempts.createdAt))
-      .limit(1);
-
-    if (attempts.length > 0) {
-      // Can't easily recover the nonce from a failed attempt, so we'll cancel using
-      // the wallet's current pending nonce
-      const provider = getProvider(wallet.chainId);
-      const signer = await getSigner(job.walletId, provider);
-      const pendingNonce = await provider.getTransactionCount(signer.address, "pending");
-      const latestNonce = await provider.getTransactionCount(signer.address, "latest");
-
-      if (pendingNonce > latestNonce) {
-        // There's a stuck pending tx — cancel it
-        const { txHash } = await cancelStuckTransaction(job.walletId, wallet.chainId, latestNonce);
-        console.log(`🔧 Unstuck job ${jobId.slice(0, 8)}: sent cancel tx ${txHash}`);
-      }
-    }
-
-    await db
-      .update(schema.mintJobs)
-      .set({ status: "cancelled", completedAt: new Date().toISOString(), error: "unstuck by operator" })
-      .where(eq(schema.mintJobs.id, jobId));
-
-    await sendAlert("job_stuck", `Job ${jobId.slice(0, 8)} unstuck and cancelled`, jobId);
-    return { success: true };
-  } catch (err: unknown) {
-    throw new Error(`Failed to unstick job: ${errorMessage(err)}`);
-  }
-}
-
-/**
- * Batch mint: create jobs for all wallets against a collection and execute.
- */
 export async function batchMint(
   collectionId: string,
   walletIds: string[],
-  quantity?: number,
-  useFlashbots?: boolean,
-  dryRun?: boolean,
-  scheduledAt?: string,
-  idempotencyBase?: string,
+  quantity = 1,
+  useFlashbots = false,
+  dryRun = false,
+  idempotencyBase: string,
 ) {
-  const results: { walletId: string; jobId: string; status: string; txHash?: string; error?: string }[] = [];
-
+  if (!idempotencyBase || idempotencyBase.length > 200) throw new Error("A valid Idempotency-Key header is required");
+  const uniqueWalletIds = [...new Set(walletIds)];
   const [collection] = await db.select().from(schema.collections).where(eq(schema.collections.id, collectionId)).limit(1);
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
-  const mintQuantity = quantity || 1;
-  if (mintQuantity < 1 || mintQuantity > (collection.maxPerWallet || 100)) throw new Error("Quantity exceeds the supported wallet limit");
-
-  for (const walletId of walletIds) {
-    const [wallet] = await db.select({ id:schema.wallets.id, chainId:schema.wallets.chainId, active:schema.wallets.active })
-      .from(schema.wallets).where(eq(schema.wallets.id, walletId)).limit(1);
-    if (!wallet || !wallet.active) throw new Error(`Wallet ${walletId} is unavailable`);
-    if (wallet.chainId !== collection.chainId) throw new Error(`Wallet ${walletId} is on the wrong network`);
-    const jobId = uuidv4();
-    const idempotencyKey = idempotencyBase ? `${idempotencyBase}:${walletId}:${collectionId}` : null;
-
-    const inserted = await db.insert(schema.mintJobs).values({
-      id: jobId,
-      walletId,
-      collectionId,
-      quantity: quantity || 1,
-      useFlashbots: useFlashbots ?? false,
-      dryRun: dryRun ?? false,
-      scheduledAt: scheduledAt || null,
-      status: "pending",
-      idempotencyKey,
-    }).onConflictDoNothing({ target:schema.mintJobs.idempotencyKey }).returning({ id:schema.mintJobs.id });
-    let resultJobId = inserted[0]?.id;
-    if (!resultJobId && idempotencyKey) {
-      const [existing] = await db.select({ id:schema.mintJobs.id }).from(schema.mintJobs)
-        .where(eq(schema.mintJobs.idempotencyKey,idempotencyKey)).limit(1);
-      resultJobId = existing?.id;
-    }
-    results.push({ walletId, jobId:resultJobId || jobId, status:inserted.length ? (scheduledAt?"scheduled":"queued") : "duplicate" });
+  const phase = await resolvePhase(collection);
+  if (phase.status === "ended") throw new Error("The reviewed mint has ended");
+  if (quantity < 1 || quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
+    throw new Error("Quantity exceeds the current supported wallet limit");
   }
 
-  return results;
+  const wallets = uniqueWalletIds.length
+    ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, uniqueWalletIds))
+    : [];
+  if (wallets.length !== uniqueWalletIds.length) throw new Error("One or more selected wallets were not found");
+  for (const wallet of wallets) {
+    if (!wallet.active || wallet.role !== "worker" || !wallet.parentWalletId) throw new Error("Only active worker wallets can mint");
+    if (wallet.chainId !== collection.chainId) throw new Error("One or more workers are on the wrong network");
+  }
+
+  const scheduledAt = phase.status === "upcoming" ? phase.startsAt : undefined;
+  const batchId = randomUUID();
+  const values = uniqueWalletIds.map((walletId) => ({
+    id: randomUUID(),
+    batchId,
+    walletId,
+    collectionId,
+    quantity,
+    useFlashbots,
+    dryRun,
+    scheduledAt: scheduledAt || null,
+    phaseId: phase.id,
+    phaseStartsAt: phase.startsAt || null,
+    phaseEndsAt: phase.endsAt || null,
+    status: "pending",
+    idempotencyKey: `${idempotencyBase}:${walletId}:${collectionId}`,
+  }));
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${idempotencyBase}))`);
+    const existing = await tx.select({
+      id: schema.mintJobs.id,
+      walletId: schema.mintJobs.walletId,
+      batchId: schema.mintJobs.batchId,
+    }).from(schema.mintJobs).where(inArray(schema.mintJobs.idempotencyKey, values.map((value) => value.idempotencyKey)));
+    if (existing.length) {
+      if (existing.length !== values.length) throw new Error("Idempotency key conflicts with a different wallet batch");
+      return { batchId: existing[0]?.batchId || batchId, scheduledAt: scheduledAt || null, phaseId: phase.id, results: existing.map((row) => ({ ...row, status: "duplicate" })) };
+    }
+    const inserted = await tx.insert(schema.mintJobs).values(values)
+      .returning({ id: schema.mintJobs.id, walletId: schema.mintJobs.walletId, batchId: schema.mintJobs.batchId });
+    return { batchId, scheduledAt: scheduledAt || null, phaseId: phase.id, results: inserted.map((row) => ({ ...row, status: scheduledAt ? "scheduled" : "queued" })) };
+  });
+}
+
+export async function recoverMintJob(jobId: string): Promise<void> {
+  const [job] = await db.select().from(schema.mintJobs).where(eq(schema.mintJobs.id, jobId)).limit(1);
+  if (!job || !["running", "confirming"].includes(job.status)) return;
+  const [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.jobId, jobId))
+    .orderBy(desc(schema.mintAttempts.createdAt)).limit(1);
+  if (attempt?.txHash) {
+    const provider = getProvider((await loadExecutionState(jobId)).collection.chainId);
+    const receipt = await provider.getTransactionReceipt(attempt.txHash).catch(() => null);
+    if (receipt) {
+      const result = await finalizeAttempt(attempt.id, receipt);
+      const recoveredStatus = recoveredJobStatus(attempt.kind === "approval" ? "approval" : "mint", result.status === "confirmed");
+      if (recoveredStatus === "pending") {
+        await db.update(schema.mintJobs).set({
+          status: "pending",
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          updatedAt: new Date().toISOString(),
+          error: null,
+        }).where(eq(schema.mintJobs.id, jobId));
+        return;
+      }
+      await db.update(schema.mintJobs).set({
+        status: recoveredStatus,
+        completedAt: new Date().toISOString(),
+        claimToken: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date().toISOString(),
+      }).where(eq(schema.mintJobs.id, jobId));
+      return;
+    }
+    if (attempt.rawTx && liveTransactionsEnabled()) {
+      await runMintJob(jobId);
+      return;
+    }
+    await db.update(schema.mintJobs).set({ status: "confirming", updatedAt: new Date().toISOString() })
+      .where(eq(schema.mintJobs.id, jobId));
+    return;
+  }
+  await db.update(schema.mintJobs).set({
+    status: "pending",
+    claimToken: null,
+    claimedAt: null,
+    leaseExpiresAt: null,
+    updatedAt: new Date().toISOString(),
+  }).where(eq(schema.mintJobs.id, jobId));
+}
+
+export function leaseExpiry(now = Date.now()): string {
+  return new Date(now + JOB_LEASE_MS).toISOString();
 }
