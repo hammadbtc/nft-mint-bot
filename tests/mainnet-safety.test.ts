@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import { exactUrlPathMatches } from "../src/lib/adapters";
 import { recoveredJobStatus, selectExecutionPhase } from "../src/lib/mint-policy";
+import { mintWalletEligibilityError } from "../src/lib/mint-wallet-policy";
 import { broadcastPreparedTransaction, exactSimulationRequest } from "../src/lib/transactions";
 import { liveTransactionsEnabled, safeErrorMessage, safeSecretEqual, stableHash } from "../src/lib/safety";
 
@@ -45,6 +46,16 @@ test("live broadcasting requires two independent explicit gates", () => {
   assert.equal(liveTransactionsEnabled(), true);
   if (previousEnabled === undefined) delete process.env.ENABLE_LIVE_TRANSACTIONS; else process.env.ENABLE_LIVE_TRANSACTIONS = previousEnabled;
   if (previousConfirmed === undefined) delete process.env.LIVE_TRANSACTIONS_CONFIRMED; else process.env.LIVE_TRANSACTIONS_CONFIRMED = previousConfirmed;
+});
+
+test("main wallets can mint while workers still require an active same-chain main", () => {
+  const main = { active: true, role: "main", parentWalletId: null, chainId: 4663 };
+  const worker = { active: true, role: "worker", parentWalletId: "main-id", chainId: 4663 };
+  assert.equal(mintWalletEligibilityError(main, 4663), null);
+  assert.equal(mintWalletEligibilityError(worker, 4663, main), null);
+  assert.match(mintWalletEligibilityError(worker, 4663) || "", /active main wallet/);
+  assert.match(mintWalletEligibilityError({ ...main, active: false }, 4663) || "", /inactive/);
+  assert.match(mintWalletEligibilityError(main, 1) || "", /wrong network/);
 });
 
 test("operator errors redact wallet keys, provider keys, credentials, and tokens", () => {

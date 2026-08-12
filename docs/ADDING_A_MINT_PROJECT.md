@@ -1,64 +1,187 @@
 # Adding a supported mint project
 
-This is the operator workflow for making a mint URL searchable in MintBot. Users never fill these technical fields; a project is reviewed and registered before they paste its link.
+This is the durable operator playbook for future MintBot sessions. A user should only paste a URL and choose wallets; all protocol research, transaction construction, and safety review happen before the project becomes searchable.
 
-## Golden rule
+## Start every project-support session here
 
-Never register a project from an unverified link or guessed ABI. Confirm the official website and announcements, inspect the deployed contract, verify every mint phase, and simulate the exact transaction before enabling it.
+1. Read this file and `docs/PRODUCT_AND_AUDIT_HANDOFF.md`.
+2. Run `git status --short`, `git log -3 --oneline`, `npm test`, and `npm run lint` before changing support.
+3. Inspect `src/lib/adapters/index.ts` and existing adapters before building another one.
+4. Collect the official mint URL, chain, phase, opening time with timezone, contract, desired quantity, and the wallet addresses that must be eligible. Never request private keys.
+5. Keep the project unsupported until the exact transaction has been reproduced and simulated.
 
-An unsupported URL must remain unsupported until this process is complete.
+MintBot production may already have live broadcasting enabled. Adding a project is therefore a transaction-safety change, not a content edit. Registration must never automatically enqueue a job.
 
-## Two kinds of support
+## Non-negotiable rule
 
-### Reusable launchpad adapter
+Never infer a live transaction from a page label, guessed ABI, copied community link, or another collection on the same launchpad. Confirm the official domain, deployed protocol/version, target contract, calldata, value, phase state, and eligibility flow.
 
-Use this when a launchpad has a stable documented protocol shared across projects, such as a standard marketplace/launchpad contract and API. One adapter can resolve multiple projects, but every collection still gets its own verified record containing its official domain, contract and phase configuration.
+If any required input remains unknown, return `This mint is not supported yet`.
 
-Do not assume all projects on a launchpad use the same transaction. Check contract/version, delegated contracts, server signatures, allowlist proofs, payment tokens and mint phases.
+## Choose the correct support path
 
-### Custom project adapter
+### 1. Existing adapter, new project record
 
-Use this for personal mint websites or unusual contracts. It may need custom argument construction, an allowlist API, a signed payload, delegated minting, ERC-20 approval or another project-specific step.
+Use an existing adapter only when the project uses the same reviewed protocol version and transaction shape. Recheck all addresses and live configuration per collection.
 
-Custom adapters belong under `src/lib/adapters/`. Register the adapter key in `src/lib/adapters/index.ts` and add tests before registering the project.
+Current adapters:
 
-The built-in `opensea-seadrop-v1` adapter handles reviewed OpenSea SeaDrop public phases. It reads the live public-drop price, timing, wallet limit, and supply from the chain immediately before building each transaction. It does not support signed, allowlist, or token-gated SeaDrop phases.
+- `opensea-seadrop-v1`: public SeaDrop only. It rereads price, start/end, wallet cap, fee-recipient permission, wallet mint stats, and supply on-chain at execution.
+- `evm-contract-v1`: only a verified payable function with either no arguments or one integer quantity argument and a static reviewed price.
 
-## Information needed from Hammad
+SeaDrop allowlists, signed mints, token-gated phases, and other launchpads are not covered merely because OpenSea displays the collection.
 
-For each upcoming mint, collect:
+### 2. Reusable launchpad adapter
 
-- Official mint URL.
-- Official project X/Discord announcement confirming that URL.
-- Network and expected launch time with timezone.
-- Public or allowlist phase being targeted.
-- Desired wallet count and quantity per wallet.
-- Any allowlist CSV, proof endpoint, access token or signature flow.
+Build this when several projects share a stable, identifiable launchpad contract/API version. Pin the adapter to the actual version or deployment. Do not create a vague adapter that treats every contract on a domain as equivalent.
 
-Never paste private wallet keys into a project-support request.
+Examples of differences that require version-aware handling:
 
-## Investigation checklist
+- Factory clone versus proxy versus shared mint router.
+- Native payment versus ERC-20 approval.
+- Direct contract phase data versus launchpad API data.
+- Merkle proof versus server-issued signature.
+- Payer, recipient, referrer, fee recipient, affiliate, or delegated minter fields.
+- Fixed price versus Dutch auction or dynamic quote.
 
-1. Confirm the domain is official through at least one independent official project channel.
-2. Record redirects and the final canonical hostname.
-3. Identify the launchpad and its deployed version, or classify it as custom.
-4. Determine the actual mint contract and verify bytecode exists on the expected chain.
-5. Obtain the verified ABI from the block explorer or project source.
-6. Identify the exact mint function and every argument in order.
-7. Determine native-token or ERC-20 payment and whether approval is needed.
-8. Verify price, maximum per wallet, supply, phase start/end and timezone.
-9. Determine allowlist eligibility, Merkle proof or server-signature requirements.
-10. Verify whether quantity, recipient address or referrer changes transaction calldata.
-11. Reproduce the site transaction locally without sending it.
-12. Run `eth_call`/gas estimation from an eligible test address where possible.
-13. Add adapter fixtures and tests.
-14. Register the project as verified only after all checks pass.
+### 3. Custom project/personal-site adapter
 
-## Project registration format
+Use a project-specific adapter when the official site calls a bespoke contract or API. The site UI is evidence, not the protocol definition. Inspect verified source and the transaction/API flow, then encode only the reviewed behavior.
 
-Registration uses `POST /api/collections`. The application is protected by HTTP Basic Auth, and registration additionally requires the `X-Support-Admin-Token` header.
+Do not automate CAPTCHA bypasses, login bypasses, stolen session tokens, or anti-bot evasion. If a mint requires interactive human authorization that cannot be obtained through an official documented flow, leave it unsupported.
 
-Example configuration:
+## Information to collect
+
+- Official mint URL and canonical redirected URL.
+- Official X/Discord/site announcement independently confirming the URL.
+- Chain ID, native symbol, explorer, and at least two usable RPC endpoints.
+- Launchpad name, protocol version, factory/router/drop addresses, and collection address.
+- Target phase: public FCFS, allowlist, token-gated, holder, auction, or another type.
+- Opening and ending time, original timezone, and whether the contract or an API is authoritative.
+- Price source, currency, quantity rules, per-wallet cap, total supply, and existing wallet mints.
+- Exact function, argument order/types, transaction `to`, `value`, and expected events.
+- Proof, signature, nonce, deadline, salt, coupon, authorization, referrer, or fee-recipient rules.
+- Whether payloads are wallet-bound, quantity-bound, phase-bound, expiring, or single-use.
+- Desired main/worker wallet addresses for eligibility testing. Both active main and active worker wallets can mint.
+
+## Investigation workflow
+
+### A. Establish identity and chain
+
+1. Confirm the domain through an official channel and record redirects.
+2. Reject lookalike subdomains and paths. MintBot URL matchers are exact.
+3. Confirm the browser wallet is on the expected chain.
+4. Verify bytecode exists at every target/router/drop address.
+5. Resolve proxies/clones to their implementation and verify the implementation source where possible.
+6. Confirm the connected collection address matches the official collection, not merely a similarly named page.
+
+### B. Reproduce the protocol
+
+Prefer primary evidence: verified contract source, official launchpad documentation/SDK, and the official site’s own network/transaction requests.
+
+Record a known-good unsigned transaction or wallet simulation:
+
+- `from`
+- `to`
+- `chainId`
+- `value`
+- function selector and decoded arguments
+- gas-estimation result
+- any API request/response that produced a proof or signature
+- expected revert before opening/ineligibility and expected success for an eligible address
+
+Never broadcast while investigating. Never copy a transaction from another collection without decoding and comparing every field.
+
+### C. Classify phase behavior
+
+#### Public FCFS
+
+- Resolve the authoritative opening time server-side.
+- Queueing before open is allowed; the scheduler must not broadcast before the live phase.
+- Reread price, pause state, wallet cap, and remaining supply immediately before signing.
+- A successful simulation is not a guaranteed hit; sell-out and block competition remain external races.
+
+#### Merkle allowlist
+
+- Identify leaf encoding exactly, including address, allowance, price, phase ID, and any salt.
+- Verify sorted-pair/tree rules and proof source.
+- Recompute the leaf locally and, where possible, verify it against the on-chain root.
+- Fetch/build the proof for the selected signing wallet at execution time.
+- Test eligible and ineligible wallets. Never silently fall through to public mint.
+
+#### Server-signed mint
+
+- Identify the official payload endpoint and authorization method.
+- Decode the EIP-712/domain or personal-sign message and confirm chain, verifying contract, signer, wallet, quantity, price, deadline, and nonce.
+- Validate the recovered signer against an on-chain or otherwise authoritative signer address.
+- Obtain short-lived signatures inside `buildTransaction`, not when the project is registered or scheduled.
+- Store API credentials only in environment variables; never in `adapterConfig`, Git, logs, or client responses.
+
+#### Token/holder-gated mint
+
+- Identify the gating asset and snapshot/current-balance rule.
+- Check eligibility for each signing wallet immediately before building the transaction.
+- Confirm whether the token is consumed, locked, delegated, or merely checked.
+
+#### Dutch auction/dynamic quote
+
+- Calculate/read the execution-time price from the authoritative contract or official signed quote.
+- Include a reviewed maximum/slippage rule where applicable.
+- Never use the display price captured during registration as transaction value.
+
+#### ERC-20 payment
+
+- Confirm token address, decimals, required amount, spender, and approval type.
+- MintBot can persist/recover an approval before minting, but the adapter must set `paymentToken` and build the correct mint transaction.
+- Test insufficient token, insufficient gas, existing allowance, approval recovery, and revoked allowance.
+
+## Adapter contract and lifecycle
+
+Adapters live in `src/lib/adapters/` and implement `MintAdapter` from `types.ts`:
+
+```ts
+export interface MintAdapter {
+  key: string;
+  resolve(collection, source): Promise<ResolvedMint>;
+  buildTransaction?(collection, signerAddress, quantity, provider): Promise<TransactionRequest>;
+}
+```
+
+`resolve` must:
+
+- Validate reviewed configuration.
+- Read authoritative phase data rather than trusting stale seed values.
+- Return clear `upcoming`, `live`, or `ended` phases with ISO UTC timestamps.
+- Return price in integer base units, wallet cap, and supply when available.
+- Avoid wallet secrets and avoid returning API credentials/proofs to the browser.
+
+`buildTransaction` runs immediately before simulation/signing and must:
+
+- Revalidate phase, pause state, price, limits, supply, and signer eligibility.
+- Fetch wallet-bound proof/signature/quote data just in time.
+- Construct the exact reviewed `to`, `data`, `value`, and `chainId`.
+- Fail closed on API/schema/version/signature changes.
+- Never send, sign, allocate a nonce, or mutate external state itself. The engine owns simulation, durable signing, broadcasting, retries, receipts, and nonce locks.
+
+Register a new adapter explicitly in `src/lib/adapters/index.ts`. A database `adapterKey` that is not in this registry must remain unusable.
+
+## Adding another chain
+
+If the chain is absent, add it to `src/lib/chains/index.ts` with its exact chain ID, symbol, explorer, dedicated-provider option, and independent public fallback. Providers must retain request timeouts and failover.
+
+Before live support:
+
+1. Verify `eth_chainId` on every RPC.
+2. Verify latest block agreement and archive/state requirements used by the adapter.
+3. Confirm fee model and receipt behavior.
+4. Add production environment variables without committing keys.
+5. Confirm `/api/status` reports at least two healthy endpoints for the live chain.
+
+## Project registration
+
+Register through `POST /api/collections`, protected by Basic Auth and `X-Support-Admin-Token`, or add a non-secret public record to `config/supported-projects.json` for idempotent deployment seeding.
+
+Example for the deliberately limited generic adapter:
 
 ```json
 {
@@ -67,41 +190,29 @@ Example configuration:
   "contractAddress": "0x0000000000000000000000000000000000000001",
   "chainId": 1,
   "mintMethod": "mint",
-  "mintAbi": [
-    {
-      "type": "function",
-      "name": "mint",
-      "stateMutability": "payable",
-      "inputs": [{ "name": "quantity", "type": "uint256" }],
-      "outputs": []
-    }
-  ],
+  "mintAbi": ["function mint(uint256 quantity) payable"],
   "mintPrice": "10000000000000000",
   "maxPerWallet": 2,
   "maxSupply": 10000,
   "adapterKey": "evm-contract-v1",
   "domains": ["mint.example.com"],
-  "siteUrl": "https://mint.example.com",
-  "imageUrl": "https://mint.example.com/project.jpg",
+  "siteUrl": "https://mint.example.com/mint",
   "adapterConfig": {
-    "phases": [
-      {
-        "id": "public",
-        "name": "Public",
-        "startsAt": "2026-08-20T18:00:00.000Z",
-        "endsAt": "2026-08-21T18:00:00.000Z",
-        "priceWei": "10000000000000000",
-        "maxPerWallet": 2
-      }
-    ]
+    "urlMatchers": [{ "domain": "mint.example.com", "path": "/mint" }],
+    "phases": [{
+      "id": "public",
+      "name": "Public",
+      "startsAt": "2026-08-20T18:00:00.000Z",
+      "endsAt": "2026-08-21T18:00:00.000Z",
+      "priceWei": "10000000000000000",
+      "maxPerWallet": 2
+    }]
   },
   "verified": true
 }
 ```
 
-Amounts such as `mintPrice` and `priceWei` are integer base units represented as strings. Never use decimal ETH values in these fields.
-
-Register it from a trusted machine:
+Amounts are integer base-unit strings. `urlMatchers.path` is exact; do not use broad domain-only matching for multi-project launchpads. Do not place API keys, cookies, bearer tokens, proofs, signatures, wallet keys, or private endpoints in seed/config files.
 
 ```bash
 curl --fail-with-body \
@@ -112,62 +223,64 @@ curl --fail-with-body \
   "https://YOUR-RAILWAY-DOMAIN/api/collections"
 ```
 
-Do not commit `project.json` if it contains private API credentials or allowlist secrets.
+## Required tests
 
-Public projects that must exist on every deployment can instead be added to `config/supported-projects.json`. Railway runs the idempotent `db:seed` step after schema setup, so reviewed entries are inserted or updated on each deploy. Never put API tokens, allowlist proofs, signatures, or other secrets in this file.
+Every new adapter needs deterministic tests for:
 
-## Generic adapter limitation
+- Exact calldata/value against a reviewed fixture or decoded official transaction.
+- Phase selection before, during, and after the window.
+- Eligible and ineligible signer behavior.
+- Quantity, wallet cap, remaining supply, pause, and price changes.
+- Bad/missing configuration and unexpected API response.
+- Proof/signature verification and expiry when applicable.
+- Exact official URL acceptance plus lookalike domain/path rejection.
+- Sender-aware `eth_call` and gas estimation on a fork/testnet or a read-only mainnet block.
 
-`evm-contract-v1` currently supports the simple transaction shape already handled by the mint engine: a payable mint function called with `quantity`, falling back to no arguments. It is suitable only when that exact behavior has been verified.
+Then run:
 
-It is **not** sufficient for:
-
-- Merkle proofs.
-- Server-generated signatures.
-- Multiple structured arguments or tuples.
-- Delegated mint contracts.
-- Captchas or authenticated project APIs.
-- Dutch auctions whose price must be read at execution time.
-- Contracts where recipient/referrer/value logic differs.
-
-Those projects require a purpose-built adapter and transaction builder before registration. Do not force them into the generic adapter.
-
-## Verification after registration
-
-1. Keep `ENABLE_LIVE_TRANSACTIONS=false`.
-2. Paste the official URL into the MintBot UI.
-3. Confirm the correct name, domain, chain, contract, phase, price, supply and limits appear.
-4. Confirm a lookalike subdomain and an unrelated path/domain remain unsupported.
-5. Import throwaway testnet wallets under a testnet main wallet.
-6. Run a dry-run mint and inspect the exact calldata/value/gas result.
-7. Confirm ineligible, underfunded and wrong-network wallets fail before broadcast.
-8. Test idempotency by repeating the same submission and confirming no duplicate task.
-9. Restart the Railway service with a scheduled test task and confirm recovery.
-10. Enable live transactions only for a funded testnet end-to-end test.
-
-## Updating or disabling support
-
-`POST /api/collections` performs an upsert when the same project `id` is supplied. Keep the project ID from the initial response when applying reviewed changes.
-
-There is intentionally no public UI for editing project support. Emergency disabling should be performed directly in PostgreSQL until a dedicated operator command exists:
-
-```sql
-UPDATE collections SET active = false WHERE id = 'PROJECT_UUID';
+```bash
+npm test
+npm run lint
+npm run build
+npx drizzle-kit check
+npm audit
+git diff --check
 ```
 
-Disable a project immediately if its domain, contract, phase configuration, proof/signature endpoint or official announcement changes unexpectedly. Re-run the full checklist before enabling it again.
+## Safe rollout
 
-## Pre-mainnet approval checklist
+1. Register/seed the project without enqueueing anything.
+2. Paste every official input form—URL, contract, exact name—and inspect displayed chain, contract, phase, time, price, cap, and supply.
+3. Confirm lookalike inputs remain unsupported.
+4. Run eligible and ineligible dry-runs where the phase/protocol permits simulation.
+5. Test the actual intended main or worker wallet. The selected wallet is the simulation sender.
+6. For a new adapter/protocol, execute a testnet/fork transaction or a deliberately tiny reviewed mainnet test before scaling wallet count/quantity.
+7. Confirm idempotency, receipt reporting, restart recovery, and no duplicate broadcast.
+8. Deploy, verify exact Git SHA, `/api/health`, authenticated `/api/status`, scheduler state, RPC health, and empty/unexpected queues.
 
-- Official domain independently confirmed.
-- Correct chain and deployed contract confirmed.
-- ABI and function signature verified.
-- Transaction arguments and value reproduced exactly.
-- Phase timing and timezone checked twice.
-- Eligibility/proof/signature flow tested.
-- Wrong-network and insufficient-balance failures tested.
-- Exact transaction simulated.
-- Testnet or fork test passed.
-- No secrets appear in logs or committed files.
-- Hammad reviewed the loaded UI details.
-- Live enablement is an explicit final action, never part of registration.
+## Updating and emergency disabling
+
+Use the same project UUID with `POST /api/collections` to update a record. Seeded projects must be changed in Git so the next deploy does not restore an old value.
+
+Immediately disable support if the official domain, implementation, router/drop address, API schema, authorized signer, phase configuration, or transaction shape changes unexpectedly:
+
+```sql
+UPDATE collections
+SET active = false, verified = false
+WHERE id = 'PROJECT_UUID';
+```
+
+For a durable seeded disable, also add the project to `config/disabled-projects.json`. Re-run the full investigation before restoring it.
+
+## Future-session handoff template
+
+Record these facts in the daily memory and commit message:
+
+- Project name, official URLs, chain ID, collection and router/drop addresses.
+- Protocol/launchpad and exact version or custom adapter key.
+- Phase type, authoritative timing, price/currency, wallet cap, and supply.
+- Proof/signature/eligibility source and validation method.
+- Reviewed transaction selector, target, argument shape, and value rule.
+- Tests/simulations performed, addresses used only in abbreviated form, and block/testnet reference.
+- Commit SHA, deployment ID/status, health/status result, and whether any transaction was broadcast.
+- Remaining limitations. Never claim public support covers allowlist/signed/token-gated phases unless that exact path was implemented and tested.

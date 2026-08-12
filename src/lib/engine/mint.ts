@@ -5,6 +5,7 @@ import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { recoveredJobStatus, selectExecutionPhase } from "@/lib/mint-policy";
+import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { getProvider } from "@/lib/chains";
 import { sendPrivateTransaction, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
@@ -66,8 +67,12 @@ async function loadExecutionState(jobId: string) {
     db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1),
   ]);
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint support is disabled or no longer verified");
-  if (!wallet || !wallet.active || wallet.role !== "worker" || !wallet.parentWalletId) throw new Error("An active worker wallet is required");
-  if (wallet.chainId !== collection.chainId) throw new Error("Worker wallet and mint network no longer match");
+  if (!wallet) throw new Error("Selected mint wallet was not found");
+  const [parent] = wallet.role === "worker" && wallet.parentWalletId
+    ? await db.select().from(schema.wallets).where(eq(schema.wallets.id, wallet.parentWalletId)).limit(1)
+    : [];
+  const eligibilityError = mintWalletEligibilityError(wallet, collection.chainId, parent);
+  if (eligibilityError) throw new Error(eligibilityError);
   return { job, collection, wallet };
 }
 
@@ -139,7 +144,7 @@ async function assertBalanceAndSpendLimit(
   const [{ total = "0" } = {}] = rows as unknown as Array<{ total?: string }>;
   const reservedOrSpent = BigInt(total);
   if (reservedOrSpent + required > BigInt(wallet.spendLimit)) {
-    throw new Error("Worker wallet spend limit would be exceeded");
+    throw new Error("Mint wallet spend limit would be exceeded");
   }
 }
 
@@ -407,9 +412,18 @@ export async function batchMint(
     ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, uniqueWalletIds))
     : [];
   if (wallets.length !== uniqueWalletIds.length) throw new Error("One or more selected wallets were not found");
+  const parentIds = [...new Set(wallets.flatMap((wallet) => wallet.role === "worker" && wallet.parentWalletId ? [wallet.parentWalletId] : []))];
+  const parents = parentIds.length
+    ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, parentIds))
+    : [];
+  const parentById = new Map(parents.map((parent) => [parent.id, parent]));
   for (const wallet of wallets) {
-    if (!wallet.active || wallet.role !== "worker" || !wallet.parentWalletId) throw new Error("Only active worker wallets can mint");
-    if (wallet.chainId !== collection.chainId) throw new Error("One or more workers are on the wrong network");
+    const eligibilityError = mintWalletEligibilityError(
+      wallet,
+      collection.chainId,
+      wallet.parentWalletId ? parentById.get(wallet.parentWalletId) : undefined,
+    );
+    if (eligibilityError) throw new Error(eligibilityError);
   }
 
   const scheduledAt = phase.status === "upcoming" ? phase.startsAt : undefined;

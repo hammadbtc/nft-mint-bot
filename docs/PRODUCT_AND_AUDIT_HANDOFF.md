@@ -8,7 +8,7 @@ MintBot is a focused, single-user minting tool. The visible workflow is:
 
 1. Paste a supported mint URL.
 2. Load verified project, phase, price, supply, timing and eligibility data.
-3. Select worker wallets and quantity.
+3. Select active main and/or worker wallets and quantity.
 4. Mint immediately or schedule for launch.
 5. Review per-wallet hits, misses, transaction hashes, gas and exact errors.
 
@@ -17,7 +17,7 @@ The only main pages are Mints, Wallets and Disperse. Light and dark themes are s
 ## Explicit scope
 
 - Mints: URL resolver, supported-project adapters, scheduling and results.
-- Wallets: one main wallet with independently generated/imported worker wallets.
+- Wallets: one main wallet per network with optional independently generated/imported worker wallets. Main and worker wallets may mint.
 - Disperse: fund workers from main and sweep funds back to main.
 - Technical details such as RPC selection, gas, nonces, simulation and retries remain automatic.
 
@@ -31,8 +31,9 @@ The only main pages are Mints, Wallets and Disperse. Light and dark themes are s
 
 ## Wallet model
 
-- A main wallet is the funding and consolidation wallet.
+- A main wallet is the funding/consolidation wallet and may also mint directly for a simple one-wallet setup.
 - Worker wallets are independent keys grouped under a main wallet; they are not derived from the main seed.
+- Mint selection accepts any active same-chain main wallet. An active worker is accepted only while its same-chain main parent remains active.
 - Generated secrets must be shown exactly once for backup and encrypted before database storage.
 - Funding and sweeping are explicit reviewed operations. No transaction is broadcast from a preview request.
 
@@ -69,7 +70,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - One main wallet per network; workers must be independent same-network children of that main.
 - Generated worker keys are returned once with no-cache headers for immediate backup.
 - Exact verified domain/contract/name resolution through a registered adapter; unsupported inputs are rejected.
-- Batch requests validate active verified support, server-resolved phase timing, quantity, worker role and network, then create the whole batch atomically under an idempotency lock.
+- Batch requests validate active verified support, server-resolved phase timing, quantity, wallet role/hierarchy and network, then create the whole batch atomically under an idempotency lock.
 - Jobs may be scheduled while broadcasting is locked. The scheduler holds live work until both safety gates are enabled, while dry-runs can execute.
 - Scheduled jobs and Disperse operations use expiring leases and restart recovery. Confirmed ERC-20 approvals resume the mint rather than counting as a completed mint.
 - Disperse supports only fund-workers and sweep-to-main, requires a fresh fingerprinted fee/balance preview, queues atomically, and persists signed transfers before broadcast.
@@ -93,7 +94,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Drizzle schema check passes.
 - Seventeen unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path rejection, reviewed adapter parsing, phase/recovery policy, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
-- Live blockchain execution has intentionally not been enabled or claimed as end-to-end tested.
+- Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 
 ## Required external configuration before live funds
 
@@ -107,4 +108,4 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 
 Review schema migrations, secret lifecycle, authorization assumptions, URL/domain matching, adapter transaction construction, allowlist proof/signature handling, nonce allocation, job claiming, idempotency, retry classification, broadcast persistence, receipt interpretation, RPC failover, Disperse totals, gas reserve logic, sweep behavior, logging redaction, dependency audit and restart recovery. Run unit, integration, production build and testnet end-to-end tests before enabling mainnet.
 
-Verify the Railway deploy/predeploy logs, database hardening migration, Hoodiez deactivation, Cash Rabbits resolution, authenticated `/api/status`, locked broadcast badge and server-derived scheduling. Do not enable live variables automatically.
+Verify Railway deploy/predeploy logs, database migrations, disabled-project enforcement, project resolution, authenticated `/api/status`, live-gate state and server-derived scheduling. Never change live variables without Hammad's explicit instruction.

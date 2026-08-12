@@ -6,9 +6,9 @@ Focused, single-user NFT mint automation with three workflows: Mints, Wallets an
 
 - Paste a supported mint URL, contract address or exact project name.
 - Review verified project and phase details.
-- Select worker wallets and quantity, then mint now or schedule.
+- Select active main and/or worker wallets and quantity, then mint now or schedule.
 - Review per-wallet task status and results.
-- Import one main wallet, create independent workers beneath it, fund workers and sweep balances back.
+- Import one main wallet, mint directly from it when desired, or create independent workers beneath it for multi-wallet runs; fund workers and sweep balances back.
 
 Unsupported projects are rejected rather than guessed. Mint and Disperse work can be safely queued while broadcasting is locked; live transactions require both explicit safety gates after verification.
 

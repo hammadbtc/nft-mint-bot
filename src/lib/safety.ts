@@ -54,5 +54,5 @@ export function stableJson(value: unknown): string {
 }
 
 export function isPermanentMintError(message: string): boolean {
-  return /not supported|disabled|wrong network|worker wallet|quantity|mint has ended|mint has not started|wallet limit|remaining supply|insufficient|spend limit|invalid|not found|inactive|simulation failed/i.test(message);
+  return /not supported|disabled|wrong network|mint wallet|worker wallet|quantity|mint has ended|mint has not started|wallet limit|remaining supply|insufficient|spend limit|invalid|not found|inactive|simulation failed/i.test(message);
 }
