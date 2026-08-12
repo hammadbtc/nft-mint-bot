@@ -5,7 +5,7 @@ import { ethers } from "ethers";
 import { formatContractTime } from "@/lib/format-contract-time";
 
 type Wallet = { id: string; label: string; address: string; chainId: number; role: "main" | "worker"; active: boolean };
-type Collection = { id: string; name: string; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseName?: string; phaseStatus: string; startsAt: string | null; endsAt: string | null; createdAt: string };
+type Collection = { id: string; name: string; slug?: string | null; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseName?: string; phaseStatus: string; startsAt: string | null; endsAt: string | null; active?: boolean; verified?: boolean; createdAt: string };
 type Attempt = { id: string; kind: "approval" | "mint"; status: string; txHash: string | null; gasUsed: string | null; effectiveGasPrice: string | null; error: string | null };
 type Job = { id: string; batchId: string | null; walletId: string; collectionId: string; status: string; quantity: number; dryRun: boolean; scheduledAt: string | null; createdAt: string; error?: string | null; attempts: Attempt[] };
 
@@ -14,7 +14,13 @@ async function json(response: Response) {
   const text = await response.text();
   let data: unknown;
   try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(`Server returned an invalid response (${response.status})`); }
-  if (!response.ok) throw new Error(typeof data === "object" && data && "error" in data ? String(data.error) : `Request failed (${response.status})`);
+  if (!response.ok) {
+    if (typeof data === "object" && data) {
+      if ("error" in data) throw new Error(String(data.error));
+      if ("reason" in data) throw new Error(String(data.reason));
+    }
+    throw new Error(`Request failed (${response.status})`);
+  }
   return data;
 }
 
@@ -30,6 +36,21 @@ export default function MintsPage() {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState("minted");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const suggestions = useMemo(() => {
+    const value = query.trim().toLowerCase();
+    if (!showSuggestions || value.length < 2 || /^https?:\/\//i.test(value) || /^0x[a-f0-9]{40}$/i.test(value)) return [];
+    const compact = value.replace(/[^a-z0-9]/g, "");
+    return collections
+      .filter((item) => item.active !== false && item.verified !== false)
+      .filter((item) => {
+        const name = item.name.toLowerCase();
+        const slug = (item.slug || "").toLowerCase();
+        return name.includes(value) || slug.includes(value) || name.replace(/[^a-z0-9]/g, "").includes(compact) || slug.replace(/[^a-z0-9]/g, "").includes(compact);
+      })
+      .slice(0, 5);
+  }, [collections, query, showSuggestions]);
 
   const load = async () => {
     const [walletData, collectionData, jobData] = await Promise.all([
@@ -55,11 +76,14 @@ export default function MintsPage() {
     [wallets, project],
   );
 
-  const resolve = async () => {
+  const resolve = async (rawInput = query) => {
+    const input = rawInput.trim();
+    if (!input) return;
+    setShowSuggestions(false);
     setBusy(true);
     setMessage("Scanning supported mint adapters…");
     try {
-      const response = await fetch("/api/mints/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input: query }) });
+      const response = await fetch("/api/mints/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ input }) });
       const data = await json(response) as Record<string, unknown>;
       if (!data.supported) throw new Error(String(data.reason || "This mint isn’t supported yet"));
       const phases = Array.isArray(data.phases) ? data.phases as Array<Record<string, unknown>> : [];
@@ -78,6 +102,13 @@ export default function MintsPage() {
       setProject(null);
       setMessage(error instanceof Error ? error.message : "This mint isn’t supported yet");
     } finally { setBusy(false); }
+  };
+
+  const loadPastedMint = (value: string) => {
+    const input = value.trim();
+    setQuery(input);
+    setShowSuggestions(false);
+    if (/^(https?:\/\/|www\.)/i.test(input) || /^0x[a-fA-F0-9]{40}$/.test(input)) void resolve(input);
   };
 
   const toggle = (id: string) => setSelected((current) => {
@@ -116,8 +147,11 @@ export default function MintsPage() {
   }, [jobs]);
 
   return <>
-    <div className="page-heading"><div><h1>Mints</h1><p>Paste a supported mint link and we&apos;ll handle the rest.</p></div></div>
-    <div className="search-box"><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void resolve()} placeholder="Paste mint URL, contract, or project name"/><button disabled={busy || !query.trim()} onClick={() => void resolve()}>{busy ? "Checking…" : "Find mint →"}</button></div>
+    <div className="page-heading"><div><h1>Mints</h1><p>Paste a supported mint link or search by project name.</p></div></div>
+    <div className="mint-search">
+      <div className="search-box"><input value={query} onFocus={() => setShowSuggestions(true)} onChange={(event) => { setQuery(event.target.value); setShowSuggestions(true); }} onPaste={(event) => { const value = event.clipboardData.getData("text"); if (value) { event.preventDefault(); loadPastedMint(value); } }} onKeyDown={(event) => event.key === "Enter" && void resolve()} placeholder="Paste mint URL, contract, or search project name"/><button disabled={busy || !query.trim()} onClick={() => void resolve()}>{busy ? "Checking…" : "Find mint →"}</button></div>
+      {suggestions.length > 0 && <div className="search-results" role="listbox" aria-label="Supported mint matches">{suggestions.map((item) => <button key={item.id} type="button" onClick={() => { setQuery(item.name); void resolve(item.name); }}><span>{item.name}</span><small>{short(item.contractAddress)}</small></button>)}</div>}
+    </div>
     {message && <div className="alert" style={{ marginBottom: 18 }}>{message}</div>}
     {!project ? <div className="panel empty"><div><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M20 4c-8 0-14 3.5-14 10 0 3 2 5 5 5 6.5 0 9-7 9-15Z"/><path d="M4 21c2-5 6-8 11-11"/></svg><h2>No mint selected</h2><p>Supported and scheduled mints will appear here.</p></div></div> :
       <section className="panel mint-card">

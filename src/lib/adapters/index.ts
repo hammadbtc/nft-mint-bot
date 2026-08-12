@@ -51,6 +51,45 @@ async function activeCollections(): Promise<SupportedCollection[]> {
   return db.select().from(schema.collections).where(and(eq(schema.collections.active,true),eq(schema.collections.verified,true)));
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Ranked, deterministic project-name search. URL and contract resolution stay exact. */
+export function searchCollectionsByName<T extends Pick<SupportedCollection, "name" | "slug">>(
+  collections: T[],
+  rawQuery: string,
+): T[] {
+  const query = normalizeSearchText(rawQuery);
+  if (query.length < 2) return [];
+  const compactQuery = query.replace(/ /g, "");
+
+  return collections
+    .map((collection) => {
+      const name = normalizeSearchText(collection.name);
+      const slug = normalizeSearchText(collection.slug || "");
+      const compactName = name.replace(/ /g, "");
+      const compactSlug = slug.replace(/ /g, "");
+      const words = `${name} ${slug}`.split(" ").filter(Boolean);
+      let score = Number.POSITIVE_INFINITY;
+      if (query === name || query === slug) score = 0;
+      else if (compactQuery === compactName || compactQuery === compactSlug) score = 1;
+      else if (words.some((word) => word === query)) score = 2;
+      else if (words.some((word) => word.startsWith(query))) score = 3;
+      else if (name.startsWith(query) || slug.startsWith(query)) score = 4;
+      else if (name.includes(query) || slug.includes(query) || compactName.includes(compactQuery) || compactSlug.includes(compactQuery)) score = 5;
+      return { collection, score };
+    })
+    .filter((item) => Number.isFinite(item.score))
+    .sort((left, right) => left.score - right.score || left.collection.name.localeCompare(right.collection.name))
+    .map((item) => item.collection);
+}
+
 export async function resolveMintInput(rawInput: string): Promise<ResolvedMint | { supported:false; reason:string }> {
   const input = rawInput.trim();
   if (!input || input.length > 2048) return { supported:false, reason:"Enter a valid mint URL, contract, or project name" };
@@ -67,8 +106,21 @@ export async function resolveMintInput(rawInput: string): Promise<ResolvedMint |
       source = "url";
       match = collections.find((item)=>urlMatches(item, url));
     } else {
-      const query = input.toLowerCase();
-      match = collections.find((item)=>item.slug?.toLowerCase()===query || item.name.toLowerCase()===query);
+      const matches = searchCollectionsByName(collections, input);
+      const normalizedInput = normalizeSearchText(input);
+      const compactInput = normalizedInput.replace(/ /g, "");
+      const exactMatch = matches.find((item) => {
+        const name = normalizeSearchText(item.name);
+        const slug = normalizeSearchText(item.slug || "");
+        return normalizedInput === name || normalizedInput === slug || compactInput === name.replace(/ /g, "") || compactInput === slug.replace(/ /g, "");
+      });
+      if (exactMatch) match = exactMatch;
+      else if (matches.length > 1) {
+        return {
+          supported:false,
+          reason:`Multiple supported mints match: ${matches.slice(0, 4).map((item) => item.name).join(", ")}. Type a more specific name.`,
+        };
+      } else match = matches[0];
     }
   }
   if (!match) return { supported:false, reason:"This mint is not supported yet" };
