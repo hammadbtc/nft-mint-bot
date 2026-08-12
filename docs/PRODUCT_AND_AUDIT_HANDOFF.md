@@ -92,7 +92,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Seventeen unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path rejection, reviewed adapter parsing, phase/recovery policy, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
+- Eighteen unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path rejection, reviewed adapter parsing, phase/recovery policy, main/worker mint-wallet eligibility, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 
