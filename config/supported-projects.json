@@ -1,0 +1,27 @@
+[
+  {
+    "id": "94e1fbcf-1998-49a1-9289-e998e2f1fc63",
+    "name": "Hoodiez Brokers",
+    "slug": "hoodiez-brokers",
+    "contractAddress": "0x29CBeF6f555C017172275C5B09b066A892bc4E2c",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "35000000000000",
+    "maxPerWallet": 50,
+    "maxSupply": 10000,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com", "hoodiezbrokers.xyz"],
+    "siteUrl": "https://opensea.io/collection/hoodiez-brokers/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/hoodiez-brokers/image_type_logo/b1bc3295fc0dea71036ba79d71f698/dbb1bc3295fc0dea71036ba79d71f698.jpeg",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "urlMatchers": [
+        { "domain": "opensea.io", "pathPrefix": "/collection/hoodiez-brokers" },
+        { "domain": "robinhoodchain.blockscout.com", "pathPrefix": "/address/0x29cbef6f555c017172275c5b09b066a892bc4e2c" },
+        { "domain": "hoodiezbrokers.xyz" }
+      ]
+    }
+  }
+]

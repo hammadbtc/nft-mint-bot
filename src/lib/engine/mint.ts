@@ -6,6 +6,7 @@ import { getProvider } from "@/lib/chains";
 import { sendPrivateTransaction, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
 import { eq, and, desc, sql } from "drizzle-orm";
+import { getMintAdapter } from "@/lib/adapters";
 
 // ─── ERC20 Minimal ABI ────────────────────────────────────────────────
 const ERC20_ABI = [
@@ -207,33 +208,21 @@ export async function executeMint(params: MintJobParams) {
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(walletId, provider);
 
-  let mintAbi: ethers.InterfaceAbi;
-  try {
-    mintAbi = JSON.parse(collection.mintAbi);
-  } catch {
-    throw new Error(`Invalid ABI for collection ${collection.name}`);
-  }
-
-  const contract = new ethers.Contract(collection.contractAddress, mintAbi, signer);
-  const mintFn = contract.getFunction(collection.mintMethod);
-  let txData: string;
-
-  try {
-    const populated = await mintFn.populateTransaction(params.quantity || 1);
-    txData = populated.data!;
-  } catch {
-    const populated = await mintFn.populateTransaction();
-    txData = populated.data!;
-  }
-
-  const tx: ethers.TransactionRequest = {
-    to: collection.contractAddress,
-    data: txData,
-    chainId: collection.chainId,
-  };
-
-  if (collection.mintPrice) {
-    tx.value = BigInt(collection.mintPrice) * BigInt(params.quantity || 1);
+  const adapter = getMintAdapter(collection.adapterKey);
+  let tx: ethers.TransactionRequest;
+  if (adapter?.buildTransaction) {
+    tx = await adapter.buildTransaction(collection, signer.address, params.quantity || 1, provider);
+  } else {
+    let mintAbi: ethers.InterfaceAbi;
+    try { mintAbi = JSON.parse(collection.mintAbi); }
+    catch { throw new Error(`Invalid ABI for collection ${collection.name}`); }
+    const contract = new ethers.Contract(collection.contractAddress, mintAbi, signer);
+    const mintFn = contract.getFunction(collection.mintMethod);
+    let txData: string;
+    try { txData = (await mintFn.populateTransaction(params.quantity || 1)).data!; }
+    catch { txData = (await mintFn.populateTransaction()).data!; }
+    tx = { to: collection.contractAddress, data: txData, chainId: collection.chainId };
+    if (collection.mintPrice) tx.value = BigInt(collection.mintPrice) * BigInt(params.quantity || 1);
   }
 
   // ─── Gas Estimation (must run before balance/spend checks) ──────────

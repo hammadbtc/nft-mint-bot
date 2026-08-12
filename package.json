@@ -9,7 +9,8 @@
     "start": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
     "env:check": "node scripts/validate-env.mjs",
     "db:push": "drizzle-kit push",
-    "railway:predeploy": "npm run env:check && npm run db:push",
+    "db:seed": "node scripts/seed-supported-projects.mjs",
+    "railway:predeploy": "npm run env:check && npm run db:push && npm run db:seed",
     "lint": "eslint",
     "test": "node --import tsx --test tests/**/*.test.ts"
   },

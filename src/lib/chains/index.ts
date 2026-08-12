@@ -22,6 +22,13 @@ const HAS_ALCHEMY = !!(ALCHEMY_KEY && ALCHEMY_KEY.length > 10);
 const al = (path: string) => HAS_ALCHEMY ? `https://${path}.g.alchemy.com/v2/${ALCHEMY_KEY}` : false;
 
 const CHAINS: Record<number, ChainConfig> = {
+  4663: {
+    id: 4663,
+    name: "Robinhood Chain",
+    symbol: "ETH",
+    rpcUrls: ["https://rpc.mainnet.chain.robinhood.com"],
+    explorerUrl: "https://robinhoodchain.blockscout.com",
+  },
   1: {
     id: 1,
     name: "Ethereum",

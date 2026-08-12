@@ -2,9 +2,13 @@ import { and, eq } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { evmContractV1 } from "./evm-contract-v1";
+import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import type { MintAdapter, ResolvedMint, SupportedCollection } from "./types";
 
-const registry = new Map<string, MintAdapter>([[evmContractV1.key, evmContractV1]]);
+const registry = new Map<string, MintAdapter>([
+  [evmContractV1.key, evmContractV1],
+  [openseaSeaDropV1.key, openseaSeaDropV1],
+]);
 
 function normalizeDomain(value: string) {
   return value.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
@@ -18,6 +22,19 @@ function parseDomains(raw: string): string[] {
 function safeUrl(input: string): URL | null {
   try { const candidate = /^https?:\/\//i.test(input) ? input : `https://${input}`; const url = new URL(candidate); return ["http:","https:"].includes(url.protocol) ? url : null; }
   catch { return null; }
+}
+
+function urlMatches(collection: SupportedCollection, url: URL): boolean {
+  const hostname = normalizeDomain(url.hostname);
+  if (!parseDomains(collection.domains).some((domain) => hostname === domain)) return false;
+  try {
+    const config = JSON.parse(collection.adapterConfig || "{}") as { urlMatchers?: Array<{ domain?: string; pathPrefix?: string }> };
+    if (!config.urlMatchers?.length) return true;
+    return config.urlMatchers.some((matcher) => {
+      if (!matcher.domain || normalizeDomain(matcher.domain) !== hostname) return false;
+      return !matcher.pathPrefix || url.pathname.toLowerCase().startsWith(matcher.pathPrefix.toLowerCase());
+    });
+  } catch { return false; }
 }
 
 async function activeCollections(): Promise<SupportedCollection[]> {
@@ -38,8 +55,7 @@ export async function resolveMintInput(rawInput: string): Promise<ResolvedMint |
     const url = safeUrl(input);
     if (url && (input.includes(".") || /^https?:/i.test(input))) {
       source = "url";
-      const hostname = normalizeDomain(url.hostname);
-      match = collections.find((item)=>parseDomains(item.domains).some((domain)=>hostname===domain));
+      match = collections.find((item)=>urlMatches(item, url));
     } else {
       const query = input.toLowerCase();
       match = collections.find((item)=>item.slug?.toLowerCase()===query || item.name.toLowerCase()===query);
@@ -52,3 +68,5 @@ export async function resolveMintInput(rawInput: string): Promise<ResolvedMint |
 }
 
 export function supportedAdapterKeys() { return [...registry.keys()]; }
+
+export function getMintAdapter(key: string): MintAdapter | undefined { return registry.get(key); }

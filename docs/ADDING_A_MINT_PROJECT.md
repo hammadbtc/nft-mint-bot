@@ -22,6 +22,8 @@ Use this for personal mint websites or unusual contracts. It may need custom arg
 
 Custom adapters belong under `src/lib/adapters/`. Register the adapter key in `src/lib/adapters/index.ts` and add tests before registering the project.
 
+The built-in `opensea-seadrop-v1` adapter handles reviewed OpenSea SeaDrop public phases. It reads the live public-drop price, timing, wallet limit, and supply from the chain immediately before building each transaction. It does not support signed, allowlist, or token-gated SeaDrop phases.
+
 ## Information needed from Hammad
 
 For each upcoming mint, collect:
@@ -112,7 +114,9 @@ curl --fail-with-body \
 
 Do not commit `project.json` if it contains private API credentials or allowlist secrets.
 
-## Current generic adapter limitation
+Public projects that must exist on every deployment can instead be added to `config/supported-projects.json`. Railway runs the idempotent `db:seed` step after schema setup, so reviewed entries are inserted or updated on each deploy. Never put API tokens, allowlist proofs, signatures, or other secrets in this file.
+
+## Generic adapter limitation
 
 `evm-contract-v1` currently supports the simple transaction shape already handled by the mint engine: a payable mint function called with `quantity`, falling back to no arguments. It is suitable only when that exact behavior has been verified.
 

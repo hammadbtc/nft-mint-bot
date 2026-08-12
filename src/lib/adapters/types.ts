@@ -1,3 +1,4 @@
+import type { ethers } from "ethers";
 import type { collections } from "@/lib/db/schema";
 
 export type SupportedCollection = typeof collections.$inferSelect;
@@ -30,4 +31,10 @@ export type ResolvedMint = {
 export interface MintAdapter {
   key: string;
   resolve(collection: SupportedCollection, source: ResolvedMint["source"]): Promise<ResolvedMint>;
+  buildTransaction?: (
+    collection: SupportedCollection,
+    signerAddress: string,
+    quantity: number,
+    provider: ethers.Provider,
+  ) => Promise<ethers.TransactionRequest>;
 }
