@@ -1,239 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-interface Stats {
-  wallets: number;
-  collections: number;
-  alerts: number;
-  jobs: {
-    total: number;
-    completed: number;
-    failed: number;
-    pending: number;
-    running: number;
-    dryRuns: number;
-    flashbots: number;
-  };
-  recentActivity: any[];
-}
+type Wallet = { id:string; label:string; address:string; chainId:number };
+type Collection = { id:string; name:string; contractAddress:string; chainId:number; mintPrice:string|null; maxPerWallet:number|null; maxSupply:number|null; createdAt:string };
+type Job = { id:string; walletId:string; collectionId:string; status:string; quantity:number; scheduledAt:string|null; createdAt:string; error?:string|null };
 
-const cards = [
-  { key: "wallets",    label: "WALLETS",      accent: "card-accent-emerald", valueKey: "wallets" as const },
-  { key: "collections", label: "COLLECTIONS",  accent: "card-accent-blue",    valueKey: "collections" as const },
-  { key: "total",      label: "TOTAL JOBS",    accent: "card-accent-purple",  valueKey: "total" as const },
-  { key: "completed",  label: "COMPLETED",     accent: "card-accent-lime",    valueKey: "completed" as const },
-  { key: "failed",     label: "FAILED",        accent: "card-accent-rose",    valueKey: "failed" as const },
-  { key: "pending",    label: "PENDING",       accent: "card-accent-amber",   valueKey: "pending" as const },
-  { key: "flashbots",  label: "FLASHBOTS",     accent: "card-accent-purple",  valueKey: "flashbots" as const },
-  { key: "dryRuns",    label: "DRY RUNS",      accent: "card-accent-cyan",    valueKey: "dryRuns" as const },
-];
+const short = (v:string) => `${v.slice(0,6)}…${v.slice(-5)}`;
 
-export default function DashboardPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [liveJobs, setLiveJobs] = useState<any[]>([]);
-  const [connected, setConnected] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/stats")
-      .then((r) => r.json())
-      .then((data) => {
-        setStats(data);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-
-    const connect = () => {
-      es = new EventSource("/api/stream");
-      setConnected(true);
-
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "initial" || data.type === "update") {
-            setLiveJobs(data.jobs || []);
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        setConnected(false);
-        es?.close();
-        reconnectTimer = setTimeout(connect, 5000);
-      };
-    };
-
-    connect();
-    return () => {
-      es?.close();
-      clearTimeout(reconnectTimer);
-    };
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <span className="text-zinc-600 font-mono text-xs uppercase tracking-widest animate-pulse">
-          Loading...
-        </span>
-      </div>
-    );
-  }
-
-  if (!stats) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <span className="text-red-400/60 font-mono text-xs uppercase tracking-widest">
-          Failed to load stats
-        </span>
-      </div>
-    );
-  }
-
-  const successRate =
-    stats.jobs.total > 0
-      ? ((stats.jobs.completed / stats.jobs.total) * 100).toFixed(1)
-      : "—";
-
-  return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h2 className="text-white text-lg font-semibold tracking-tight">Dashboard</h2>
-          <p className="text-zinc-600 text-xs font-mono uppercase tracking-widest mt-0.5">
-            System Overview
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-zinc-600 text-[11px] font-mono">
-            SUCCESS RATE <span className="text-white font-semibold">{successRate}%</span>
-          </span>
-          <span className={`text-[10px] px-2 py-1 rounded font-mono uppercase tracking-wider ${
-            connected
-              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-              : "bg-red-500/10 text-red-400 border border-red-500/20"
-          }`}>
-            {connected ? "LIVE" : "OFFLINE"}
-          </span>
-        </div>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-10">
-        {cards.map((card) => {
-          const value = card.valueKey === "wallets" || card.valueKey === "collections"
-            ? (stats as any)[card.valueKey]
-            : (stats.jobs as any)[card.valueKey];
-          return (
-            <div
-              key={card.key}
-              className={`${card.accent} bg-zinc-900/70 border border-zinc-800/70 rounded-lg p-4 hover:bg-zinc-900 transition-colors`}
-            >
-              <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest mb-2">
-                {card.label}
-              </div>
-              <div className="text-3xl font-semibold text-white tracking-tight font-mono">
-                {value ?? 0}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Live jobs */}
-      <div>
-        <h3 className="text-white text-sm font-semibold tracking-tight mb-4 flex items-center gap-2">
-          LIVE JOBS
-          {liveJobs.length > 0 && (
-            <span className="text-[10px] text-zinc-600 font-mono">
-              SSE
-            </span>
-          )}
-        </h3>
-
-        {liveJobs.length === 0 ? (
-          <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg p-8 text-center">
-            <span className="text-zinc-600 text-xs font-mono uppercase tracking-widest">
-              No active jobs
-            </span>
-          </div>
-        ) : (
-          <div className="overflow-x-auto border border-zinc-800/50 rounded-lg">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b border-zinc-800/50">
-                  <th className="py-3 px-4 text-[10px] text-zinc-600 font-mono uppercase tracking-widest font-medium">
-                    Job
-                  </th>
-                  <th className="py-3 px-4 text-[10px] text-zinc-600 font-mono uppercase tracking-widest font-medium">
-                    Status
-                  </th>
-                  <th className="py-3 px-4 text-[10px] text-zinc-600 font-mono uppercase tracking-widest font-medium hidden sm:table-cell">
-                    Flags
-                  </th>
-                  <th className="py-3 px-4 text-[10px] text-zinc-600 font-mono uppercase tracking-widest font-medium">
-                    Error
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveJobs.slice(0, 10).map((job: any) => (
-                  <tr key={job.id} className="border-b border-zinc-800/30 hover:bg-zinc-900/50 transition-colors">
-                    <td className="py-2.5 px-4 font-mono text-xs text-zinc-500">
-                      {job.id.slice(0, 8)}&hellip;
-                    </td>
-                    <td className="py-2.5 px-4">
-                      <StatusBadge status={job.status} />
-                    </td>
-                    <td className="py-2.5 px-4 hidden sm:table-cell">
-                      <div className="flex gap-1">
-                        {job.useFlashbots && (
-                          <span className="px-1.5 py-0.5 text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded font-mono uppercase tracking-wider">
-                            FB
-                          </span>
-                        )}
-                        {job.dryRun && (
-                          <span className="px-1.5 py-0.5 text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded font-mono uppercase tracking-wider">
-                            DRY
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-4 text-red-400/60 text-xs max-w-[140px] lg:max-w-[220px] truncate font-mono">
-                      {job.error || <span className="text-zinc-700">&mdash;</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-    failed: "bg-red-500/10 text-red-400 border-red-500/20",
-    pending: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    running: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    cancelled: "bg-zinc-500/10 text-zinc-500 border-zinc-500/20",
-  };
-  return (
-    <span
-      className={`px-2 py-0.5 rounded text-[10px] border font-mono uppercase tracking-wider ${
-        styles[status] || styles.pending
-      }`}
-    >
-      {status}
-    </span>
-  );
+export default function MintsPage() {
+  const [query,setQuery]=useState(""); const [wallets,setWallets]=useState<Wallet[]>([]); const [collections,setCollections]=useState<Collection[]>([]); const [jobs,setJobs]=useState<Job[]>([]);
+  const [project,setProject]=useState<Collection|null>(null); const [selected,setSelected]=useState<Set<string>>(new Set()); const [qty,setQty]=useState(1); const [scheduledAt,setScheduledAt]=useState("");
+  const [message,setMessage]=useState(""); const [busy,setBusy]=useState(false); const [expanded,setExpanded]=useState<string|null>(null); const [tab,setTab]=useState("minted");
+  const load=()=>Promise.all([fetch("/api/wallets").then(r=>r.json()),fetch("/api/collections").then(r=>r.json()),fetch("/api/jobs?limit=100").then(r=>r.json())]).then(([w,c,j])=>{setWallets(Array.isArray(w)?w:[]);setCollections(Array.isArray(c)?c:[]);setJobs(Array.isArray(j)?j:[])}).catch(()=>{});
+  useEffect(()=>{load()},[]);
+  const compatible=useMemo(()=>project?wallets.filter(w=>w.chainId===project.chainId):wallets,[wallets,project]);
+  const resolve=async()=>{setBusy(true);setMessage("Scanning supported mint adapters…");try{const response=await fetch("/api/mints/resolve",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input:query})});const data=await response.json();if(!response.ok||!data.supported)throw new Error(data.reason||"This mint isn’t supported yet");const phase=data.phases?.find((item:{status:string})=>item.status==="live")||data.phases?.[0];setProject({id:data.collectionId,name:data.name,contractAddress:data.contractAddress,chainId:data.chainId,mintPrice:phase?.priceWei||null,maxPerWallet:phase?.maxPerWallet||null,maxSupply:data.maxSupply||null,createdAt:""});setMessage("");setSelected(new Set())}catch(error){setProject(null);setMessage(error instanceof Error?error.message:"This mint isn’t supported yet")}finally{setBusy(false)}};
+  const toggle=(id:string)=>setSelected(p=>{const n=new Set(p);if(n.has(id))n.delete(id);else n.add(id);return n});
+  const schedule=async()=>{if(!project||!selected.size)return;setBusy(true);setMessage("");try{const idempotencyKey=crypto.randomUUID();const r=await fetch("/api/jobs/batch",{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify({collectionId:project.id,walletIds:[...selected],quantity:qty,scheduledAt:scheduledAt?new Date(scheduledAt).toISOString():undefined})});const d=await r.json();if(!r.ok)throw new Error(d.error);setMessage(`${selected.size} mint task${selected.size>1?"s":""} queued successfully.`);await load()}catch(e){setMessage(e instanceof Error?e.message:"Could not schedule mint")}finally{setBusy(false)}};
+  const groups=useMemo(()=>{const map=new Map<string,Job[]>();jobs.forEach(j=>map.set(j.collectionId,[...(map.get(j.collectionId)||[]),j]));return [...map.entries()]},[jobs]);
+  return <>
+    <div className="page-heading"><div><h1>Mints</h1><p>Paste a supported mint link and we&apos;ll handle the rest.</p></div></div>
+    <div className="search-box"><input value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&resolve()} placeholder="Paste mint URL, contract, or project name"/><button disabled={busy} onClick={resolve}>{busy?"Checking…":"Find mint →"}</button></div>
+    {message&&<div className="alert" style={{marginBottom:18}}>{message}</div>}
+    {!project?<div className="panel empty"><div><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M20 4c-8 0-14 3.5-14 10 0 3 2 5 5 5 6.5 0 9-7 9-15Z"/><path d="M4 21c2-5 6-8 11-11"/></svg><h2>No mint selected</h2><p>Supported and scheduled mints will appear here.</p></div></div>:
+    <section className="panel mint-card">
+      <div className="mint-hero"><div className="mint-identity"><div className="project-art">◈</div><div className="mint-title"><h2>{project.name}</h2><p>{short(project.contractAddress)} · Chain {project.chainId}</p></div></div><div className="supply"><b>{project.maxSupply?`0 / ${project.maxSupply.toLocaleString()}`:"Live mint"}</b><span>On-chain supply</span><div className="progress"><i style={{width:"4%"}}/></div></div></div>
+      <div className="mint-body"><div className="mint-grid"><div className="phase-list"><div className="phase"><div className="phase-top"><h3>PUBLIC</h3><span className="status">Supported</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{project.mintPrice?project.mintPrice:"FREE"}</strong></span><span className="chip">MAX · <strong>{project.maxPerWallet||"—"}</strong></span><span className="chip">ELIGIBLE · <strong>{compatible.length}</strong></span></div></div><div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{fontSize:12}}>Automatic gas</span></div><div className="field" style={{marginTop:12}}><label>Quantity per wallet</label><div className="amount-row"><input type="number" min="1" max={project.maxPerWallet||100} value={qty} onChange={e=>setQty(Math.max(1,Number(e.target.value)))}/><button className="secondary-btn" onClick={()=>setQty(project.maxPerWallet||1)}>Max</button></div></div></div></div>
+        <div className="schedule-box"><div className="field"><label>Wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length?compatible.map(w=><label className="wallet-option" key={w.id}><input type="checkbox" checked={selected.has(w.id)} onChange={()=>toggle(w.id)}/><span>{w.label}</span><small>{short(w.address)}</small></label>):<div className="wallet-option muted">No compatible wallets</div>}</div></div><div className="field"><label>Schedule (optional)</label><input type="datetime-local" value={scheduledAt} onChange={e=>setScheduledAt(e.target.value)}/></div><button className="primary-btn" disabled={!selected.size||busy} onClick={schedule}>{busy?"Scheduling…":scheduledAt?"Schedule mint →":"Mint now →"}</button><div className="alert">Transactions are simulated before broadcast. Gas and nonce are handled automatically.</div></div>
+      </div></div>
+    </section>}
+    {groups.length>0&&<section className="scheduled"><div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{fontSize:12}}>{jobs.length} tasks</span></div>{groups.map(([cid,items])=>{const c=collections.find(x=>x.id===cid);const id=cid;const success=items.filter(x=>x.status==="completed").length;return <div className="panel job" key={id}><div className="job-summary" onClick={()=>setExpanded(expanded===id?null:id)}><div className="job-art"/><div className="job-main"><b>{c?.name||"Supported mint"}</b><span>{items.length} wallets · {items.reduce((a,b)=>a+b.quantity,0)} total · {success} hits</span></div><span className="status">{items.some(x=>x.status==="running")?"Running":items.some(x=>x.status==="pending")?"Scheduled":"Finished"}</span><span>{expanded===id?"⌃":"⌄"}</span></div>{expanded===id&&<div className="result-panel"><div className="result-tabs">{["minted","transactions","analytics"].map(t=><button key={t} className={tab===t?"active":""} onClick={()=>setTab(t)}>{t[0].toUpperCase()+t.slice(1)}</button>)}</div>{tab==="analytics"?<div className="summary-box"><div className="summary-line"><span>Total tasks</span><b>{items.length}</b></div><div className="summary-line"><span>Successful hits</span><b className="ok">{success}</b></div><div className="summary-line"><span>Failed</span><b className="failed">{items.filter(x=>x.status==="failed").length}</b></div><div className="summary-line"><span>Hit rate</span><b>{items.length?Math.round(success/items.length*100):0}%</b></div></div>:<table className="result-table"><thead><tr><th>Status</th><th>{tab==="minted"?"Wallet":"Task"}</th><th>Amount</th><th>Result</th></tr></thead><tbody>{items.map(j=>{const w=wallets.find(x=>x.id===j.walletId);return <tr key={j.id}><td className={j.status==="failed"?"failed":"ok"}>{j.status==="failed"?"✕":"✓"}</td><td className="mono">{tab==="minted"?short(w?.address||j.walletId):short(j.id)}</td><td>{j.quantity}</td><td>{j.error||j.status}</td></tr>})}</tbody></table>}</div>}</div>})}</section>}
+  </>;
 }

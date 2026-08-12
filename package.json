@@ -5,14 +5,19 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "bash scripts/start.sh",
-    "lint": "eslint"
+    "postbuild": "node scripts/prepare-standalone.mjs",
+    "start": "HOSTNAME=0.0.0.0 node .next/standalone/server.js",
+    "env:check": "node scripts/validate-env.mjs",
+    "db:push": "drizzle-kit push",
+    "railway:predeploy": "npm run env:check && npm run db:push",
+    "lint": "eslint",
+    "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "ethers": "^6.16.0",
-    "next": "16.2.6",
+    "ethers": "^6.17.0",
+    "next": "^16.3.0",
     "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -28,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "tsx": "^4.20.6"
   }
 }

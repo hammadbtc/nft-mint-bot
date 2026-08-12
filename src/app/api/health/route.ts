@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
-import { db, schema } from "@/lib/db";
+import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 
 export async function GET() {
   try {
     // Quick DB ping
-    await db.select({ n: sql<number>`1` }).from(schema.wallets).limit(1);
-    return NextResponse.json({ status: "ok", db: "connected" }, { status: 200 });
+    await db.execute(sql`select 1`);
+    return NextResponse.json(
+      { status: "ok", db: "connected", service: "mintbot" },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
   } catch {
     return NextResponse.json({ status: "error", db: "disconnected" }, { status: 503 });
   }

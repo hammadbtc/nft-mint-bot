@@ -26,6 +26,8 @@ export const wallets = pgTable("wallets", {
   active: boolean("active").notNull().default(true),
   spendLimit: text("spend_limit"), // max ETH this wallet can spend total (in wei, null = unlimited)
   hdPath: text("hd_path"), // BIP44 derivation path for mnemonic wallets
+  role: varchar("role").notNull().default("worker"), // main | worker
+  parentWalletId: varchar("parent_wallet_id"), // main wallet for a worker
   createdAt: text("created_at")
     .notNull()
     .default(sql`now()`),
@@ -58,6 +60,13 @@ export const collections = pgTable("collections", {
   paymentToken: text("payment_token"),
   // Safety
   safetyCheck: boolean("safety_check").notNull().default(true),
+  slug: varchar("slug"),
+  adapterKey: varchar("adapter_key").notNull().default("evm-contract-v1"),
+  domains: text("domains").notNull().default("[]"), // JSON string[]
+  siteUrl: text("site_url"),
+  imageUrl: text("image_url"),
+  adapterConfig: text("adapter_config").notNull().default("{}"), // reviewed JSON
+  verified: boolean("verified").notNull().default(false),
   createdAt: text("created_at")
     .notNull()
     .default(sql`now()`),
@@ -87,6 +96,9 @@ export const mintJobs = pgTable("mint_jobs", {
   scheduledAt: text("scheduled_at"),
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
+  idempotencyKey: varchar("idempotency_key").unique(),
+  claimedAt: text("claimed_at"),
+  claimToken: varchar("claim_token"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`now()`),
@@ -161,4 +173,28 @@ export const appConfig = pgTable("app_config", {
   updatedAt: text("updated_at")
     .notNull()
     .default(sql`now()`),
+});
+
+export const disperseOperations = pgTable("disperse_operations", {
+  id: varchar("id").primaryKey(),
+  type: varchar("type").notNull(), // fund | sweep
+  mainWalletId: varchar("main_wallet_id").notNull().references(() => wallets.id),
+  chainId: integer("chain_id").notNull(),
+  status: varchar("status").notNull().default("pending"),
+  amountPerWallet: text("amount_per_wallet"),
+  error: text("error"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
+  completedAt: text("completed_at"),
+});
+
+export const disperseTransfers = pgTable("disperse_transfers", {
+  id: varchar("id").primaryKey(),
+  operationId: varchar("operation_id").notNull().references(() => disperseOperations.id),
+  fromWalletId: varchar("from_wallet_id").notNull().references(() => wallets.id),
+  toWalletId: varchar("to_wallet_id").notNull().references(() => wallets.id),
+  amount: text("amount").notNull(),
+  status: varchar("status").notNull().default("pending"),
+  txHash: text("tx_hash"),
+  error: text("error"),
+  createdAt: text("created_at").notNull().default(sql`now()`),
 });

@@ -1,0 +1,5 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { executeDisperse, previewDisperse } from "@/lib/disperse";
+const input=z.object({action:z.enum(["preview","execute"]),type:z.enum(["fund","sweep"]),mainWalletId:z.string().uuid(),workerWalletIds:z.array(z.string().uuid()).min(1).max(500),amountPerWallet:z.string().optional(),expected:z.any().optional()});
+export async function POST(req:NextRequest){try{const body=input.parse(await req.json());const operation={type:body.type,mainWalletId:body.mainWalletId,workerWalletIds:body.workerWalletIds,amountPerWallet:body.amountPerWallet};if(body.action==="preview")return NextResponse.json(await previewDisperse(operation),{headers:{"Cache-Control":"no-store"}});if(!body.expected)throw new Error("An exact reviewed preview is required");return NextResponse.json(await executeDisperse(operation,body.expected),{status:202});}catch(error:unknown){const message=error instanceof z.ZodError?error.issues[0]?.message:error instanceof Error?error.message:"Disperse failed";return NextResponse.json({error:message},{status:400});}}

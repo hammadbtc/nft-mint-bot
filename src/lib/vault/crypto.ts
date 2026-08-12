@@ -6,7 +6,14 @@ const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 
 function getPassphrase(): string {
-  return process.env.VAULT_PASSPHRASE || "dev-passphrase-change-in-production-00000000";
+  const passphrase = process.env.VAULT_PASSPHRASE;
+  if (!passphrase) {
+    throw new Error("VAULT_PASSPHRASE is required; refusing to access wallet secrets");
+  }
+  if (passphrase.length < 32) {
+    throw new Error("VAULT_PASSPHRASE must be at least 32 characters");
+  }
+  return passphrase;
 }
 
 function deriveKey(passphrase: string, salt: Buffer): Buffer {

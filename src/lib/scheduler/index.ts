@@ -1,6 +1,7 @@
 import { db, schema } from "@/lib/db";
 import { runMintJob } from "@/lib/engine/mint";
 import { eq, and, lt, or, isNull } from "drizzle-orm";
+import { randomUUID } from "crypto";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 
@@ -33,10 +34,11 @@ export async function processScheduledJobs(maxConcurrent?: number): Promise<numb
   const running: Promise<void>[] = [];
 
   for (const job of pendingJobs) {
+    const claimToken = randomUUID();
     // Mark as running to prevent double-pick (optimistic lock via WHERE status='pending')
     const updated = await db
       .update(schema.mintJobs)
-      .set({ status: "running", startedAt: new Date().toISOString() })
+      .set({ status: "running", startedAt: new Date().toISOString(), claimedAt:new Date().toISOString(), claimToken })
       .where(
         and(
           eq(schema.mintJobs.id, job.id),
@@ -58,7 +60,7 @@ export async function processScheduledJobs(maxConcurrent?: number): Promise<numb
 
     if (running.length >= limit) {
       // Wait for at least one to finish
-      const settled = await Promise.race(
+      await Promise.race(
         running.map((p, i) => p.then(() => i).catch(() => i))
       );
       // Remove all completed promises

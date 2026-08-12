@@ -1,65 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { db, schema } from "@/lib/db";
-import { v4 as uuidv4 } from "uuid";
+import { supportedAdapterKeys } from "@/lib/adapters";
 import { eq } from "drizzle-orm";
 
-export async function GET(req: NextRequest) {
-  const chainId = req.nextUrl.searchParams.get("chainId");
-  const conditions = [];
-  if (chainId) {
-    conditions.push(eq(schema.collections.chainId, parseInt(chainId)));
-  }
+const reviewedMint = z.object({
+  id:z.string().uuid().optional(), name:z.string().trim().min(1).max(120), slug:z.string().trim().min(1).max(100),
+  contractAddress:z.string().regex(/^0x[a-fA-F0-9]{40}$/), chainId:z.coerce.number().int().positive(),
+  mintMethod:z.string().trim().min(1), mintAbi:z.union([z.string(),z.array(z.unknown())]), mintPrice:z.string().regex(/^\d+$/).optional(),
+  maxPerWallet:z.number().int().positive().optional(), maxSupply:z.number().int().positive().optional(), paymentToken:z.string().optional(),
+  adapterKey:z.string().default("evm-contract-v1"), domains:z.array(z.string().trim().min(1)).min(1), siteUrl:z.string().url(),
+  imageUrl:z.string().url().optional(), adapterConfig:z.record(z.string(),z.unknown()).default({}), verified:z.literal(true),
+});
 
-  const rows = await db
-    .select()
-    .from(schema.collections)
-    .where(conditions.length ? conditions[0] : undefined)
-    .orderBy(schema.collections.createdAt);
+export async function GET(req:NextRequest){const chainId=req.nextUrl.searchParams.get("chainId");const rows=await db.select().from(schema.collections).where(chainId?eq(schema.collections.chainId,Number(chainId)):undefined).orderBy(schema.collections.createdAt);return NextResponse.json(rows,{headers:{"Cache-Control":"no-store"}});}
 
-  return NextResponse.json(rows);
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { name, contractAddress, chainId, mintMethod, mintAbi, mintPrice, maxPerWallet, maxSupply, paymentToken, defaultGasLimit, defaultMaxFeePerGas, defaultMaxPriorityFeePerGas, defaultUseFlashbots, fcfsMintOpenSignature } = body;
-
-    if (!name || !contractAddress || !chainId || !mintMethod || !mintAbi) {
-      return NextResponse.json(
-        { error: "name, contractAddress, chainId, mintMethod, and mintAbi are required" },
-        { status: 400 }
-      );
-    }
-
-    // Validate ABI is valid JSON
-    try {
-      JSON.parse(typeof mintAbi === "string" ? mintAbi : JSON.stringify(mintAbi));
-    } catch {
-      return NextResponse.json({ error: "mintAbi must be valid JSON" }, { status: 400 });
-    }
-
-    const id = uuidv4();
-    await db.insert(schema.collections).values({
-      id,
-      name,
-      contractAddress,
-      chainId: parseInt(chainId),
-      mintMethod: mintMethod || "mint",
-      mintAbi: typeof mintAbi === "string" ? mintAbi : JSON.stringify(mintAbi),
-      mintPrice: mintPrice?.toString(),
-      maxPerWallet: maxPerWallet || null,
-      maxSupply: maxSupply || null,
-      paymentToken: paymentToken || null,
-      defaultGasLimit: defaultGasLimit || null,
-      defaultMaxFeePerGas: defaultMaxFeePerGas || null,
-      defaultMaxPriorityFeePerGas: defaultMaxPriorityFeePerGas || null,
-      defaultUseFlashbots: defaultUseFlashbots ?? false,
-      fcfsMintOpenSignature: fcfsMintOpenSignature || null,
-    });
-
-    const [created] = await db.select().from(schema.collections).where(eq(schema.collections.id, id)).limit(1);
-    return NextResponse.json(created, { status: 201 });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "Failed to add collection" }, { status: 500 });
-  }
-}
+export async function POST(req:NextRequest){try{const adminToken=process.env.SUPPORT_ADMIN_TOKEN;if(!adminToken||req.headers.get("x-support-admin-token")!==adminToken)return NextResponse.json({error:"Mint support authorization required"},{status:401});const input=reviewedMint.parse(await req.json());if(!supportedAdapterKeys().includes(input.adapterKey))throw new Error("Unknown adapter key");const mintAbi=typeof input.mintAbi==="string"?input.mintAbi:JSON.stringify(input.mintAbi);JSON.parse(mintAbi);const id=input.id||crypto.randomUUID();await db.insert(schema.collections).values({id,name:input.name,slug:input.slug,contractAddress:input.contractAddress,chainId:input.chainId,mintMethod:input.mintMethod,mintAbi,mintPrice:input.mintPrice||null,maxPerWallet:input.maxPerWallet||null,maxSupply:input.maxSupply||null,paymentToken:input.paymentToken||null,adapterKey:input.adapterKey,domains:JSON.stringify(input.domains),siteUrl:input.siteUrl,imageUrl:input.imageUrl||null,adapterConfig:JSON.stringify(input.adapterConfig),verified:true}).onConflictDoUpdate({target:schema.collections.id,set:{name:input.name,slug:input.slug,contractAddress:input.contractAddress,chainId:input.chainId,mintMethod:input.mintMethod,mintAbi,mintPrice:input.mintPrice||null,maxPerWallet:input.maxPerWallet||null,maxSupply:input.maxSupply||null,paymentToken:input.paymentToken||null,adapterKey:input.adapterKey,domains:JSON.stringify(input.domains),siteUrl:input.siteUrl,imageUrl:input.imageUrl||null,adapterConfig:JSON.stringify(input.adapterConfig),verified:true}});const [created]=await db.select().from(schema.collections).where(eq(schema.collections.id,id)).limit(1);return NextResponse.json(created,{status:201})}catch(error:unknown){const message=error instanceof z.ZodError?error.issues[0]?.message:error instanceof Error?error.message:"Could not register mint";return NextResponse.json({error:message},{status:400})}}

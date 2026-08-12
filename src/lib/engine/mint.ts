@@ -2,10 +2,9 @@ import { ethers } from "ethers";
 import { v4 as uuidv4 } from "uuid";
 import { db, schema } from "@/lib/db";
 import { getSigner } from "@/lib/vault";
-import { getProvider, getChain } from "@/lib/chains";
-import { sendPrivateTransaction, sendFlashbotsBundle, hasFlashbotsProtect } from "@/lib/chains/flashbots";
+import { getProvider } from "@/lib/chains";
+import { sendPrivateTransaction, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
-import { checkContractSafety } from "@/lib/engine/safety";
 import { eq, and, desc, sql } from "drizzle-orm";
 
 // ─── ERC20 Minimal ABI ────────────────────────────────────────────────
@@ -15,6 +14,18 @@ const ERC20_ABI = [
   "function balanceOf(address account) view returns (uint256)",
   "function decimals() view returns (uint8)",
 ];
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null) {
+    const value = error as Record<string, unknown>;
+    if (typeof value.reason === "string") return value.reason;
+    if (typeof value.message === "string") return value.message;
+  }
+  return String(error);
+}
+
+class AmbiguousBroadcastError extends Error {}
 
 // ─── Nonce Manager (in-process) ────────────────────────────────────────
 const nonceLock = new Map<string, Promise<void>>();
@@ -100,8 +111,8 @@ async function simulateTx(
       gasLimit: tx.gasLimit || 1_000_000n,
     });
     return { success: true };
-  } catch (err: any) {
-    const message = err?.revert?.args?.[0] ?? err?.reason ?? err?.message ?? String(err);
+  } catch (err: unknown) {
+    const message = errorMessage(err);
     console.warn("Simulation failed:", message);
     return { success: false, error: message };
   }
@@ -175,6 +186,8 @@ export interface MintJobParams {
   maxPriorityFeePerGas?: string;
   useFlashbots?: boolean;
   dryRun?: boolean;
+  attemptId?: string;
+  jobId?: string;
 }
 
 /**
@@ -191,11 +204,10 @@ export async function executeMint(params: MintJobParams) {
 
   if (!collection) throw new Error(`Collection ${collectionId} not found`);
 
-  const chain = getChain(collection.chainId);
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(walletId, provider);
 
-  let mintAbi: any;
+  let mintAbi: ethers.InterfaceAbi;
   try {
     mintAbi = JSON.parse(collection.mintAbi);
   } catch {
@@ -214,12 +226,9 @@ export async function executeMint(params: MintJobParams) {
     txData = populated.data!;
   }
 
-  const nonce = await acquireNonce(walletId, signer.address, provider);
-
   const tx: ethers.TransactionRequest = {
     to: collection.contractAddress,
     data: txData,
-    nonce,
     chainId: collection.chainId,
   };
 
@@ -248,7 +257,6 @@ export async function executeMint(params: MintJobParams) {
     const totalNeeded = txVal + estGasCost;
 
     if (ethBalance < totalNeeded) {
-      rollbackNonce(walletId);
       throw new Error(
         `Insufficient ETH balance: have ${ethers.formatEther(ethBalance)} ETH, ` +
         `need ~${ethers.formatEther(totalNeeded)} ETH (value + gas)`
@@ -258,12 +266,11 @@ export async function executeMint(params: MintJobParams) {
     // ERC20 token balance if payment token is set
     if (collection.paymentToken) {
       const token = new ethers.Contract(collection.paymentToken, ERC20_ABI, provider);
-      const tokenBalance: bigint = await (token as any).balanceOf(signer.address);
-      const tokenDecimals: number = await (token as any).decimals().catch(() => 18);
+      const tokenBalance = BigInt(await token.getFunction("balanceOf").staticCall(signer.address));
+      const tokenDecimals = Number(await token.getFunction("decimals").staticCall().catch(() => 18));
       const tokenNeeded = BigInt(collection.mintPrice || "0") * BigInt(params.quantity || 1);
 
       if (tokenBalance < tokenNeeded) {
-        rollbackNonce(walletId);
         throw new Error(
           `Insufficient token balance: have ${ethers.formatUnits(tokenBalance, tokenDecimals)}, ` +
           `need ${ethers.formatUnits(tokenNeeded, tokenDecimals)}`
@@ -271,30 +278,23 @@ export async function executeMint(params: MintJobParams) {
       }
 
       // Check allowance and approve if needed
-      const allowance: bigint = await (token as any).allowance(signer.address, collection.contractAddress);
+      const allowance = BigInt(await token.getFunction("allowance").staticCall(signer.address, collection.contractAddress));
       if (allowance < tokenNeeded) {
         console.log(`🔓 Approving ${ethers.formatUnits(tokenNeeded, tokenDecimals)} tokens for ${collection.name}...`);
         try {
-          const approveTx = await (token.connect(signer) as any).approve(collection.contractAddress, tokenNeeded);
+          const approveTx = await token.connect(signer).getFunction("approve").send(collection.contractAddress, tokenNeeded);
           await approveTx.wait(1);
           console.log(`✅ Approval confirmed: ${approveTx.hash}`);
-        } catch (err: any) {
-          rollbackNonce(walletId);
-          throw new Error(`Token approval failed: ${err?.message || err}`);
+        } catch (err: unknown) {
+          throw new Error(`Token approval failed: ${errorMessage(err)}`);
         }
       }
     }
   }
 
-  // ─── Contract Safety Check ─────────────────────────────────────────
-  const safety = await checkContractSafety(collection.contractAddress, collection.chainId, provider);
-  if (!safety.safe) {
-    rollbackNonce(walletId);
-    throw new Error(`Safety check failed: ${safety.reasons.join("; ")}`);
-  }
-  if (safety.warnings.length > 0 && !dryRun) {
-    console.warn(`⚠️ Safety warnings for ${collection.name}:`, safety.warnings);
-  }
+  // Reserve the mint nonce only after any ERC-20 approval transaction has confirmed.
+  const nonce = await acquireNonce(walletId, signer.address, provider);
+  tx.nonce = nonce;
 
   // ─── Spend limit check (uses estimated gas from above) ─────────────
   if (!dryRun) {
@@ -367,6 +367,11 @@ export async function executeMint(params: MintJobParams) {
     };
   }
 
+  if (process.env.ENABLE_LIVE_TRANSACTIONS !== "true") {
+    rollbackNonce(walletId);
+    throw new Error("Live mint transactions are disabled until testnet verification is complete");
+  }
+
   // ─── Send Transaction ──────────────────────────────────────────────
   let response: ethers.TransactionResponse;
   let sentVia = "public";
@@ -380,14 +385,36 @@ export async function executeMint(params: MintJobParams) {
     } else {
       response = await signer.sendTransaction(tx);
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Don't rollback — tx may have been broadcast. But release the lock.
     releaseNonce(walletId);
-    throw new Error(`Send failed: ${err?.message || err}`);
+    throw new AmbiguousBroadcastError(`Broadcast outcome is unknown and will not be retried automatically: ${errorMessage(err)}`);
+  }
+
+  // Persist the hash before waiting. A receipt timeout must never cause a duplicate mint.
+  if (params.attemptId && params.jobId) {
+    await db.insert(schema.mintAttempts).values({
+      id: params.attemptId,
+      jobId: params.jobId,
+      txHash: response.hash,
+      status: "submitted",
+    }).onConflictDoUpdate({
+      target: schema.mintAttempts.id,
+      set: { txHash: response.hash, status: "submitted" },
+    });
   }
 
   // Wait for confirmation
   const receipt = await response.wait(1);
+
+  if (params.attemptId) {
+    await db.update(schema.mintAttempts).set({
+      status: receipt?.status === 1 ? "confirmed" : "failed",
+      gasUsed: receipt?.gasUsed?.toString(),
+      effectiveGasPrice: receipt?.gasPrice?.toString(),
+      blockNumber: receipt?.blockNumber,
+    }).where(eq(schema.mintAttempts.id, params.attemptId));
+  }
 
   return {
     txHash: response.hash,
@@ -434,6 +461,8 @@ export async function runMintJob(jobId: string) {
         maxPriorityFeePerGas: job.maxPriorityFeePerGas || undefined,
         useFlashbots: job.useFlashbots ?? false,
         dryRun: job.dryRun ?? false,
+        attemptId,
+        jobId,
       });
 
       // Dry run result
@@ -456,17 +485,6 @@ export async function runMintJob(jobId: string) {
         return result;
       }
 
-      // Log attempt
-      await db.insert(schema.mintAttempts).values({
-        id: attemptId,
-        jobId,
-        txHash: result.txHash,
-        status: "submitted",
-        gasUsed: result.gasUsed,
-        effectiveGasPrice: result.effectiveGasPrice,
-        blockNumber: result.blockNumber,
-      });
-
       const finalStatus = result.status === "confirmed" ? "completed" : "failed";
 
       await db
@@ -475,6 +493,8 @@ export async function runMintJob(jobId: string) {
           status: finalStatus,
           completedAt: new Date().toISOString(),
           nonce: null,
+          claimToken: null,
+          claimedAt: null,
         })
         .where(eq(schema.mintJobs.id, jobId));
 
@@ -486,31 +506,47 @@ export async function runMintJob(jobId: string) {
       }
 
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const [broadcast] = await db.select({ txHash:schema.mintAttempts.txHash })
+        .from(schema.mintAttempts).where(eq(schema.mintAttempts.id, attemptId)).limit(1);
+      if (broadcast?.txHash) {
+        const message = `Broadcast as ${broadcast.txHash}; confirmation is unknown and will not be retried automatically: ${errorMessage(err)}`;
+        await db.update(schema.mintJobs).set({ status:"failed", completedAt:new Date().toISOString(), error:message })
+          .where(eq(schema.mintJobs.id, jobId));
+        await db.update(schema.mintAttempts).set({ error:message }).where(eq(schema.mintAttempts.id, attemptId));
+        throw new Error(message);
+      }
+      if (err instanceof AmbiguousBroadcastError) {
+        const message = err.message;
+        await db.insert(schema.mintAttempts).values({ id:attemptId, jobId, status:"failed", error:message }).onConflictDoNothing();
+        await db.update(schema.mintJobs).set({ status:"failed", completedAt:new Date().toISOString(), error:message, claimToken:null, claimedAt:null })
+          .where(eq(schema.mintJobs.id, jobId));
+        throw err;
+      }
       lastAttempt++;
 
       await db.insert(schema.mintAttempts).values({
         id: attemptId,
         jobId,
         status: "failed",
-        error: err?.message || String(err),
+        error: errorMessage(err),
       });
 
       await db
         .update(schema.mintJobs)
-        .set({ retryCount: lastAttempt, error: err?.message || String(err) })
+        .set({ retryCount: lastAttempt, error: errorMessage(err) })
         .where(eq(schema.mintJobs.id, jobId));
 
       if (lastAttempt >= job.maxRetries) {
         await db
           .update(schema.mintJobs)
-          .set({ status: "failed", completedAt: new Date().toISOString() })
+          .set({ status: "failed", completedAt: new Date().toISOString(), claimToken:null, claimedAt:null })
           .where(eq(schema.mintJobs.id, jobId));
 
         // Alert on final failure
         const [wallet] = await db.select({ label: schema.wallets.label }).from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1);
         const [collection] = await db.select({ name: schema.collections.name }).from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1);
-        await sendAlert("job_failed", `Job ${jobId.slice(0, 8)} exhausted retries: ${wallet?.label || "?"} → ${collection?.name || "?"} — ${err?.message || err}`, jobId);
+        await sendAlert("job_failed", `Job ${jobId.slice(0, 8)} exhausted retries: ${wallet?.label || "?"} → ${collection?.name || "?"} — ${errorMessage(err)}`, jobId);
 
         throw err;
       }
@@ -569,8 +605,8 @@ export async function unstickJob(jobId: string) {
 
     await sendAlert("job_stuck", `Job ${jobId.slice(0, 8)} unstuck and cancelled`, jobId);
     return { success: true };
-  } catch (err: any) {
-    throw new Error(`Failed to unstick job: ${err?.message}`);
+  } catch (err: unknown) {
+    throw new Error(`Failed to unstick job: ${errorMessage(err)}`);
   }
 }
 
@@ -583,14 +619,25 @@ export async function batchMint(
   quantity?: number,
   useFlashbots?: boolean,
   dryRun?: boolean,
-  scheduledAt?: string
+  scheduledAt?: string,
+  idempotencyBase?: string,
 ) {
   const results: { walletId: string; jobId: string; status: string; txHash?: string; error?: string }[] = [];
 
-  for (const walletId of walletIds) {
-    const jobId = uuidv4();
+  const [collection] = await db.select().from(schema.collections).where(eq(schema.collections.id, collectionId)).limit(1);
+  if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
+  const mintQuantity = quantity || 1;
+  if (mintQuantity < 1 || mintQuantity > (collection.maxPerWallet || 100)) throw new Error("Quantity exceeds the supported wallet limit");
 
-    await db.insert(schema.mintJobs).values({
+  for (const walletId of walletIds) {
+    const [wallet] = await db.select({ id:schema.wallets.id, chainId:schema.wallets.chainId, active:schema.wallets.active })
+      .from(schema.wallets).where(eq(schema.wallets.id, walletId)).limit(1);
+    if (!wallet || !wallet.active) throw new Error(`Wallet ${walletId} is unavailable`);
+    if (wallet.chainId !== collection.chainId) throw new Error(`Wallet ${walletId} is on the wrong network`);
+    const jobId = uuidv4();
+    const idempotencyKey = idempotencyBase ? `${idempotencyBase}:${walletId}:${collectionId}` : null;
+
+    const inserted = await db.insert(schema.mintJobs).values({
       id: jobId,
       walletId,
       collectionId,
@@ -599,32 +646,15 @@ export async function batchMint(
       dryRun: dryRun ?? false,
       scheduledAt: scheduledAt || null,
       status: "pending",
-    });
-
-    // If scheduled, don't execute immediately — scheduler picks it up
-    if (scheduledAt) {
-      results.push({ walletId, jobId, status: "scheduled" });
-      continue;
+      idempotencyKey,
+    }).onConflictDoNothing({ target:schema.mintJobs.idempotencyKey }).returning({ id:schema.mintJobs.id });
+    let resultJobId = inserted[0]?.id;
+    if (!resultJobId && idempotencyKey) {
+      const [existing] = await db.select({ id:schema.mintJobs.id }).from(schema.mintJobs)
+        .where(eq(schema.mintJobs.idempotencyKey,idempotencyKey)).limit(1);
+      resultJobId = existing?.id;
     }
-
-    try {
-      const result = await runMintJob(jobId);
-      if (result) {
-        results.push({
-          walletId,
-          jobId,
-          status: "completed",
-          txHash: result.txHash,
-        });
-      }
-    } catch (err: any) {
-      results.push({
-        walletId,
-        jobId,
-        status: "failed",
-        error: err?.message,
-      });
-    }
+    results.push({ walletId, jobId:resultJobId || jobId, status:inserted.length ? (scheduledAt?"scheduled":"queued") : "duplicate" });
   }
 
   return results;

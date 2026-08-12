@@ -1,122 +1,60 @@
 "use client";
 
-import "./globals.css";
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import "./globals.css";
 
-const sections = [
-  {
-    label: "CORE",
-    items: [
-      { href: "/", label: "Dashboard" },
-      { href: "/wallets", label: "Wallets" },
-      { href: "/collections", label: "Collections" },
-      { href: "/mint", label: "Batch Mint" },
-      { href: "/jobs", label: "Jobs" },
-    ],
-  },
-  {
-    label: "INFRASTRUCTURE",
-    items: [
-      { href: "/rpc", label: "RPC Health" },
-      { href: "/analytics", label: "Analytics" },
-      { href: "/safety", label: "Contract Safety" },
-    ],
-  },
-  {
-    label: "SYSTEM",
-    items: [
-      { href: "/settings", label: "Settings" },
-    ],
-  },
+const nav = [
+  { href: "/", label: "Mints", icon: "leaf" },
+  { href: "/wallets", label: "Wallets", icon: "wallet" },
+  { href: "/disperse", label: "Disperse", icon: "nodes" },
 ];
 
+function Icon({ name, size = 24 }: { name: string; size?: number }) {
+  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  if (name === "leaf") return <svg {...common}><path d="M20 4c-8 0-14 3.5-14 10 0 3 2 5 5 5 6.5 0 9-7 9-15Z"/><path d="M4 21c2-5 6-8 11-11"/></svg>;
+  if (name === "wallet") return <svg {...common}><path d="M4 6.5h15a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6.5A2.5 2.5 0 0 1 4.5 4H18"/><path d="M2 9h19M16 14h2"/></svg>;
+  if (name === "nodes") return <svg {...common}><circle cx="12" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="12" cy="19" r="2"/><path d="m10.5 6.5-4 4m7-4 4 4m-11 3 4 4m7-4-4 4"/></svg>;
+  return null;
+}
+
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const pathname = usePathname();
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    const saved = localStorage.getItem("mintbot-theme");
+    const next = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.dataset.theme = next ? "dark" : "light";
+    queueMicrotask(() => setDark(next));
+  }, []);
+  const toggleTheme = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.dataset.theme = next ? "dark" : "light";
+    localStorage.setItem("mintbot-theme", next ? "dark" : "light");
+  };
 
   return (
-    <html lang="en" className="dark">
-      <body className="bg-zinc-950 text-zinc-100 antialiased">
-        <div className="flex h-screen">
-      {/* Mobile hamburger */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="lg:hidden fixed top-3 left-3 z-50 p-2 bg-zinc-900 border border-zinc-800 rounded text-zinc-400 hover:text-white transition-colors"
-      >
-        {sidebarOpen ? "✕" : "☰"}
-      </button>
-
-      {/* Overlay */}
-      {sidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/60 z-30"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* ── Sidebar ── */}
-      <aside
-        className={`${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:translate-x-0 fixed lg:sticky z-40 w-60 h-screen bg-zinc-950 border-r border-zinc-800 flex flex-col transition-transform overflow-y-auto`}
-      >
-        {/* Logo area */}
-        <div className="px-5 py-5 border-b border-zinc-800/50">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="MintBot" className="w-9 h-9 rounded-lg flex-shrink-0" />
-            <div className="min-w-0">
-              <div className="text-white font-semibold text-[15px] tracking-tight leading-tight">MintBot</div>
-              <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em]">
-                ACO Automint
-              </div>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <div className="app-shell">
+          <header className="topbar">
+            <Link href="/" className="brand"><span className="brand-mark"><Icon name="leaf" size={22}/></span><span>MintBot</span></Link>
+            <div className="top-actions">
+              <span className="status-dot"><i/> Engine ready</span>
+              <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">{dark ? "☀" : "☾"}</button>
             </div>
-          </div>
+          </header>
+          <div className="notice">Mint didn&apos;t work? Found a bug? <a href="https://x.com/hammadbtc" target="_blank">Report an issue</a></div>
+          <main className="page-wrap">{children}</main>
+          <nav className="bottom-nav">
+            {nav.map((item) => {
+              const active = pathname === item.href;
+              return <Link key={item.href} href={item.href} className={active ? "active" : ""}><Icon name={item.icon}/><span>{item.label}</span></Link>;
+            })}
+          </nav>
         </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto">
-          {sections.map((section) => (
-            <div key={section.label} className="mb-5">
-              <div className="px-3 mb-1.5 text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em] font-medium">
-                {section.label}
-              </div>
-              {section.items.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setSidebarOpen(false)}
-                  className="flex items-center px-3 py-2 rounded-md text-[13px] text-zinc-400 hover:text-white hover:bg-zinc-800/70 transition-colors font-medium tracking-wide"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-zinc-800/50 space-y-3">
-          <div className="text-[10px] text-zinc-600 font-mono uppercase tracking-[0.15em] leading-relaxed">
-            v2.3 &middot; Multi-chain
-            <br />
-            ERC20 &middot; Flashbots &middot; SSE
-          </div>
-          <a
-            href="https://x.com/hammadbtc"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block text-[10px] text-zinc-500 hover:text-white font-mono uppercase tracking-[0.12em] transition-colors"
-          >
-            Powered by <span className="text-zinc-400">@Hammadbtc</span>
-          </a>
-        </div>
-      </aside>
-
-      {/* ── Main content ── */}
-      <main className="flex-1 overflow-auto p-5 lg:p-8 pt-14 lg:pt-8 bg-zinc-950">
-        {children}
-      </main>
-        </div>{/* /flex */}
       </body>
     </html>
   );

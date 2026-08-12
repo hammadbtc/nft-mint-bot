@@ -59,11 +59,6 @@ export async function sendFlashbotsBundle(
     throw new Error(`Flashbots relay not available for chain ${chainId}`);
   }
 
-  // Get target block (current + 25 blocks max window)
-  const provider = new ethers.JsonRpcProvider(relayUrl, chainId, {
-    staticNetwork: true,
-  });
-
   if (!targetBlock) {
     if (!authSigner.provider) {
       throw new Error("Flashbots auth signer has no provider — connect it first");

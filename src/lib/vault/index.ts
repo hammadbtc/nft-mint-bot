@@ -11,6 +11,8 @@ export interface WalletImport {
   key: string; // raw private key or mnemonic
   hdPath?: string; // BIP44 derivation path
   spendLimit?: string; // max spend in wei (null = unlimited)
+  role?: "main" | "worker";
+  parentWalletId?: string;
 }
 
 /**
@@ -44,6 +46,8 @@ export async function importWallet(input: WalletImport) {
     keyFormat: input.keyType,
     spendLimit: input.spendLimit || null,
     hdPath: input.hdPath || null,
+    role: input.role || "worker",
+    parentWalletId: input.parentWalletId || null,
   });
 
   return {
@@ -91,7 +95,7 @@ export async function getSigner(walletId: string, provider: ethers.Provider): Pr
 
   let wallet: ethers.Wallet | ethers.HDNodeWallet;
   if (record.keyFormat === "mnemonic") {
-    const hdPath = (record as any).hdPath || "m/44'/60'/0'/0/0";
+    const hdPath = record.hdPath || "m/44'/60'/0'/0/0";
     wallet = ethers.HDNodeWallet.fromPhrase(rawKey, undefined, hdPath);
   } else {
     wallet = new ethers.Wallet(rawKey);
@@ -119,6 +123,8 @@ export async function listWallets(chainId?: number) {
       active: schema.wallets.active,
       spendLimit: schema.wallets.spendLimit,
       hdPath: schema.wallets.hdPath,
+      role: schema.wallets.role,
+      parentWalletId: schema.wallets.parentWalletId,
       createdAt: schema.wallets.createdAt,
     })
     .from(schema.wallets)
