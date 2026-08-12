@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
+import { formatContractTime } from "@/lib/format-contract-time";
 
 type Wallet = { id:string; label:string; address:string; chainId:number };
 type Collection = { id:string; name:string; contractAddress:string; chainId:number; mintPrice:string|null; maxPerWallet:number|null; maxSupply:number|null; currentSupply:number|null; phaseStatus:string; startsAt:string|null; endsAt:string|null; createdAt:string };
@@ -20,7 +21,6 @@ export default function MintsPage() {
   const toggle=(id:string)=>setSelected(p=>{const n=new Set(p);if(n.has(id))n.delete(id);else n.add(id);return n});
   const schedule=async()=>{if(!project||!selected.size)return;setBusy(true);setMessage("");try{const idempotencyKey=crypto.randomUUID();const contractStart=project.startsAt&&Date.parse(project.startsAt)>Date.now()?project.startsAt:undefined;const r=await fetch("/api/jobs/batch",{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":idempotencyKey},body:JSON.stringify({collectionId:project.id,walletIds:[...selected],quantity:qty,scheduledAt:contractStart})});const d=await r.json();if(!r.ok)throw new Error(d.error);setMessage(`${selected.size} mint task${selected.size>1?"s":""} scheduled ${contractStart?"for the contract opening time":"to run now"}.`);await load()}catch(e){setMessage(e instanceof Error?e.message:"Could not schedule mint")}finally{setBusy(false)}};
   const formatPrice=(wei:string|null)=>wei?`${ethers.formatEther(wei)} ETH`:"FREE";
-  const formatContractTime=(value:string|null)=>value?new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"medium",timeZoneName:"short"}).format(new Date(value)):"Runs immediately (mint is live)";
   const groups=useMemo(()=>{const map=new Map<string,Job[]>();jobs.forEach(j=>map.set(j.collectionId,[...(map.get(j.collectionId)||[]),j]));return [...map.entries()]},[jobs]);
   return <>
     <div className="page-heading"><div><h1>Mints</h1><p>Paste a supported mint link and we&apos;ll handle the rest.</p></div></div>
