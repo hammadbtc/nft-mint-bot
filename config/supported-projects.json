@@ -1,26 +1,25 @@
 [
   {
-    "id": "94e1fbcf-1998-49a1-9289-e998e2f1fc63",
-    "name": "Hoodiez Brokers",
-    "slug": "hoodiez-brokers",
-    "contractAddress": "0x29CBeF6f555C017172275C5B09b066A892bc4E2c",
+    "id": "14a790d9-1ad8-42e4-8bb8-f8d6ae903915",
+    "name": "Cash Rabbits",
+    "slug": "cash-rabbits",
+    "contractAddress": "0x5b05C950993705416C9069d43Ee70b564a875e40",
     "chainId": 4663,
     "mintMethod": "mintPublic",
     "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
-    "mintPrice": "35000000000000",
-    "maxPerWallet": 50,
+    "mintPrice": "100000000000000",
+    "maxPerWallet": 10,
     "maxSupply": 10000,
     "adapterKey": "opensea-seadrop-v1",
-    "domains": ["opensea.io", "robinhoodchain.blockscout.com", "hoodiezbrokers.xyz"],
-    "siteUrl": "https://opensea.io/collection/hoodiez-brokers/overview",
-    "imageUrl": "https://i2c.seadn.io/collection/hoodiez-brokers/image_type_logo/b1bc3295fc0dea71036ba79d71f698/dbb1bc3295fc0dea71036ba79d71f698.jpeg",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/cash-rabbits",
+    "imageUrl": "https://i2c.seadn.io/collection/cash-rabbits/image_type_logo/0d16a785f548e214e7f6fcef35dddd/730d16a785f548e214e7f6fcef35dddd.jpeg",
     "adapterConfig": {
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "urlMatchers": [
-        { "domain": "opensea.io", "pathPrefix": "/collection/hoodiez-brokers" },
-        { "domain": "robinhoodchain.blockscout.com", "pathPrefix": "/address/0x29cbef6f555c017172275c5b09b066a892bc4e2c" },
-        { "domain": "hoodiezbrokers.xyz" }
+        { "domain": "opensea.io", "pathPrefix": "/collection/cash-rabbits" },
+        { "domain": "robinhoodchain.blockscout.com", "pathPrefix": "/address/0x5b05c950993705416c9069d43ee70b564a875e40" }
       ]
     }
   }

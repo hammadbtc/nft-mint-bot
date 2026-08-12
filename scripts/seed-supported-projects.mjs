@@ -3,9 +3,14 @@ import { readFile } from "node:fs/promises";
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to seed supported projects");
 const projects = JSON.parse(await readFile(new URL("../config/supported-projects.json", import.meta.url), "utf8"));
+const disabledProjects = JSON.parse(await readFile(new URL("../config/disabled-projects.json", import.meta.url), "utf8"));
 const sql = postgres(process.env.DATABASE_URL, { max: 1, connect_timeout: 10 });
 
 try {
+  for (const project of disabledProjects) {
+    await sql`update collections set active = false, verified = false where id = ${project.id}`;
+    console.log(`Disabled supported mint: ${project.name}`);
+  }
   for (const project of projects) {
     await sql`
       insert into collections (

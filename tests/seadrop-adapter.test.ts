@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { encodeSeaDropPublicMint } from "../src/lib/adapters/opensea-seadrop-v1";
 
 test("SeaDrop public mint calldata matches the reviewed OpenSea transaction shape", () => {
-  const nft = "0x29CBeF6f555C017172275C5B09b066A892bc4E2c";
+  const nft = "0x5b05C950993705416C9069d43Ee70b564a875e40";
   const recipient = "0x0000a26b00c1F0DF003000390027140000fAa719";
   const minter = "0x1111111111111111111111111111111111111111";
   const data = encodeSeaDropPublicMint(nft, recipient, minter, 2);
