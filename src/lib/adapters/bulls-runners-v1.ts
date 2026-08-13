@@ -140,6 +140,32 @@ async function proofFor(config: BullsRunnersConfig, signerAddress: string): Prom
   return rawProof;
 }
 
+async function confirmOpenMintStable(collection: SupportedCollection, provider: ethers.Provider): Promise<void> {
+  const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
+  let firstBlock = -1;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const block = await provider.getBlock("latest");
+    if (!block) throw new Error("Robinhood RPC did not return a latest block for Bulls Runners");
+    if (attempt === 0) firstBlock = block.number;
+    const [whitelistEnabled, mintClosed] = await Promise.all([
+      contract.getFunction("whitelistEnabled").staticCall({ blockTag: block.number }).then(Boolean),
+      contract.getFunction("mintClosed").staticCall({ blockTag: block.number }).then(Boolean),
+    ]);
+    if (whitelistEnabled) throw new Error("Bulls Runners open mint has not been enabled on-chain");
+    if (mintClosed) throw new Error("Bulls Runners mint is closed");
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250));
+    if (attempt === 2 && block.number <= firstBlock) throw new Error("Bulls Runners public switch could not be confirmed across fresh blocks");
+  }
+}
+
+function assertOpenRequest(collection: SupportedCollection, request: ethers.TransactionRequest): void {
+  if (
+    String(request.to || "").toLowerCase() !== collection.contractAddress.toLowerCase() ||
+    String(request.data || "0x").toLowerCase() !== encodeBullsRunnersMint([]).toLowerCase() ||
+    BigInt(request.value ?? 0) !== 0n || Number(request.chainId) !== collection.chainId
+  ) throw new Error("Bulls Runners prepared transaction does not match reviewed open-mint intent");
+}
+
 function unavailable(reason: string): MintPhaseEligibility[] {
   return [
     { phaseId: "whitelist", status: "ineligible", reason },
@@ -223,6 +249,7 @@ export const bullsRunnersV1: MintAdapter = {
       if (!proof.length) throw new Error("Wallet is not on the reviewed Bulls Runners whitelist");
     } else {
       if (state.whitelistEnabled) throw new Error("Bulls Runners open mint has not been enabled on-chain");
+      await confirmOpenMintStable(collection, provider);
       proof = [];
     }
     return {
@@ -231,6 +258,15 @@ export const bullsRunnersV1: MintAdapter = {
       value: 0n,
       chainId: collection.chainId,
     };
+  },
+
+  async revalidateBeforeSigning(collection, signerAddress, quantity, provider, request, options) {
+    if (options?.phaseId !== "open") return;
+    if (quantity !== 1) throw new Error("Bulls Runners allows exactly one mint per wallet");
+    assertOpenRequest(collection, request);
+    await confirmOpenMintStable(collection, provider);
+    const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
+    if (await contract.getFunction("hasMinted").staticCall(signerAddress).then(Boolean)) throw new Error("This wallet has already minted its Bull");
   },
 };
 

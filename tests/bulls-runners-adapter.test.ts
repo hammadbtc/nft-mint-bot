@@ -35,6 +35,7 @@ const readInterface = new ethers.Interface([
 ]);
 
 function fakeProvider({ whitelistEnabled = false, hasMinted = false, merkleRoot = expectedRoot } = {}): ethers.Provider {
+  let blockNumber = 100;
   const answers = new Map<string, string>([
     [readInterface.getFunction("MAX_SUPPLY")!.selector, readInterface.encodeFunctionResult("MAX_SUPPLY", [4200n])],
     [readInterface.getFunction("RESERVE_SUPPLY")!.selector, readInterface.encodeFunctionResult("RESERVE_SUPPLY", [420n])],
@@ -50,6 +51,7 @@ function fakeProvider({ whitelistEnabled = false, hasMinted = false, merkleRoot 
       if (!answer) throw new Error(`Unexpected test call ${request.data}`);
       return answer;
     },
+    getBlock: async () => ({ number: blockNumber++, timestamp: 1_786_658_000 }),
   } as unknown as ethers.Provider;
 }
 

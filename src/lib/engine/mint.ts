@@ -179,7 +179,12 @@ async function prepareDurableAttempt(args: {
 }): Promise<AttemptRow> {
   const { job, kind, request, signer, provider } = args;
   const existing = await latestRecoverableAttempt(job.id, kind);
-  if (existing) return existing;
+  if (existing) {
+    if (existing.preflightHash !== transactionIntentHash(request)) throw new Error("Stored prepared transaction no longer matches the current reviewed mint intent");
+    const parsed = ethers.Transaction.from(existing.rawTx!);
+    if (transactionIntentHash(parsed) !== transactionIntentHash(request)) throw new Error("Stored signed transaction does not match the current reviewed mint intent");
+    return existing;
+  }
   const attemptId = randomUUID();
   const intentHash = transactionIntentHash(request);
   const prepared = await prepareSignedTransaction(
@@ -211,6 +216,8 @@ async function prepareDurableAttempt(args: {
   const [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.id, attemptId)).limit(1);
   if (!attempt) throw new Error("Prepared transaction was not durably recorded");
   if (attempt.txHash?.toLowerCase() !== prepared.txHash.toLowerCase()) throw new Error("Prepared transaction hash mismatch");
+  const parsed = ethers.Transaction.from(prepared.rawTx);
+  if (transactionIntentHash(parsed) !== intentHash) throw new Error("Signed transaction does not match the reviewed mint intent");
   return attempt;
 }
 
@@ -479,6 +486,7 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
     return { status: "simulation_passed", dryRun: true };
   }
   await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
+  await adapter.revalidateBeforeSigning?.(collection, address, job.quantity, provider, request, { phaseId: phase.id });
   return sendDurableAttempt({ job, kind: "mint", request, signer, provider });
 }
 

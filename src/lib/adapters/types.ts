@@ -59,5 +59,13 @@ export interface MintAdapter {
     provider: ethers.Provider,
     options?: { allowBeforeStart?: boolean; phaseId?: string },
   ) => Promise<ethers.TransactionRequest>;
+  revalidateBeforeSigning?: (
+    collection: SupportedCollection,
+    signerAddress: string,
+    quantity: number,
+    provider: ethers.Provider,
+    request: ethers.TransactionRequest,
+    options?: { phaseId?: string },
+  ) => Promise<void>;
   recommendedGasLimit?: bigint;
 }
