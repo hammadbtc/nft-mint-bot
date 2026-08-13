@@ -61,12 +61,26 @@ export function mapSignedStageEligibility(
   eligibilityStages: ApiEligibilityStage[],
   quantity: number,
 ): MintPhaseEligibility[] {
+  const normalizeUuid = (value: string | undefined) => (value || "").trim().replace(/[{}]/g, "").toLowerCase();
+  const reviewedUuids = new Set(stages.filter((stage) => stage.kind === "signed")
+    .map((stage) => matchApiStage(stage, apiStages)?.uuid)
+    .filter((value): value is string => Boolean(value))
+    .map(normalizeUuid));
+  const unmatched = eligibilityStages.filter((item) => !reviewedUuids.has(normalizeUuid(item.stageUuid)));
+  const unmatchedEligible = unmatched.filter((item) => item.isEligible);
+  const mappingCode = unmatchedEligible.map((item) => normalizeUuid(item.stageUuid).slice(0, 8)).filter(Boolean).join(",");
   return stages.filter((stage) => stage.kind === "signed").map((stage) => {
     const apiStage = matchApiStage(stage, apiStages);
-    const result = eligibilityStages.find((item) => item.stageUuid === apiStage?.uuid);
+    const expectedUuid = normalizeUuid(apiStage?.uuid);
+    const result = eligibilityStages.find((item) => normalizeUuid(item.stageUuid) === expectedUuid);
     // The authenticated OpenSea endpoint returns records for stages the wallet
     // can claim and may omit non-matching allowlists. Omission is safe to treat
     // as ineligible: execution still requires a fresh wallet-bound signature.
+    if (!result && unmatchedEligible.length) return {
+      phaseId: stage.id,
+      status: "unknown",
+      reason: `OpenSea returned an unmapped eligible signed stage (${mappingCode || "unknown"})`,
+    };
     if (!result) return { phaseId: stage.id, status: "ineligible", reason: `Wallet is not eligible for ${stage.name}` };
     if (!result.isEligible) return { phaseId: stage.id, status: "ineligible", reason: `Wallet is not eligible for ${stage.name}` };
     if (result.price != null && BigInt(result.price) !== BigInt(stage.priceWei)) {

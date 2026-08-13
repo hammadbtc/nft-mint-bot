@@ -98,3 +98,29 @@ test("an omitted GTD stage is skipped while a returned eligible FCFS stage is se
     { phaseId: "fcfs", status: "eligible" },
   ]);
 });
+
+test("signed stage UUID matching tolerates casing and braces", () => {
+  const apiStages = [{
+    uuid: "AABBCCDD-1111-2222-3333-444455556666",
+    stageType: "signed_presale", label: "FCFs", price: "0",
+    startTime: stage.startsAt, endTime: stage.endsAt, maxPerWallet: "1",
+  }];
+  assert.deepEqual(mapSignedStageEligibility([stage], apiStages, [{
+    stageUuid: "{aabbccdd-1111-2222-3333-444455556666}", isEligible: true,
+  }], 1), [{ phaseId: "fcfs", status: "eligible" }]);
+});
+
+test("an unmapped eligible OpenSea stage blocks public fallback with a diagnostic code", () => {
+  const apiStages = [{
+    uuid: "aaaaaaaa-1111-2222-3333-444455556666",
+    stageType: "signed_presale", label: "FCFs", price: "0",
+    startTime: stage.startsAt, endTime: stage.endsAt, maxPerWallet: "1",
+  }];
+  assert.deepEqual(mapSignedStageEligibility([stage], apiStages, [{
+    stageUuid: "bbbbbbbb-1111-2222-3333-444455556666", isEligible: true,
+  }], 1), [{
+    phaseId: "fcfs",
+    status: "unknown",
+    reason: "OpenSea returned an unmapped eligible signed stage (bbbbbbbb)",
+  }]);
+});
