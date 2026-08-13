@@ -1,7 +1,7 @@
 import { getMintAdapter } from "@/lib/adapters";
 import type { MintPhase, MintPhaseEligibility, SupportedCollection } from "@/lib/adapters/types";
 import { getProvider } from "@/lib/chains";
-import { selectEligibleExecutionPhase } from "@/lib/mint-policy";
+import { selectEligibleExecutionPhase, selectRequestedExecutionPhase } from "@/lib/mint-policy";
 import type { ethers } from "ethers";
 
 export type WalletPhasePlan = {
@@ -55,4 +55,17 @@ export async function resolveWalletPhasePlan(
 ): Promise<WalletPhasePlan> {
   const inspected = await inspectWalletPhases(collection, signerAddress, quantity, knownPhases, context);
   return { ...inspected, selectedPhase: selectEligibleExecutionPhase(inspected.phases, inspected.eligibility) };
+}
+
+export async function resolveWalletSelectedPhase(
+  collection: SupportedCollection,
+  signerAddress: string,
+  quantity: number,
+  phaseId: string,
+  knownPhases?: MintPhase[],
+  context?: { signer?: ethers.Signer },
+): Promise<WalletPhasePlan> {
+  const inspected = await inspectWalletPhases(collection, signerAddress, quantity, knownPhases, context);
+  const phase = selectRequestedExecutionPhase(inspected.phases, inspected.eligibility, phaseId);
+  return { ...inspected, selectedPhase: phase };
 }

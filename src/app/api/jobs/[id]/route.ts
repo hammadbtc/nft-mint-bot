@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/lib/db";
-import { resolveWalletPhasePlan } from "@/lib/phase-planning";
+import { resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { requireAdminPassword } from "@/lib/admin-auth";
 import { safeErrorMessage } from "@/lib/safety";
 import { mintTaskMutationError } from "@/lib/task-management";
+import { getMintAdapter } from "@/lib/adapters";
+import { getProvider } from "@/lib/chains";
+import { getSigner } from "@/lib/vault";
 
 type Context = { params: Promise<{ id: string }> };
 const noStore = { "Cache-Control": "no-store" };
@@ -37,7 +40,12 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       : [];
     const eligibilityError = mintWalletEligibilityError(wallet, collection.chainId, parent);
     if (eligibilityError) throw new Error(eligibilityError);
-    const phase = (await resolveWalletPhasePlan(collection, wallet.address, quantity)).selectedPhase;
+    const adapter = getMintAdapter(collection.adapterKey);
+    if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
+    const signer = adapter.requiresSignerForEligibility ? await getSigner(wallet.id, getProvider(collection.chainId)) : undefined;
+    const phase = job.phaseId
+      ? (await resolveWalletSelectedPhase(collection, wallet.address, quantity, job.phaseId, undefined, { signer })).selectedPhase
+      : (await resolveWalletPhasePlan(collection, wallet.address, quantity, undefined, { signer })).selectedPhase;
     if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) throw new Error("Quantity exceeds the reviewed transaction limit");
 
     const scheduledAt = phase.status === "upcoming" ? phase.startsAt || null : null;

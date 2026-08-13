@@ -30,6 +30,15 @@ export function selectEligibleExecutionPhase(phases: MintPhase[], eligibility: M
   throw new Error(reasons[0] || "No live or upcoming phase is eligible for this wallet");
 }
 
+export function selectRequestedExecutionPhase(phases: MintPhase[], eligibility: MintPhaseEligibility[], phaseId: string): MintPhase {
+  const phase = phases.find((item) => item.id === phaseId);
+  if (!phase) throw new Error("The selected mint phase is no longer available");
+  const result = eligibility.find((item) => item.phaseId === phaseId);
+  if (result?.status !== "eligible") throw new Error(result?.reason || `${phase.name} eligibility could not be verified`);
+  if (!["live", "upcoming"].includes(phase.status)) throw new Error(`${phase.name} is not runnable`);
+  return phase;
+}
+
 export function recoveredJobStatus(kind: "approval" | "mint", transactionConfirmed: boolean): "pending" | "completed" | "failed" {
   if (!transactionConfirmed) return "failed";
   return kind === "approval" ? "pending" : "completed";

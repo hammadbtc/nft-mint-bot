@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import { exactUrlPathMatches } from "../src/lib/adapters";
-import { recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase } from "../src/lib/mint-policy";
+import { recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase, selectRequestedExecutionPhase } from "../src/lib/mint-policy";
 import { mintWalletEligibilityError } from "../src/lib/mint-wallet-policy";
 import { broadcastPreparedTransaction, exactSimulationRequest } from "../src/lib/transactions";
 import { liveTransactionsEnabled, safeErrorMessage, safeSecretEqual, stableHash } from "../src/lib/safety";
@@ -50,6 +50,22 @@ test("wallet phase policy skips ineligible live stages and selects the next elig
     { phaseId: "gtd", status: "unknown", reason: "Eligibility service unavailable" },
     { phaseId: "public", status: "eligible" },
   ]), /Eligibility service unavailable/);
+});
+
+test("explicit phase policy never reroutes a phase-bound task", () => {
+  const phases = [
+    { id: "gtd", name: "GTD", status: "live" as const },
+    { id: "fcfs", name: "FCFS", status: "upcoming" as const, startsAt: "2026-08-13T17:30:00Z" },
+    { id: "public", name: "Public", status: "upcoming" as const, startsAt: "2026-08-13T19:30:00Z" },
+  ];
+  const eligibility = [
+    { phaseId: "gtd", status: "eligible" as const },
+    { phaseId: "fcfs", status: "eligible" as const },
+    { phaseId: "public", status: "eligible" as const },
+  ];
+  assert.equal(selectRequestedExecutionPhase(phases, eligibility, "fcfs").id, "fcfs");
+  assert.equal(selectRequestedExecutionPhase(phases, eligibility, "public").id, "public");
+  assert.throws(() => selectRequestedExecutionPhase(phases, [{ phaseId: "fcfs", status: "ineligible", reason: "Not FCFS" }], "fcfs"), /Not FCFS/);
 });
 
 test("restart recovery resumes after approval and only completes after mint confirmation", () => {

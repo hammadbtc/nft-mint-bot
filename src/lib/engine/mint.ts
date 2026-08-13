@@ -5,7 +5,7 @@ import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { recoveredJobStatus } from "@/lib/mint-policy";
-import { resolveWalletPhasePlan } from "@/lib/phase-planning";
+import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { getProvider } from "@/lib/chains";
 import { broadcastSameHash, warmBroadcastRoutes } from "@/lib/chains/broadcast";
@@ -53,7 +53,8 @@ type ExecutionResult = {
   launchTargetAt?: string;
 };
 
-async function resolvePhase(collection: SupportedCollection, signerAddress: string, quantity: number, signer?: ethers.Signer): Promise<MintPhase> {
+async function resolvePhase(collection: SupportedCollection, signerAddress: string, quantity: number, phaseId: string | null, signer?: ethers.Signer): Promise<MintPhase> {
+  if (phaseId) return (await resolveWalletSelectedPhase(collection, signerAddress, quantity, phaseId, undefined, { signer })).selectedPhase;
   return (await resolveWalletPhasePlan(collection, signerAddress, quantity, undefined, { signer })).selectedPhase;
 }
 
@@ -355,7 +356,7 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
   if (!adapter?.buildTransaction || !adapter.supportsArming || !job.phaseId || (adapter.canArmPhase && !adapter.canArmPhase(job.phaseId))) throw new Error("Armed adapter is unavailable for this phase");
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(job.walletId, provider);
-  const plan = await resolveWalletPhasePlan(collection, wallet.address, job.quantity, undefined, { signer });
+  const plan = await inspectWalletPhases(collection, wallet.address, job.quantity, undefined, { signer });
   const phase = plan.phases.find((item) => item.id === job.phaseId);
   const eligibility = plan.eligibility.find((item) => item.phaseId === job.phaseId);
   if (!phase || eligibility?.status !== "eligible") throw new Error("The armed wallet is no longer eligible for its reviewed phase");
@@ -431,10 +432,9 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   const { job, collection, wallet } = await loadExecutionState(jobId);
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(job.walletId, provider);
-  const phase = await resolvePhase(collection, wallet.address, job.quantity, signer);
-  if (job.phaseId !== phase.id || job.phaseStartsAt !== (phase.startsAt || null) || job.phaseEndsAt !== (phase.endsAt || null)) {
+  const phase = await resolvePhase(collection, wallet.address, job.quantity, job.phaseId, signer);
+  if (job.phaseStartsAt !== (phase.startsAt || null) || job.phaseEndsAt !== (phase.endsAt || null)) {
     await db.update(schema.mintJobs).set({
-      phaseId: phase.id,
       phaseStartsAt: phase.startsAt || null,
       phaseEndsAt: phase.endsAt || null,
       scheduledAt: phase.status === "upcoming" ? phase.startsAt || null : null,
@@ -556,9 +556,13 @@ export async function batchMint(
   useFlashbots = false,
   dryRun = false,
   idempotencyBase: string,
+  requestedPhases?: Array<{ walletId: string; phaseId: string }>,
 ) {
   if (!idempotencyBase || idempotencyBase.length > 200) throw new Error("A valid Idempotency-Key header is required");
-  const uniqueWalletIds = [...new Set(walletIds)];
+  const uniqueRequests = requestedPhases?.length
+    ? [...new Map(requestedPhases.map((item) => [`${item.walletId}:${item.phaseId}`, item])).values()]
+    : undefined;
+  const uniqueWalletIds = [...new Set(uniqueRequests?.map((item) => item.walletId) || walletIds)];
   const [collection] = await db.select().from(schema.collections).where(eq(schema.collections.id, collectionId)).limit(1);
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
   if (quantity < 1) throw new Error("Mint quantity must be positive");
@@ -586,10 +590,13 @@ export async function batchMint(
   const phases = (await adapter.resolve(collection, "name")).phases;
   const provider = getProvider(collection.chainId);
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet]));
-  const plans = await Promise.all(uniqueWalletIds.map(async (walletId) => {
+  const planRequests = uniqueRequests || uniqueWalletIds.map((walletId) => ({ walletId, phaseId: undefined }));
+  const plans = await Promise.all(planRequests.map(async ({ walletId, phaseId }) => {
     const wallet = walletById.get(walletId)!;
     const signer = adapter.requiresSignerForEligibility ? await getSigner(wallet.id, provider) : undefined;
-    const plan = await resolveWalletPhasePlan(collection, wallet.address, quantity, phases, { signer });
+    const plan = phaseId
+      ? await resolveWalletSelectedPhase(collection, wallet.address, quantity, phaseId, phases, { signer })
+      : await resolveWalletPhasePlan(collection, wallet.address, quantity, phases, { signer });
     const phase = plan.selectedPhase;
     if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
       throw new Error(`${wallet.label} exceeds the ${phase.name} wallet limit`);
@@ -610,7 +617,7 @@ export async function batchMint(
     phaseStartsAt: phase.startsAt || null,
     phaseEndsAt: phase.endsAt || null,
     status: "pending",
-    idempotencyKey: `${idempotencyBase}:${walletId}:${collectionId}`,
+    idempotencyKey: `${idempotencyBase}:${walletId}:${collectionId}:${phase.id}`,
   }));
   const sharedSchedule = plans.every((plan) => plan.scheduledAt === plans[0]?.scheduledAt) ? plans[0]?.scheduledAt || null : null;
   const sharedPhaseId = plans.every((plan) => plan.phase.id === plans[0]?.phase.id) ? plans[0]?.phase.id || null : null;
@@ -646,13 +653,14 @@ export async function batchMint(
     }
     const inserted = await tx.insert(schema.mintJobs).values(values)
       .returning({ id: schema.mintJobs.id, walletId: schema.mintJobs.walletId, batchId: schema.mintJobs.batchId });
-    const planByWallet = new Map(plans.map((plan) => [plan.walletId, plan]));
+    const planByWalletPhase = new Map(plans.map((plan) => [`${plan.walletId}:${plan.phase.id}`, plan]));
     return {
       batchId,
       scheduledAt: sharedSchedule,
       phaseId: sharedPhaseId,
       results: inserted.map((row) => {
-        const plan = planByWallet.get(row.walletId)!;
+        const value = values.find((item) => item.id === row.id)!;
+        const plan = planByWalletPhase.get(`${row.walletId}:${value.phaseId}`)!;
         return { ...row, phaseId: plan.phase.id, phaseName: plan.phase.name, scheduledAt: plan.scheduledAt, status: plan.scheduledAt ? "scheduled" : "queued" };
       }),
     };
