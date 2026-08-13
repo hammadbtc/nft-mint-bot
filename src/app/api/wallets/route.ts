@@ -73,9 +73,6 @@ export async function POST(req: NextRequest) {
     if (input.role === "worker") {
       if (!input.parentWalletId) throw new Error("Choose a main wallet for this worker");
       await assertMainWallet(input.parentWalletId, input.chainId);
-    } else {
-      const existingMain = (await listWallets(input.chainId)).find((wallet) => wallet.role === "main");
-      if (existingMain) throw new Error("This network already has a main wallet");
     }
     const wallet = await importWallet(input);
     return NextResponse.json(wallet, { status: 201, headers: { "Cache-Control": "no-store" } });

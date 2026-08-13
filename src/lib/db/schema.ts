@@ -36,8 +36,6 @@ export const wallets = pgTable("wallets", {
     .default(sql`now()`),
 }, (table) => [
   uniqueIndex("wallets_chain_address_unique").on(table.chainId, sql`lower(${table.address})`),
-  uniqueIndex("wallets_one_main_per_chain").on(table.chainId)
-    .where(sql`${table.role} = 'main'`),
   index("wallets_parent_idx").on(table.parentWalletId),
 ]);
 
