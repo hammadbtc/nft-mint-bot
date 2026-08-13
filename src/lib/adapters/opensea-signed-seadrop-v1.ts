@@ -55,6 +55,31 @@ type ApiEligibilityStage = {
   maxTotalMintableByWallet?: string;
 };
 
+export function mapSignedStageEligibility(
+  stages: ReviewedOpenSeaStage[],
+  apiStages: ApiStage[],
+  eligibilityStages: ApiEligibilityStage[],
+  quantity: number,
+): MintPhaseEligibility[] {
+  return stages.filter((stage) => stage.kind === "signed").map((stage) => {
+    const apiStage = matchApiStage(stage, apiStages);
+    const result = eligibilityStages.find((item) => item.stageUuid === apiStage?.uuid);
+    // The authenticated OpenSea endpoint returns records for stages the wallet
+    // can claim and may omit non-matching allowlists. Omission is safe to treat
+    // as ineligible: execution still requires a fresh wallet-bound signature.
+    if (!result) return { phaseId: stage.id, status: "ineligible", reason: `Wallet is not eligible for ${stage.name}` };
+    if (!result.isEligible) return { phaseId: stage.id, status: "ineligible", reason: `Wallet is not eligible for ${stage.name}` };
+    if (result.price != null && BigInt(result.price) !== BigInt(stage.priceWei)) {
+      return { phaseId: stage.id, status: "unknown", reason: `${stage.name} wallet price differs from the reviewed price` };
+    }
+    const walletLimit = result.maxTotalMintableByWallet == null ? stage.maxPerWallet : Number(result.maxTotalMintableByWallet);
+    if (!Number.isSafeInteger(walletLimit) || walletLimit < quantity) {
+      return { phaseId: stage.id, status: "ineligible", reason: `Wallet has insufficient room under its ${stage.name} mint limit` };
+    }
+    return { phaseId: stage.id, status: "eligible" };
+  });
+}
+
 type TimedPromise<T> = { expiresAt: number; value: Promise<T> };
 const dropCache = new Map<string, TimedPromise<unknown>>();
 const eligibilityCache = new Map<string, TimedPromise<MintPhaseEligibility[]>>();
@@ -147,20 +172,7 @@ async function apiEligibility(
   const eligibility = eligibilityRaw as unknown as { stages?: ApiEligibilityStage[] };
   if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
 
-  return config.stages.filter((stage) => stage.kind === "signed").map((stage) => {
-    const apiStage = matchApiStage(stage, drop.stages);
-    const result = eligibility.stages!.find((item) => item.stageUuid === apiStage?.uuid);
-    if (!result) return { phaseId: stage.id, status: "unknown", reason: "OpenSea did not return eligibility for this signed stage" };
-    if (!result.isEligible) return { phaseId: stage.id, status: "ineligible", reason: `Wallet is not eligible for ${stage.name}` };
-    if (result.price != null && BigInt(result.price) !== BigInt(stage.priceWei)) {
-      return { phaseId: stage.id, status: "unknown", reason: `${stage.name} wallet price differs from the reviewed price` };
-    }
-    const walletLimit = result.maxTotalMintableByWallet == null ? stage.maxPerWallet : Number(result.maxTotalMintableByWallet);
-    if (!Number.isSafeInteger(walletLimit) || walletLimit < quantity) {
-      return { phaseId: stage.id, status: "ineligible", reason: `Wallet has insufficient room under its ${stage.name} mint limit` };
-    }
-    return { phaseId: stage.id, status: "eligible" };
-  });
+  return mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
   });
 }
 

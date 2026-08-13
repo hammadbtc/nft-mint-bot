@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import {
+  mapSignedStageEligibility,
   validateOpenSeaSignedTransaction,
   type ReviewedOpenSeaStage,
   type SignedSeaDropConfig,
@@ -71,4 +72,29 @@ test("OpenSea signed FCFS validation rejects another stage, NFT, quantity, or re
   assert.throws(() => validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, 1, signedResponse({ nft: ethers.ZeroAddress })), /different NFT contract/);
   assert.throws(() => validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, 1, signedResponse({ quantity: 2 })), /quantity/);
   assert.throws(() => validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, 1, signedResponse({ recipient: "0x2222222222222222222222222222222222222222" })), /another wallet/);
+});
+
+test("an omitted GTD stage is skipped while a returned eligible FCFS stage is selected", () => {
+  const gtd: ReviewedOpenSeaStage = {
+    ...stage,
+    id: "gtd",
+    name: "GTDs",
+    startsAt: "2026-08-13T17:00:00.000Z",
+    endsAt: "2026-08-13T17:30:00.000Z",
+    dropStageIndex: 1,
+  };
+  const apiStages = [
+    { uuid: "gtd-uuid", stageType: "signed_presale", label: "GTDs", price: "0", startTime: gtd.startsAt, endTime: gtd.endsAt, maxPerWallet: "1" },
+    { uuid: "fcfs-uuid", stageType: "signed_presale", label: "FCFs", price: "0", startTime: stage.startsAt, endTime: stage.endsAt, maxPerWallet: "1" },
+  ];
+  const result = mapSignedStageEligibility([gtd, stage], apiStages, [{
+    stageUuid: "fcfs-uuid",
+    isEligible: true,
+    price: "0",
+    maxTotalMintableByWallet: "1",
+  }], 1);
+  assert.deepEqual(result, [
+    { phaseId: "gtd", status: "ineligible", reason: "Wallet is not eligible for GTDs" },
+    { phaseId: "fcfs", status: "eligible" },
+  ]);
 });
