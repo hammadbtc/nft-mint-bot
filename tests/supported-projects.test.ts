@@ -61,11 +61,16 @@ test("Squiggle Wuiggle is bound to exact official, explorer, and collection URLs
   assert.ok(squiggle?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/squigglerh/status/2087590681426428010"));
 });
 
-test("CHIMPS and WEASELS public phases are explicitly named and bound to supplied paths", () => {
+test("CHIMPS, WEASELS, and Purr Cat public phases are named and bound to supplied paths", () => {
   const chimps = seeds.find((seed) => seed.slug === "chimps-hood");
   const weasels = seeds.find((seed) => seed.slug === "weaselsinstock");
+  const purrCat = seeds.find((seed) => seed.slug === "purr-cats-nft");
   assert.equal(chimps?.adapterConfig.publicPhaseName, "Public stage");
   assert.equal(weasels?.adapterConfig.publicPhaseName, "FCFS");
+  assert.equal(purrCat?.adapterKey, "opensea-seadrop-v1");
+  assert.equal(purrCat?.adapterConfig.publicPhaseName, "Public Mint");
   assert.ok(chimps?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/chimps-hood/overview"));
   assert.ok(weasels?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/weaselsinstock/overview"));
+  assert.ok(purrCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/purr-cats-nft/overview"));
+  assert.ok(purrCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0xce905281c45014b37a4597f9964299f1e9b6df06"));
 });

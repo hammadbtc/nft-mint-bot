@@ -74,6 +74,31 @@
     }
   },
   {
+    "id": "fa99c2dc-2392-43d4-96f1-eeb53d43c16a",
+    "name": "Purr Cat",
+    "slug": "purr-cats-nft",
+    "contractAddress": "0xCe905281c45014B37A4597f9964299F1e9B6dF06",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "100000000000000",
+    "maxPerWallet": 100,
+    "maxSupply": 10000,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/purr-cats-nft/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/purr-cat-670317237/image_type_logo/924f95ab3bc0a8a511d55e4a0bb92f/dc924f95ab3bc0a8a511d55e4a0bb92f.jpeg",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public Mint",
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/purr-cats-nft/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0xce905281c45014b37a4597f9964299f1e9b6df06" }
+      ]
+    }
+  },
+  {
     "id": "ed083dbf-57ab-4467-802c-8436986f8ee6",
     "name": "Squiggle Wuiggle",
     "slug": "squiggle-wuiggle",
