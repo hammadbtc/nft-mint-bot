@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
-import { openSeaApi, openSeaApiForSigner } from "@/lib/opensea-auth";
+import { openSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
 
@@ -122,10 +122,9 @@ async function apiEligibility(
   signer: ethers.Signer,
   quantity: number,
 ): Promise<MintPhaseEligibility[]> {
-  const authenticated = await openSeaApiForSigner(signer);
   const [dropRaw, eligibilityRaw] = await Promise.all([
     openSeaApi().then((api) => api.getDrop(config.openSeaSlug)),
-    authenticated.walletAuth.getDropEligibility(config.openSeaSlug),
+    withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug)),
   ]);
   const drop = validateApiDrop(collection, config, dropRaw);
   const eligibility = eligibilityRaw as unknown as { stages?: ApiEligibilityStage[] };
