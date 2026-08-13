@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
-import { openSeaApi, openSeaApiForSigner, openSeaApiKey } from "@/lib/opensea-auth";
+import { openSeaApi, openSeaApiForSigner } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
 
@@ -124,7 +124,7 @@ async function apiEligibility(
 ): Promise<MintPhaseEligibility[]> {
   const authenticated = await openSeaApiForSigner(signer);
   const [dropRaw, eligibilityRaw] = await Promise.all([
-    openSeaApi().getDrop(config.openSeaSlug),
+    openSeaApi().then((api) => api.getDrop(config.openSeaSlug)),
     authenticated.walletAuth.getDropEligibility(config.openSeaSlug),
   ]);
   const drop = validateApiDrop(collection, config, dropRaw);
@@ -221,13 +221,7 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const config = configFor(collection);
     const publicResults = await openseaSeaDropV1.checkEligibility!(collection, signerAddress, quantity, provider, phases);
     let signedResults: MintPhaseEligibility[];
-    if (!openSeaApiKey()) {
-      signedResults = config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
-        phaseId: stage.id,
-        status: "unknown",
-        reason: "OpenSea API key is not configured for signed-stage eligibility",
-      }));
-    } else if (!context?.signer) {
+    if (!context?.signer) {
       signedResults = config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
         phaseId: stage.id,
         status: "unknown",
@@ -251,7 +245,7 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const now = Number(latest.timestamp) * 1000;
     if (now < Date.parse(stage.startsAt)) throw new Error(`${stage.name} has not started`);
     if (now >= Date.parse(stage.endsAt)) throw new Error(`${stage.name} has ended`);
-    const response = await openSeaApi().buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity });
+    const response = await (await openSeaApi()).buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity });
     return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, response);
   },
 };

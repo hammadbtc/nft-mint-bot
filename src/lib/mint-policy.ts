@@ -12,13 +12,17 @@ export function selectExecutionPhase(phases: MintPhase[]): MintPhase {
 
 export function selectEligibleExecutionPhase(phases: MintPhase[], eligibility: MintPhaseEligibility[]): MintPhase {
   const eligibilityById = new Map(eligibility.map((item) => [item.phaseId, item]));
-  const eligible = (phase: MintPhase) => eligibilityById.get(phase.id)?.status === "eligible";
-  const live = phases.find((phase) => phase.status === "live" && eligible(phase));
-  if (live) return live;
+  const live = phases.filter((phase) => phase.status === "live");
   const upcoming = phases
-    .filter((phase) => phase.status === "upcoming" && phase.startsAt && Number.isFinite(Date.parse(phase.startsAt)) && eligible(phase))
-    .sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!))[0];
-  if (upcoming) return upcoming;
+    .filter((phase) => phase.status === "upcoming" && phase.startsAt && Number.isFinite(Date.parse(phase.startsAt)))
+    .sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!));
+  for (const phase of [...live, ...upcoming]) {
+    const result = eligibilityById.get(phase.id);
+    if (result?.status === "eligible") return phase;
+    if (!result || result.status === "unknown" || result.status === "unsupported") {
+      throw new Error(result?.reason || `${phase.name} eligibility could not be verified`);
+    }
+  }
   const reasons = phases.flatMap((phase) => {
     const result = eligibilityById.get(phase.id);
     return result?.reason ? [`${phase.name}: ${result.reason}`] : [];

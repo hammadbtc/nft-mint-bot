@@ -7,15 +7,36 @@ type AuthEntry = {
 };
 
 const authByAddress = new Map<string, AuthEntry>();
+let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
+let cachedInstantKey: { value: string; expiresAt: number } | undefined;
 
-export function openSeaApiKey(): string | undefined {
+export function configuredOpenSeaApiKey(): string | undefined {
   return process.env.OPENSEA_API_KEY?.trim() || undefined;
 }
 
-export function requireOpenSeaApiKey(): string {
-  const value = openSeaApiKey();
-  if (!value) throw new Error("OPENSEA_API_KEY is required for signed-drop eligibility and minting");
-  return value;
+/**
+ * Prefer the permanent production key. When it has not been configured yet,
+ * OpenSea's official seven-day instant key keeps a reviewed launch usable.
+ * The temporary key stays in process memory and is never returned to clients.
+ */
+export async function requireOpenSeaApiKey(): Promise<string> {
+  const configured = configuredOpenSeaApiKey();
+  if (configured) return configured;
+  if (cachedInstantKey && cachedInstantKey.expiresAt - Date.now() > 300_000) return cachedInstantKey.value;
+  if (!instantKeyPromise) {
+    instantKeyPromise = OpenSeaAPI.requestInstantApiKey().then((response) => {
+      if (!response.apiKey || !Number.isFinite(Date.parse(response.expiresAt))) {
+        throw new Error("OpenSea returned an invalid instant API key response");
+      }
+      return { value: response.apiKey, expiresAt: Date.parse(response.expiresAt) };
+    });
+  }
+  try {
+    cachedInstantKey = await instantKeyPromise;
+    return cachedInstantKey.value;
+  } finally {
+    instantKeyPromise = undefined;
+  }
 }
 
 /**
@@ -37,13 +58,13 @@ export async function openSeaApiForSigner(signer: ethers.Signer): Promise<OpenSe
   try {
     await entry.ready;
     const token = await entry.auth.getValidToken();
-    return new OpenSeaAPI({ apiKey: requireOpenSeaApiKey(), authToken: token.accessToken });
+    return new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken });
   } catch (error) {
     if (authByAddress.get(address) === entry) authByAddress.delete(address);
     throw error;
   }
 }
 
-export function openSeaApi(): OpenSeaAPI {
-  return new OpenSeaAPI({ apiKey: requireOpenSeaApiKey() });
+export async function openSeaApi(): Promise<OpenSeaAPI> {
+  return new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey() });
 }

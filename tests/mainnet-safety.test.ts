@@ -44,7 +44,12 @@ test("wallet phase policy skips ineligible live stages and selects the next elig
     { phaseId: "wl", status: "ineligible", reason: "Wallet is not allowlisted" },
     { phaseId: "gtd", status: "unknown" },
     { phaseId: "public", status: "unsupported" },
-  ]), /Wallet is not allowlisted/);
+  ]), /GTD eligibility could not be verified/);
+  assert.throws(() => selectEligibleExecutionPhase(phases, [
+    { phaseId: "wl", status: "ineligible", reason: "Wallet is not allowlisted" },
+    { phaseId: "gtd", status: "unknown", reason: "Eligibility service unavailable" },
+    { phaseId: "public", status: "eligible" },
+  ]), /Eligibility service unavailable/);
 });
 
 test("restart recovery resumes after approval and only completes after mint confirmation", () => {
