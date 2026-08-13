@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { failArmedJob, launchArmedJob, leaseExpiry, recoverMintJob, revalidateArmedJob, runMintJob } from "@/lib/engine/mint";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 import { processDisperseOperations, recoverDisperseOperation } from "@/lib/disperse";
 import { armLeadMs, revalidateLeadMs, schedulePrecisely } from "@/lib/launch-timing";
+import { firstTaskPerWallet } from "@/lib/task-management";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
@@ -122,20 +123,30 @@ export async function processScheduledJobs(maxConcurrent = state.activeConcurren
       ),
       liveEnabled ? undefined : eq(schema.mintJobs.dryRun, true),
     ),
-  ).orderBy(asc(schema.mintJobs.priority), asc(schema.mintJobs.createdAt)).limit(maxConcurrent * 3);
+  ).orderBy(asc(schema.mintJobs.priority), asc(schema.mintJobs.scheduledAt), asc(schema.mintJobs.createdAt)).limit(maxConcurrent * 10);
+
+  const runnable = firstTaskPerWallet(candidates);
 
   const running: Promise<unknown>[] = [];
-  for (const job of candidates) {
+  for (const job of runnable) {
     const claimToken = randomUUID();
-    const claimed = await db.update(schema.mintJobs).set({
-      status: "running",
-      claimToken,
-      claimedAt: now,
-      leaseExpiresAt: leaseExpiry(),
-      startedAt: job.startedAt || now,
-      updatedAt: now,
-    }).where(and(eq(schema.mintJobs.id, job.id), eq(schema.mintJobs.status, "pending")))
-      .returning({ id: schema.mintJobs.id });
+    const claimed = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${job.walletId}`}))`);
+      const [busy] = await tx.select({ id: schema.mintJobs.id }).from(schema.mintJobs).where(and(
+        eq(schema.mintJobs.walletId, job.walletId),
+        inArray(schema.mintJobs.status, ["running", "armed", "confirming"]),
+      )).limit(1);
+      if (busy) return [];
+      return tx.update(schema.mintJobs).set({
+        status: "running",
+        claimToken,
+        claimedAt: now,
+        leaseExpiresAt: leaseExpiry(),
+        startedAt: job.startedAt || now,
+        updatedAt: now,
+      }).where(and(eq(schema.mintJobs.id, job.id), eq(schema.mintJobs.status, "pending")))
+        .returning({ id: schema.mintJobs.id });
+    });
     if (!claimed.length) continue;
     running.push(runMintJob(job.id).then((result) => {
       if (result?.status === "armed" && result.launchTargetAt) scheduleArmedTimers(job.id, result.launchTargetAt);

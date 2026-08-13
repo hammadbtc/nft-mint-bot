@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { adminPasswordAccepted } from "../src/lib/admin-auth";
 import { prepareWalletKeyReplacement } from "../src/lib/vault";
-import { mintTaskMutationError } from "../src/lib/task-management";
+import { firstTaskPerWallet, mintTaskMutationError } from "../src/lib/task-management";
 
 test("destructive actions require the configured admin password with access-password fallback", () => {
   const previousAdmin = process.env.ADMIN_ACTION_PASSWORD;
@@ -43,4 +43,13 @@ test("only genuinely unsigned pending mint tasks may be edited or deleted", () =
   for (const status of ["armed", "running", "confirming", "completed", "failed"]) {
     assert.match(mintTaskMutationError(status, false) || "", /only pending/i);
   }
+});
+
+test("scheduler queues many mints per wallet but starts only its earliest candidate", () => {
+  const candidates = [
+    { id: "earliest-a", walletId: "wallet-a" },
+    { id: "later-a", walletId: "wallet-a" },
+    { id: "earliest-b", walletId: "wallet-b" },
+  ];
+  assert.deepEqual(firstTaskPerWallet(candidates).map((job) => job.id), ["earliest-a", "earliest-b"]);
 });

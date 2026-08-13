@@ -57,6 +57,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Reserve nonces under a PostgreSQL advisory lock shared by Mint and Disperse.
 - Report confirmed success only from a successful receipt.
 - Pending unsigned mint tasks may change wallet or quantity; the server refreshes authoritative contract phase timing during the edit. Deletion requires fresh admin approval. Armed, running, submitted, or historical work remains immutable.
+- A wallet may queue multiple projects. The scheduler orders eligible work by authoritative launch time and permits only the first task per wallet to arm/run at once; later tasks do not reserve a nonce until that wallet is free.
 - External races, sell-outs, project pauses and provider outages mean a 100% hit rate cannot be guaranteed.
 
 ## Armed FCFS launch engine
@@ -111,7 +112,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Thirty-five unit tests pass, additionally covering destructive-action password fallback, immutable attempted/non-pending mint tasks, signing-key-derived wallet replacement, precise non-early launch timing, direct-sequencer route order/uniqueness, provider identification, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
+- Thirty-six unit tests pass, additionally covering destructive-action password fallback, immutable attempted/non-pending mint tasks, per-wallet queued-task arbitration, signing-key-derived wallet replacement, precise non-early launch timing, direct-sequencer route order/uniqueness, provider identification, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 

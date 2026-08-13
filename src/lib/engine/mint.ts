@@ -622,15 +622,6 @@ export async function batchMint(
       );
       if (eligibilityError) throw new Error(eligibilityError);
     }
-    const activeForWallets = await tx.select({ walletId: schema.mintJobs.walletId })
-      .from(schema.mintJobs)
-      .where(and(
-        inArray(schema.mintJobs.walletId, uniqueWalletIds),
-        inArray(schema.mintJobs.status, ["pending", "running", "armed", "confirming"]),
-      )).limit(1);
-    if (activeForWallets.length) {
-      throw new Error("A selected wallet already has an active mint task; wait for it to finish before reserving another nonce");
-    }
     const inserted = await tx.insert(schema.mintJobs).values(values)
       .returning({ id: schema.mintJobs.id, walletId: schema.mintJobs.walletId, batchId: schema.mintJobs.batchId });
     return { batchId, scheduledAt: scheduledAt || null, phaseId: phase.id, results: inserted.map((row) => ({ ...row, status: scheduledAt ? "scheduled" : "queued" })) };

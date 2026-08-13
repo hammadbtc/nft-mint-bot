@@ -3,3 +3,14 @@ export function mintTaskMutationError(status: string, hasAttempt: boolean): stri
   if (hasAttempt) return "This task has transaction history and must be retained for recovery and audit";
   return null;
 }
+
+export function firstTaskPerWallet<T extends { walletId: string }>(tasks: T[]): T[] {
+  const selected: T[] = [];
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    if (seen.has(task.walletId)) continue;
+    seen.add(task.walletId);
+    selected.push(task);
+  }
+  return selected;
+}

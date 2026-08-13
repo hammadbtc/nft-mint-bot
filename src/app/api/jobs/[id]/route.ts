@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
@@ -54,13 +54,6 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         .where(eq(schema.mintAttempts.jobId, id)).limit(1);
       const mutationError = mintTaskMutationError(fresh.status, Boolean(attempt));
       if (mutationError) throw new Error(mutationError);
-      if (walletId !== job.walletId) {
-        const [conflict] = await tx.select({ id: schema.mintJobs.id }).from(schema.mintJobs).where(and(
-          eq(schema.mintJobs.walletId, walletId), ne(schema.mintJobs.id, id),
-          inArray(schema.mintJobs.status, ["pending", "running", "armed", "confirming"]),
-        )).limit(1);
-        if (conflict) throw new Error("The replacement wallet already has an active mint task");
-      }
       return tx.update(schema.mintJobs).set({
         walletId,
         quantity,
