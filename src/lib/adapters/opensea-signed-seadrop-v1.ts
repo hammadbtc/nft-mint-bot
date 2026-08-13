@@ -190,6 +190,22 @@ async function apiEligibility(
   });
 }
 
+export async function diagnoseOpenSeaStageMapping(collection: SupportedCollection, signer: ethers.Signer) {
+  const config = configFor(collection);
+  const [dropRaw, eligibilityRaw] = await Promise.all([
+    openSeaApi().then((api) => api.getDrop(config.openSeaSlug)),
+    withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug)),
+  ]);
+  const drop = validateApiDrop(collection, config, dropRaw);
+  const eligibility = eligibilityRaw as unknown as { stages?: ApiEligibilityStage[] };
+  if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
+  return {
+    reviewed: config.stages.map((stage) => ({ id: stage.id, name: stage.name, startsAt: stage.startsAt, endsAt: stage.endsAt, dropStageIndex: stage.dropStageIndex })),
+    dropStages: drop.stages.map((stage) => ({ uuid: stage.uuid.slice(0, 8), label: stage.label, stageType: stage.stageType, startsAt: stage.startTime, endsAt: stage.endTime })),
+    eligibility: eligibility.stages.map((stage) => ({ uuid: stage.stageUuid.slice(0, 8), isEligible: stage.isEligible, price: stage.price, max: stage.maxTotalMintableByWallet })),
+  };
+}
+
 export function validateOpenSeaSignedTransaction(
   collection: SupportedCollection,
   config: SignedSeaDropConfig,
