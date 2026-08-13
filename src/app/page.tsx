@@ -9,6 +9,7 @@ type Collection = { id: string; name: string; slug?: string | null; contractAddr
 type Broadcast = { routeLabel: string; status: string; latencyMs: number | null };
 type Attempt = { id: string; kind: "approval" | "mint"; status: string; txHash: string | null; gasUsed: string | null; effectiveGasPrice: string | null; error: string | null; broadcasts?: Broadcast[] };
 type Job = { id: string; batchId: string | null; walletId: string; collectionId: string; status: string; quantity: number; dryRun: boolean; scheduledAt: string | null; launchTargetAt?: string | null; timingDriftMs?: number | null; createdAt: string; error?: string | null; attempts: Attempt[] };
+type TaskEdit = { id: string; collectionId: string; walletId: string; quantity: number };
 
 const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-5)}`;
 async function json(response: Response) {
@@ -38,6 +39,9 @@ export default function MintsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState("minted");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [taskEdit, setTaskEdit] = useState<TaskEdit | null>(null);
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
+  const [adminPassword, setAdminPassword] = useState("");
 
   const suggestions = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -137,6 +141,31 @@ export default function MintsPage() {
     finally { setBusy(false); }
   };
 
+  const saveTask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!taskEdit) return;
+    setBusy(true); setMessage("");
+    try {
+      await json(await fetch(`/api/jobs/${taskEdit.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletId: taskEdit.walletId, quantity: taskEdit.quantity }),
+      }));
+      setTaskEdit(null); await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not update mint task"); }
+    finally { setBusy(false); }
+  };
+
+  const deleteTask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!deleteTaskId) return;
+    setBusy(true); setMessage("");
+    try {
+      await json(await fetch(`/api/jobs/${deleteTaskId}`, { method: "DELETE", headers: { "X-Admin-Password": adminPassword } }));
+      setDeleteTaskId(null); setAdminPassword(""); await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not delete mint task"); }
+    finally { setBusy(false); }
+  };
+
   const formatPrice = (wei: string | null) => wei ? `${ethers.formatEther(wei)} ETH` : "FREE";
   const groups = useMemo(() => {
     const map = new Map<string, Job[]>();
@@ -170,8 +199,10 @@ export default function MintsPage() {
         const attempt = job.attempts?.find((item) => item.kind === "mint") || job.attempts?.[0];
         const status = job.dryRun && job.status === "completed" ? "simulation passed" : attempt?.status || job.status;
         const gas = attempt?.gasUsed && attempt?.effectiveGasPrice ? `${ethers.formatEther(BigInt(attempt.gasUsed) * BigInt(attempt.effectiveGasPrice))} ETH gas` : null;
-        return <tr key={job.id}><td className={job.status === "failed" ? "failed" : job.status === "completed" ? "ok" : ""}>{job.status === "failed" ? "✕" : job.status === "completed" ? "✓" : "…"}</td><td className="mono">{tab === "minted" ? short(wallet?.address || job.walletId) : attempt?.txHash ? short(attempt.txHash) : "No broadcast"}</td><td>{job.quantity}</td><td>{job.error || attempt?.error || `${status}${gas ? ` · ${gas}` : ""}`}</td></tr>;
+        return <tr key={job.id}><td className={job.status === "failed" ? "failed" : job.status === "completed" ? "ok" : ""}>{job.status === "failed" ? "✕" : job.status === "completed" ? "✓" : "…"}</td><td className="mono">{tab === "minted" ? short(wallet?.address || job.walletId) : attempt?.txHash ? short(attempt.txHash) : "No broadcast"}</td><td>{job.quantity}</td><td><div>{job.error || attempt?.error || `${status}${gas ? ` · ${gas}` : ""}`}</div>{job.status === "pending" && job.attempts.length === 0 && <div className="toolbar" style={{marginTop:8}}><button className="secondary-btn" style={{padding:"5px 8px"}} onClick={()=>{setMessage("");setTaskEdit({id:job.id,collectionId:job.collectionId,walletId:job.walletId,quantity:job.quantity})}}>Edit</button><button className="secondary-btn" style={{padding:"5px 8px",color:"var(--danger)"}} onClick={()=>{setMessage("");setDeleteTaskId(job.id);setAdminPassword("")}}>Delete</button></div>}</td></tr>;
       })}</tbody></table>}</div>}</div>;
     })}</section>}
+    {taskEdit && <div className="modal-backdrop" onMouseDown={()=>setTaskEdit(null)}><form className="panel modal" onSubmit={saveTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Edit scheduled mint</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>Only pending, unsigned tasks can change. Contract launch timing remains server-controlled.</p></div><button type="button" onClick={()=>setTaskEdit(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Wallet</label><select required value={taskEdit.walletId} onChange={(event)=>setTaskEdit({...taskEdit,walletId:event.target.value})}>{wallets.filter((wallet)=>wallet.active&&wallet.chainId===collections.find((item)=>item.id===taskEdit.collectionId)?.chainId).map((wallet)=><option key={wallet.id} value={wallet.id}>{wallet.label} · {short(wallet.address)}</option>)}</select></div><div className="field"><label>Quantity</label><input type="number" min="1" max={collections.find((item)=>item.id===taskEdit.collectionId)?.maxPerWallet||100} value={taskEdit.quantity} onChange={(event)=>setTaskEdit({...taskEdit,quantity:Math.max(1,Number(event.target.value)||1)})}/></div><button className="primary-btn" disabled={busy}>{busy?"Saving…":"Save task"}</button></div></form></div>}
+    {deleteTaskId && <div className="modal-backdrop" onMouseDown={()=>setDeleteTaskId(null)}><form className="panel modal" onSubmit={deleteTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Delete scheduled task</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>This permanently removes a pending, unsigned task.</p></div><button type="button" onClick={()=>setDeleteTaskId(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Admin password</label><input type="password" required autoFocus autoComplete="current-password" placeholder="App login password" value={adminPassword} onChange={(event)=>setAdminPassword(event.target.value)}/></div><button className="primary-btn" style={{background:"var(--danger)"}} disabled={busy||!adminPassword}>{busy?"Deleting…":"Confirm deletion"}</button></div></form></div>}
   </>;
 }

@@ -21,6 +21,9 @@ VAULT_PASSPHRASE=<64 random hex characters or stronger>
 APP_ACCESS_USER=mintbot
 APP_ACCESS_PASSWORD=<strong password, at least 16 characters>
 SUPPORT_ADMIN_TOKEN=<64 random hex characters or stronger>
+# Optional separate confirmation secret for destructive UI actions.
+# If omitted, the existing APP_ACCESS_PASSWORD is used.
+ADMIN_ACTION_PASSWORD=<strong password, at least 16 characters>
 ENABLE_LIVE_TRANSACTIONS=false
 ```
 
@@ -35,6 +38,8 @@ openssl rand -base64 24
 ```
 
 Use the first hex value for `VAULT_PASSPHRASE`, the second for `SUPPORT_ADMIN_TOKEN`, and the Base64 value for `APP_ACCESS_PASSWORD`.
+
+`ADMIN_ACTION_PASSWORD` is optional. Set it when wallet/task deletion and wallet signing-key replacement should use a secret separate from the browser login. When it is blank, those confirmations use `APP_ACCESS_PASSWORD`.
 
 Never change `VAULT_PASSPHRASE` after wallets have been imported or generated; changing it makes existing encrypted keys unreadable. Store it outside Railway as a secure backup.
 

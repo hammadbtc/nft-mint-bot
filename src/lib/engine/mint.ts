@@ -607,6 +607,21 @@ export async function batchMint(
     for (const walletId of [...uniqueWalletIds].sort()) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${walletId}`}))`);
     }
+    const freshWallets = await tx.select().from(schema.wallets).where(inArray(schema.wallets.id, uniqueWalletIds));
+    if (freshWallets.length !== uniqueWalletIds.length) throw new Error("One or more selected wallets were removed before scheduling");
+    const freshParentIds = [...new Set(freshWallets.flatMap((wallet) => wallet.role === "worker" && wallet.parentWalletId ? [wallet.parentWalletId] : []))];
+    const freshParents = freshParentIds.length
+      ? await tx.select().from(schema.wallets).where(inArray(schema.wallets.id, freshParentIds))
+      : [];
+    const freshParentById = new Map(freshParents.map((parent) => [parent.id, parent]));
+    for (const wallet of freshWallets) {
+      const eligibilityError = mintWalletEligibilityError(
+        wallet,
+        collection.chainId,
+        wallet.parentWalletId ? freshParentById.get(wallet.parentWalletId) : undefined,
+      );
+      if (eligibilityError) throw new Error(eligibilityError);
+    }
     const activeForWallets = await tx.select({ walletId: schema.mintJobs.walletId })
       .from(schema.mintJobs)
       .where(and(

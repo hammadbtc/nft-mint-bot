@@ -1,6 +1,6 @@
 # MintBot product and audit handoff
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 ## Product promise
 
@@ -35,6 +35,8 @@ The only main pages are Mints, Wallets and Disperse. Light and dark themes are s
 - Worker wallets are independent keys grouped under a main wallet; they are not derived from the main seed.
 - Mint selection accepts any active same-chain main wallet. An active worker is accepted only while its same-chain main parent remains active.
 - Generated secrets must be shown exactly once for backup and encrypted before database storage.
+- Wallet labels and active state can be edited. An address is never edited independently: replacing it requires the matching private key or seed, the server derives the address, fresh admin approval is required, and wallets with audit history must instead be imported as new wallets.
+- Wallet removal requires fresh admin approval. Wallets with job or transfer history are deactivated rather than erased; main wallets cannot be removed while child workers exist.
 - Funding and sweeping are explicit reviewed operations. No transaction is broadcast from a preview request.
 
 ## Mint adapter model
@@ -54,6 +56,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Persist the exact signed raw transaction and precomputed hash before broadcast; reconcile or rebroadcast those exact bytes after ambiguity/restart.
 - Reserve nonces under a PostgreSQL advisory lock shared by Mint and Disperse.
 - Report confirmed success only from a successful receipt.
+- Pending unsigned mint tasks may change wallet or quantity; the server refreshes authoritative contract phase timing during the edit. Deletion requires fresh admin approval. Armed, running, submitted, or historical work remains immutable.
 - External races, sell-outs, project pauses and provider outages mean a 100% hit rate cannot be guaranteed.
 
 ## Armed FCFS launch engine
@@ -82,6 +85,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Generated worker keys are returned once with no-cache headers for immediate backup.
 - Exact verified domain/contract/name resolution through a registered adapter; unsupported inputs are rejected.
 - Batch requests validate active verified support, server-resolved phase timing, quantity, wallet role/hierarchy and network, then create the whole batch atomically under an idempotency lock.
+- Destructive task/wallet actions use a constant-time checked `ADMIN_ACTION_PASSWORD`, falling back to the existing browser access password when a separate secret is not configured.
 - Jobs may be scheduled while broadcasting is locked. The scheduler holds live work until both safety gates are enabled, while dry-runs can execute.
 - Scheduled jobs and Disperse operations use expiring leases and restart recovery. Confirmed ERC-20 approvals resume the mint rather than counting as a completed mint.
 - Disperse supports only fund-workers and sweep-to-main, requires a fresh fingerprinted fee/balance preview, queues atomically, and persists signed transfers before broadcast.
@@ -107,7 +111,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Thirty-two unit tests pass, additionally covering precise non-early launch timing, direct-sequencer route order/uniqueness, provider identification, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
+- Thirty-five unit tests pass, additionally covering destructive-action password fallback, immutable attempted/non-pending mint tasks, signing-key-derived wallet replacement, precise non-early launch timing, direct-sequencer route order/uniqueness, provider identification, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 

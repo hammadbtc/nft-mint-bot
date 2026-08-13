@@ -26,6 +26,11 @@ if (process.env.APP_ACCESS_PASSWORD && process.env.APP_ACCESS_PASSWORD.length < 
   process.exit(1);
 }
 
+if (process.env.ADMIN_ACTION_PASSWORD && process.env.ADMIN_ACTION_PASSWORD.length < 16) {
+  console.error("ADMIN_ACTION_PASSWORD must be at least 16 characters");
+  process.exit(1);
+}
+
 if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && process.env.LIVE_TRANSACTIONS_CONFIRMED !== "I_UNDERSTAND") {
   console.error("Live transactions require LIVE_TRANSACTIONS_CONFIRMED=I_UNDERSTAND");
   process.exit(1);

@@ -39,6 +39,19 @@ export function prepareWalletRecord(input: WalletImport) {
   };
 }
 
+export function prepareWalletKeyReplacement(input: Pick<WalletImport, "keyType" | "key" | "hdPath">) {
+  let wallet: ethers.Wallet | ethers.HDNodeWallet;
+  const hdPath = input.keyType === "mnemonic" ? input.hdPath || "m/44'/60'/0'/0/0" : null;
+  if (input.keyType === "mnemonic") wallet = ethers.HDNodeWallet.fromPhrase(input.key, undefined, hdPath!);
+  else wallet = new ethers.Wallet(input.key);
+  return {
+    address: wallet.address,
+    encryptedKey: encryptPrivateKey(input.key),
+    keyFormat: input.keyType,
+    hdPath,
+  };
+}
+
 /**
  * Import a wallet: derive address from key/mnemonic, encrypt the raw key, store in DB.
  * For mnemonics, uses HD derivation with configurable path.
