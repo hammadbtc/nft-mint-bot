@@ -72,5 +72,39 @@
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x808ef461a7982e0517ca647070be251f6f115fcc" }
       ]
     }
+  },
+  {
+    "id": "ed083dbf-57ab-4467-802c-8436986f8ee6",
+    "name": "Squiggle Wuiggle",
+    "slug": "squiggle-wuiggle",
+    "contractAddress": "0x65E0B476Ce5c9849E6c26fb06042479e552E309C",
+    "chainId": 4663,
+    "mintMethod": "mint",
+    "mintAbi": ["function mint(uint256 quantity) payable"],
+    "mintPrice": "1600000000000000",
+    "maxPerWallet": 2,
+    "maxSupply": 7500,
+    "adapterKey": "squiggle-wuiggle-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com", "x.com"],
+    "siteUrl": "https://opensea.io/collection/squiggle-wuiggle",
+    "imageUrl": "https://pbs.twimg.com/media/HPiQ0oIW4AAcpmN.jpg",
+    "adapterConfig": {
+      "mintContract": "0x2897e59840e6e3Deb1dBf56dD7F32d20C26a69eB",
+      "transferPolicy": "0x28b60Fbc4F730328e9AF28C49e400653AE31AB7c",
+      "tokenContract": "0xE26DFaD41E606F0608C366Df21eE7E7809f459C1",
+      "expectedPriceWei": "1600000000000000",
+      "expectedMaxPerTransaction": 2,
+      "expectedInventory": 7500,
+      "contractAliases": [
+        "0x2897e59840e6e3Deb1dBf56dD7F32d20C26a69eB"
+      ],
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/squiggle-wuiggle" },
+        { "domain": "opensea.io", "path": "/collection/squiggle-wuiggle/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x65e0b476ce5c9849e6c26fb06042479e552e309c" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x2897e59840e6e3deb1dbf56dd7f32d20c26a69eb" },
+        { "domain": "x.com", "path": "/squigglerh/status/2087590681426428010" }
+      ]
+    }
   }
 ]

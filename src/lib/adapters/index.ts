@@ -3,11 +3,13 @@ import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { evmContractV1 } from "./evm-contract-v1";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
+import { squiggleWuiggleV1 } from "./squiggle-wuiggle-v1";
 import type { MintAdapter, ResolvedMint, SupportedCollection } from "./types";
 
 const registry = new Map<string, MintAdapter>([
   [evmContractV1.key, evmContractV1],
   [openseaSeaDropV1.key, openseaSeaDropV1],
+  [squiggleWuiggleV1.key, squiggleWuiggleV1],
 ]);
 
 function normalizeDomain(value: string) {
@@ -99,7 +101,13 @@ export async function resolveMintInput(rawInput: string): Promise<ResolvedMint |
   const isAddress = Boolean(ethers.isAddress(input));
   if (isAddress) {
     source = "contract";
-    match = collections.find((item)=>item.contractAddress.toLowerCase()===input.toLowerCase());
+    match = collections.find((item) => {
+      if (item.contractAddress.toLowerCase() === input.toLowerCase()) return true;
+      try {
+        const config = JSON.parse(item.adapterConfig || "{}") as { contractAliases?: string[] };
+        return config.contractAliases?.some((address) => ethers.isAddress(address) && address.toLowerCase() === input.toLowerCase()) || false;
+      } catch { return false; }
+    });
   } else {
     const url = safeUrl(input);
     if (url && (input.includes(".") || /^https?:/i.test(input))) {

@@ -43,7 +43,7 @@ Every supported project has a reviewed adapter/configuration defining accepted d
 
 The full operator procedure and current generic-adapter limitations are documented in `docs/ADDING_A_MINT_PROJECT.md`.
 
-Implemented platform support now includes `opensea-seadrop-v1` for reviewed public SeaDrop phases. It reads the live public-drop price, start/end, per-wallet limit, wallet mint stats and collection supply before constructing `mintPublic(address,address,address,uint256)`. Signed, allowlist and token-gated phases remain unsupported.
+Implemented platform support includes `opensea-seadrop-v1` for reviewed public SeaDrop phases. It reads the live public-drop price, start/end, per-wallet limit, wallet mint stats and collection supply before constructing `mintPublic(address,address,address,uint256)`. Signed, allowlist and token-gated phases remain unsupported. `squiggle-wuiggle-v1` is a bespoke armed adapter for the verified Squiggle Wuiggle inventory-sale contract; OpenSea displaying the collection does not make it a SeaDrop mint.
 
 ## Reliability rules
 
@@ -96,6 +96,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Active seed: Cash Rabbits, `0x5b05C950993705416C9069d43Ee70b564a875e40`, OpenSea slug `cash-rabbits`, Robinhood Chain.
 - Active upcoming public-phase seed: CHIMPS HOOD, `0x3a1ACd38650397e93765BCD2D2E9714B074A482e`, OpenSea slug `chimps-hood`, Robinhood Chain. Reviewed public stage: free, maximum 5 per wallet, 5,000 max supply, 2026-08-13 14:00 UTC through 2026-08-14 14:00 UTC.
 - Active upcoming public-phase seed: WEASELS IN STOCK, `0x808ef461a7982e0517ca647070BE251f6f115fCC`, OpenSea slug `weaselsinstock`, Robinhood Chain. Reviewed FCFS public stage: 0.00008 ETH, maximum 30 per wallet, 6,666 max supply, 2026-08-13 10:05 UTC through 2026-09-12 10:05 UTC.
+- Active upcoming custom-contract seed: Squiggle Wuiggle, collection `0x65E0B476Ce5c9849E6c26fb06042479e552E309C`, minter `0x2897e59840e6e3Deb1dBf56dD7F32d20C26a69eB`, adapter `squiggle-wuiggle-v1`, Robinhood Chain. The verified minter transfers an already-preminted 7,500-token inventory via `mint(uint256)`, charges exactly 0.0016 ETH each, allows 1–2 per transaction with no on-chain wallet cap, and currently opens 2026-08-13 16:30 UTC. The adapter rereads the mutable start timestamp, fixed constants, collection linkage, inventory accounting/readiness, 10,000 fixed collection supply, and receiver-specific transfer-policy check before signing. The announcement's claim that the time cannot be changed is inaccurate: the verified owner can call `setSaleStartTime`, so execution must continue to trust fresh chain state.
 - CHIMPS HOOD's earlier `Whitelist FCFS` and WEASELS IN STOCK's earlier `TEAM` stage are signed presales and remain unsupported by `opensea-seadrop-v1`. The records intentionally schedule only their on-chain public stages.
 - Historical public configuration observed 2026-08-12: 0.0001 ETH, maximum 10 per wallet, 10,000 max supply, start 20:30:52 UTC on August 12, end 20:30:52 UTC on August 15. The adapter must use fresh chain state, not these recorded values.
 - Removed seed: Hoodiez Brokers. Deployment explicitly marks it inactive and unverified at Hammad's request because he believed it was probably a scam.
@@ -106,7 +107,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Twenty-eight unit tests pass, additionally covering precise non-early launch timing, direct-sequencer route order/uniqueness, exact raw-byte submission/hash verification, canonical signed-payload hashing, and supported-project search.
+- Thirty-one unit tests pass, additionally covering precise non-early launch timing, direct-sequencer route order/uniqueness, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 

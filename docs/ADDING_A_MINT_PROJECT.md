@@ -28,6 +28,7 @@ Current adapters:
 
 - `opensea-seadrop-v1`: public SeaDrop only. It rereads price, start/end, wallet cap, fee-recipient permission, wallet mint stats, and supply on-chain at execution.
 - `evm-contract-v1`: only a verified payable function with either no arguments or one integer quantity argument and a static reviewed price.
+- `squiggle-wuiggle-v1`: project-specific Robinhood adapter for the verified preminted-inventory contract. It supports deterministic arming but must not be reused for another collection merely because its ABI looks similar.
 
 SeaDrop allowlists, signed mints, token-gated phases, and other launchpads are not covered merely because OpenSea displays the collection.
 
