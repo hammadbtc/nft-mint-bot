@@ -5,6 +5,7 @@ import { evmContractV1 } from "./evm-contract-v1";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import { openseaSignedSeaDropV1 } from "./opensea-signed-seadrop-v1";
 import { squiggleWuiggleV1 } from "./squiggle-wuiggle-v1";
+import { bullsRunnersV1 } from "./bulls-runners-v1";
 import type { MintAdapter, ResolvedMint, SupportedCollection } from "./types";
 
 const registry = new Map<string, MintAdapter>([
@@ -12,6 +13,7 @@ const registry = new Map<string, MintAdapter>([
   [openseaSeaDropV1.key, openseaSeaDropV1],
   [openseaSignedSeaDropV1.key, openseaSignedSeaDropV1],
   [squiggleWuiggleV1.key, squiggleWuiggleV1],
+  [bullsRunnersV1.key, bullsRunnersV1],
 ]);
 
 function normalizeDomain(value: string) {

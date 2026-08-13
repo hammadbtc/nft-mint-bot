@@ -198,5 +198,33 @@
         { "domain": "x.com", "path": "/squigglerh/status/2087590681426428010" }
       ]
     }
+  },
+  {
+    "id": "9a30c018-0c3f-47be-8726-22d7a05f6d9b",
+    "name": "Bulls Runners",
+    "slug": "bulls-runners",
+    "contractAddress": "0x4d908ec6F8B6b63DcD57E68eDe19e595c402d83B",
+    "chainId": 4663,
+    "mintMethod": "mint",
+    "mintAbi": ["function mint(bytes32[] proof)"],
+    "mintPrice": "0",
+    "maxPerWallet": 1,
+    "maxSupply": 4200,
+    "adapterKey": "bulls-runners-v1",
+    "domains": ["bullsrunners.com", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://bullsrunners.com/mint",
+    "imageUrl": "https://bullsrunners.com/media/bull-run.gif",
+    "adapterConfig": {
+      "expectedMerkleRoot": "0xfe59d1969f0924fe220298c4ce82e263f64ba1690f1a196192f06d9e8e227b9d",
+      "expectedMaxSupply": 4200,
+      "expectedReserveSupply": 420,
+      "expectedWhitelistCount": 4880,
+      "whitelistUrl": "https://bullsrunners.com/whitelist.json",
+      "urlMatchers": [
+        { "domain": "bullsrunners.com", "path": "/mint" },
+        { "domain": "bullsrunners.com", "path": "/docs" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x4d908ec6f8b6b63dcd57e68ede19e595c402d83b" }
+      ]
+    }
   }
 ]

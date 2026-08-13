@@ -20,6 +20,11 @@ type Seed = {
     expectedPriceWei?: string;
     expectedMaxPerTransaction?: number;
     expectedInventory?: number;
+    expectedMerkleRoot?: string;
+    expectedMaxSupply?: number;
+    expectedReserveSupply?: number;
+    expectedWhitelistCount?: number;
+    whitelistUrl?: string;
     contractAliases?: string[];
     openSeaSlug?: string;
     stages?: Array<{
@@ -48,17 +53,23 @@ test("reviewed project seeds have unique identities and exact URL matchers", () 
   assert.equal(new Set(resolvableContracts).size, resolvableContracts.length);
   for (const seed of seeds) {
     assert.equal(ethers.isAddress(seed.contractAddress), true);
-    assert.ok(["opensea-seadrop-v1", "opensea-signed-seadrop-v1", "squiggle-wuiggle-v1"].includes(seed.adapterKey));
+    assert.ok(["opensea-seadrop-v1", "opensea-signed-seadrop-v1", "squiggle-wuiggle-v1", "bulls-runners-v1"].includes(seed.adapterKey));
     if (seed.adapterKey.startsWith("opensea-")) {
       assert.equal(typeof seed.adapterConfig.seaDropAddress === "string" && ethers.isAddress(seed.adapterConfig.seaDropAddress), true);
       assert.equal(typeof seed.adapterConfig.feeRecipient === "string" && ethers.isAddress(seed.adapterConfig.feeRecipient), true);
-    } else {
+    } else if (seed.adapterKey === "squiggle-wuiggle-v1") {
       assert.equal(ethers.isAddress(seed.adapterConfig.mintContract || ""), true);
       assert.equal(ethers.isAddress(seed.adapterConfig.transferPolicy || ""), true);
       assert.equal(ethers.isAddress(seed.adapterConfig.tokenContract || ""), true);
       assert.equal(seed.adapterConfig.expectedPriceWei, "1600000000000000");
       assert.equal(seed.adapterConfig.expectedMaxPerTransaction, 2);
       assert.equal(seed.adapterConfig.expectedInventory, 7500);
+    } else {
+      assert.equal(ethers.isHexString(seed.adapterConfig.expectedMerkleRoot || "", 32), true);
+      assert.equal(seed.adapterConfig.expectedMaxSupply, 4200);
+      assert.equal(seed.adapterConfig.expectedReserveSupply, 420);
+      assert.equal(seed.adapterConfig.expectedWhitelistCount, 4880);
+      assert.equal(seed.adapterConfig.whitelistUrl, "https://bullsrunners.com/whitelist.json");
     }
     assert.ok(seed.adapterConfig.urlMatchers?.length);
     for (const matcher of seed.adapterConfig.urlMatchers || []) {
@@ -66,6 +77,15 @@ test("reviewed project seeds have unique identities and exact URL matchers", () 
       assert.equal(exactUrlPathMatches(`${matcher.path}/claim`, matcher.path), false);
     }
   }
+});
+
+test("Bulls Runners is bound to the reviewed site, docs, explorer, and one-per-wallet contract", () => {
+  const bulls = seeds.find((seed) => seed.slug === "bulls-runners");
+  assert.equal(bulls?.adapterKey, "bulls-runners-v1");
+  assert.equal(bulls?.contractAddress.toLowerCase(), "0x4d908ec6f8b6b63dcd57e68ede19e595c402d83b");
+  assert.equal(bulls?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "bullsrunners.com" && matcher.path === "/mint"), true);
+  assert.equal(bulls?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "bullsrunners.com" && matcher.path === "/docs"), true);
+  assert.equal(bulls?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x4d908ec6f8b6b63dcd57e68ede19e595c402d83b"), true);
 });
 
 test("Squiggle Wuiggle is bound to exact official, explorer, and collection URLs", () => {

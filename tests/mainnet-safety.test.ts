@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import { exactUrlPathMatches } from "../src/lib/adapters";
-import { recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase, selectRequestedExecutionPhase } from "../src/lib/mint-policy";
+import { manualOpenRetryAt, recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase, selectRequestedExecutionPhase } from "../src/lib/mint-policy";
 import { mintWalletEligibilityError } from "../src/lib/mint-wallet-policy";
 import { broadcastPreparedTransaction, exactSimulationRequest } from "../src/lib/transactions";
 import { liveTransactionsEnabled, safeErrorMessage, safeSecretEqual, stableHash } from "../src/lib/safety";
@@ -66,6 +66,12 @@ test("explicit phase policy never reroutes a phase-bound task", () => {
   assert.equal(selectRequestedExecutionPhase(phases, eligibility, "fcfs").id, "fcfs");
   assert.equal(selectRequestedExecutionPhase(phases, eligibility, "public").id, "public");
   assert.throws(() => selectRequestedExecutionPhase(phases, [{ phaseId: "fcfs", status: "ineligible", reason: "Not FCFS" }], "fcfs"), /Not FCFS/);
+});
+
+test("manual owner-opened phases get a short polling retry without inventing a launch time", () => {
+  assert.equal(manualOpenRetryAt({ id: "open", name: "Open Mint", status: "upcoming", manualOpen: true }, 1_000), new Date(1_750).toISOString());
+  assert.equal(manualOpenRetryAt({ id: "timed", name: "Timed", status: "upcoming", startsAt: "2030-01-01T00:00:00Z" }, 1_000), null);
+  assert.equal(manualOpenRetryAt({ id: "live", name: "Live", status: "live", manualOpen: true }, 1_000), null);
 });
 
 test("restart recovery resumes after approval and only completes after mint confirmation", () => {

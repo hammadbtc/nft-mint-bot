@@ -12,6 +12,8 @@ export type MintPhase = {
   endsAt?: string;
   priceWei?: string;
   maxPerWallet?: number;
+  /** The phase opens through an on-chain owner switch instead of a timestamp. */
+  manualOpen?: boolean;
 };
 
 export type MintPhaseEligibility = {

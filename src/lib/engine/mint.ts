@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
-import { recoveredJobStatus } from "@/lib/mint-policy";
+import { manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
 import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { getProvider } from "@/lib/chains";
@@ -34,7 +34,7 @@ const ERC20_ABI = [
 const JOB_LEASE_MS = 120_000;
 
 class MintNotOpenError extends Error {
-  constructor(readonly scheduledAt: string) {
+  constructor(readonly scheduledAt: string, readonly phaseStartsAt: string | null = scheduledAt) {
     super(`Mint is scheduled for ${scheduledAt}`);
   }
 }
@@ -445,6 +445,8 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
     if (job.dryRun) throw new MintNotOpenError(phase.startsAt);
     return armMint(job, collection, phase);
   }
+  const manualRetryAt = manualOpenRetryAt(phase);
+  if (manualRetryAt) throw new MintNotOpenError(manualRetryAt, null);
   if (phase.status !== "live") throw new Error("The reviewed mint phase is not live");
   if (phase.endsAt && Date.now() >= Date.parse(phase.endsAt)) throw new Error("The reviewed mint phase has ended");
   if (phase.maxPerWallet && job.quantity > phase.maxPerWallet) throw new Error("Quantity exceeds the current on-chain wallet limit");
@@ -512,7 +514,7 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
         await db.update(schema.mintJobs).set({
           status: "pending",
           scheduledAt: error.scheduledAt,
-          phaseStartsAt: error.scheduledAt,
+          phaseStartsAt: error.phaseStartsAt,
           claimToken: null,
           claimedAt: null,
           leaseExpiresAt: null,
