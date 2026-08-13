@@ -31,6 +31,11 @@ function envRpcList(name: string): string[] {
   return (process.env[name] || "").split(",").map((value) => value.trim()).filter(Boolean);
 }
 
+function envRpc(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
 function uniqueRpc(...urls: (string | false | undefined)[]): string[] {
   return [...new Set(urls.filter((value): value is string => Boolean(value)))];
 }
@@ -41,8 +46,11 @@ const CHAINS: Record<number, ChainConfig> = {
     name: "Robinhood Chain",
     symbol: "ETH",
     rpcUrls: uniqueRpc(
-      ...envRpcList("ROBINHOOD_RPC_URLS"),
       al("robinhood-mainnet"),
+      envRpc("ROBINHOOD_DRPC_URL"),
+      envRpc("ROBINHOOD_QUICKNODE_URL"),
+      envRpc("ROBINHOOD_CHAINSTACK_URL"),
+      ...envRpcList("ROBINHOOD_RPC_URLS"),
       "https://rpc.mainnet.chain.robinhood.com",
     ),
     explorerUrl: "https://robinhoodchain.blockscout.com",
@@ -206,11 +214,26 @@ export function getBroadcastRoutes(chainId: number): BroadcastRoute[] {
   const candidates = chainId === 4663
     ? [process.env.ROBINHOOD_SEQUENCER_URL || "https://sequencer.mainnet.chain.robinhood.com", ...chain.rpcUrls]
     : chain.rpcUrls;
-  return [...new Set(candidates)].map((url, index) => ({
-    key: chainId === 4663 && index === 0 ? "sequencer" : `rpc-${index + (chainId === 4663 ? 0 : 1)}`,
-    label: chainId === 4663 && index === 0 ? "Robinhood sequencer" : `RPC route ${index + (chainId === 4663 ? 0 : 1)}`,
-    url,
-  }));
+  return [...new Set(candidates)].map((url, index) => {
+    const fallbackNumber = index + (chainId === 4663 ? 0 : 1);
+    const identified = identifyRpcProvider(url);
+    return {
+      key: chainId === 4663 && index === 0 ? "sequencer" : identified?.key || `rpc-${fallbackNumber}`,
+      label: chainId === 4663 && index === 0 ? "Robinhood sequencer" : identified?.label || `RPC route ${fallbackNumber}`,
+      url,
+    };
+  });
+}
+
+export function identifyRpcProvider(rawUrl: string): { key: string; label: string } | undefined {
+  let hostname = "";
+  try { hostname = new URL(rawUrl).hostname.toLowerCase(); } catch { return undefined; }
+  if (hostname.endsWith("alchemy.com")) return { key: "alchemy", label: "Alchemy" };
+  if (hostname === "lb.drpc.org" || hostname.endsWith(".drpc.org")) return { key: "drpc", label: "dRPC" };
+  if (hostname.endsWith("quiknode.pro")) return { key: "quicknode", label: "QuickNode" };
+  if (hostname.endsWith("chainstack.com")) return { key: "chainstack", label: "Chainstack" };
+  if (hostname === "rpc.mainnet.chain.robinhood.com") return { key: "robinhood-public", label: "Robinhood public RPC" };
+  return undefined;
 }
 
 /**

@@ -42,10 +42,13 @@ Never change `VAULT_PASSPHRASE` after wallets have been imported or generated; c
 
 ```env
 ALCHEMY_API_KEY=<Alchemy key>
+ROBINHOOD_DRPC_URL=<full private Robinhood mainnet HTTPS endpoint>
+ROBINHOOD_QUICKNODE_URL=<full private Robinhood mainnet HTTPS endpoint>
+ROBINHOOD_CHAINSTACK_URL=<full private Robinhood mainnet HTTPS endpoint when available>
 ROBINHOOD_RPC_URLS=<optional comma-separated independent HTTPS providers>
 ```
 
-The app has public RPC fallbacks, but a dedicated provider is strongly recommended before testnet or live minting.
+Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Never commit their URLs: provider credentials are commonly embedded in the URL path or query string. The app also has a public fallback, but private providers are strongly recommended for live FCFS minting.
 
 ## Optional variables
 

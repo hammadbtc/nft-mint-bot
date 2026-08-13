@@ -4,8 +4,10 @@ const SECRET_PATTERNS: RegExp[] = [
   /ghp_[A-Za-z0-9]{20,}/g,
   /0x[a-fA-F0-9]{64}/g,
   /(https?:\/\/[^\s/:]+:)[^@\s]+@/g,
-  /([?&](?:api_?key|token|secret|password)=)[^&\s]+/gi,
+  /([?&](?:api_?key|dkey|token|secret|password)=)[^&\s]+/gi,
   /(\/v2\/)[A-Za-z0-9_-]{16,}/g,
+  /(\.quiknode\.pro\/)[A-Za-z0-9_-]{16,}/gi,
+  /(\.core\.chainstack\.com\/)[A-Za-z0-9_-]{16,}/gi,
 ];
 
 export function liveTransactionsEnabled(): boolean {

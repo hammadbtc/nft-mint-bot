@@ -31,7 +31,13 @@ if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && process.env.LIVE_TRANSACT
   process.exit(1);
 }
 
-const robinhoodRpcUrls = (process.env.ROBINHOOD_RPC_URLS || "").split(",").map((value) => value.trim()).filter(Boolean);
+const namedRobinhoodRpcUrls = ["ROBINHOOD_DRPC_URL", "ROBINHOOD_QUICKNODE_URL", "ROBINHOOD_CHAINSTACK_URL"]
+  .map((name) => process.env[name]?.trim())
+  .filter(Boolean);
+const robinhoodRpcUrls = [
+  ...namedRobinhoodRpcUrls,
+  ...(process.env.ROBINHOOD_RPC_URLS || "").split(",").map((value) => value.trim()).filter(Boolean),
+];
 for (const value of robinhoodRpcUrls) {
   try {
     if (new URL(value).protocol !== "https:") throw new Error();

@@ -59,11 +59,14 @@ test("main wallets can mint while workers still require an active same-chain mai
 });
 
 test("operator errors redact wallet keys, provider keys, credentials, and tokens", () => {
-  const message = safeErrorMessage(new Error("ghp_abcdefghijklmnopqrstuvwxyz123456 https://user:pass@example.com/v2/abcdefghijklmnopqrstu?api_key=secret 0x" + "ab".repeat(32)));
+  const message = safeErrorMessage(new Error("ghp_abcdefghijklmnopqrstuvwxyz123456 https://user:pass@example.com/v2/abcdefghijklmnopqrstu?api_key=secret https://lb.drpc.org/ogrpc?network=robinhood-mainnet&dkey=drpc-secret https://node.quiknode.pro/quicknode-secret-value/ https://robinhood-mainnet.core.chainstack.com/chainstack-secret-value 0x" + "ab".repeat(32)));
   assert.equal(message.includes("ghp_"), false);
   assert.equal(message.includes("pass"), false);
   assert.equal(message.includes("abcdefghijklmnopqrstu"), false);
   assert.equal(message.includes("abababab"), false);
+  assert.equal(message.includes("drpc-secret"), false);
+  assert.equal(message.includes("quicknode-secret"), false);
+  assert.equal(message.includes("chainstack-secret"), false);
 });
 
 test("stable request hashes ignore object key order and secret comparison is exact", () => {

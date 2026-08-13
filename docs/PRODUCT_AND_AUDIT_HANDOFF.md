@@ -62,7 +62,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Reviewed arming-capable adapters prepare and durably store the exact signed payload 60 seconds before the contract start by default.
 - Five seconds before opening, MintBot rereads authoritative phase/configuration/eligibility state, compares the intended `chainId`, `to`, `data`, and `value`, verifies the signer and exact pending nonce, rechecks balance/spend limits, and warms every write route.
 - An in-process precise timer submits at the contract timestamp. The network requests are fired before any launch-time database write.
-- Robinhood sends the identical signed bytes concurrently to the official sequencer, Alchemy/custom RPCs, and the public fallback. Redundant routes cannot create duplicate mints because the nonce, raw payload, and transaction hash are identical.
+- Robinhood sends the identical signed bytes concurrently to the official sequencer, Alchemy, named dRPC/QuickNode/Chainstack endpoints when configured, any custom RPCs, and the public fallback. Redundant routes cannot create duplicate mints because the nonce, raw payload, and transaction hash are identical. Telemetry identifies providers by hostname but never stores endpoint URLs or credentials.
 - Receipt reconciliation runs outside the submission path. Restarts restore armed timers from PostgreSQL; ambiguous submissions only rebroadcast the same persisted bytes.
 - Timer drift and per-route acknowledgement latency are persisted without endpoint URLs or API credentials and shown in mint analytics.
 - `MINT_ARM_LEAD_MS` and `MINT_REVALIDATE_LEAD_MS` are bounded environment overrides; defaults are 60,000 and 5,000 ms.
@@ -107,7 +107,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Thirty-one unit tests pass, additionally covering precise non-early launch timing, direct-sequencer route order/uniqueness, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
+- Thirty-two unit tests pass, additionally covering precise non-early launch timing, direct-sequencer route order/uniqueness, provider identification, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { ethers } from "ethers";
-import { getBroadcastRoutes } from "../src/lib/chains";
+import { getBroadcastRoutes, identifyRpcProvider } from "../src/lib/chains";
 import { millisecondsUntil, schedulePrecisely, timingDriftMs } from "../src/lib/launch-timing";
 import { rawTransactionFingerprint, submitRawTransactionRoute } from "../src/lib/chains/broadcast";
 
@@ -27,6 +27,13 @@ test("Robinhood broadcasts to the official sequencer first and uses unique route
   assert.match(routes[0]?.url || "", /^https:\/\/sequencer\.mainnet\.chain\.robinhood\.com/);
   assert.equal(new Set(routes.map((route) => route.url)).size, routes.length);
   assert.ok(routes.length >= 2);
+});
+
+test("broadcast telemetry identifies supported Robinhood providers without storing endpoint URLs", () => {
+  assert.deepEqual(identifyRpcProvider("https://robinhood-mainnet.g.alchemy.com/v2/secret"), { key: "alchemy", label: "Alchemy" });
+  assert.deepEqual(identifyRpcProvider("https://lb.drpc.org/ogrpc?network=robinhood-mainnet&dkey=secret"), { key: "drpc", label: "dRPC" });
+  assert.deepEqual(identifyRpcProvider("https://example.robinhood-mainnet.quiknode.pro/secret/"), { key: "quicknode", label: "QuickNode" });
+  assert.deepEqual(identifyRpcProvider("https://robinhood-mainnet.core.chainstack.com/secret"), { key: "chainstack", label: "Chainstack" });
 });
 
 test("signed payload fingerprint is the canonical transaction hash", async () => {
