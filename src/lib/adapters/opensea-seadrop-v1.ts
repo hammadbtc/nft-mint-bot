@@ -68,7 +68,22 @@ async function publicDrop(collection: SupportedCollection, provider: ethers.Prov
 export const openseaSeaDropV1: MintAdapter = {
   key: "opensea-seadrop-v1",
   supportsArming: true,
+  canArmPhase: (phaseId) => phaseId === "public",
   recommendedGasLimit: 500_000n,
+
+  async checkEligibility(collection, signerAddress, quantity, provider, phases) {
+    const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
+    const [minted, supply, maxSupply] = await nft.getFunction("getMintStats").staticCall(signerAddress);
+    const maxPerWallet = phases.find((phase) => phase.id === "public")?.maxPerWallet || 0;
+    if (!maxPerWallet) return [{ phaseId: "public", status: "unknown", reason: "Public wallet limit is unavailable" }];
+    if (BigInt(minted) + BigInt(quantity) > BigInt(maxPerWallet)) {
+      return [{ phaseId: "public", status: "ineligible", reason: `Wallet has insufficient room under the ${maxPerWallet} public mint limit` }];
+    }
+    if (BigInt(supply) + BigInt(quantity) > BigInt(maxSupply)) {
+      return [{ phaseId: "public", status: "ineligible", reason: "Quantity exceeds remaining public supply" }];
+    }
+    return [{ phaseId: "public", status: "eligible" }];
+  },
 
   async resolve(collection, source): Promise<ResolvedMint> {
     const provider = getProvider(collection.chainId);
@@ -97,6 +112,7 @@ export const openseaSeaDropV1: MintAdapter = {
       phases: [{
         id: "public",
         name: config.publicPhaseName || "Public Mint",
+        kind: "public",
         status: statusFor(startTime, endTime, chainTimestamp),
         startsAt,
         endsAt,
@@ -108,6 +124,7 @@ export const openseaSeaDropV1: MintAdapter = {
   },
 
   async buildTransaction(collection, signerAddress, quantity, provider, options) {
+    if (options?.phaseId && options.phaseId !== "public") throw new Error("Unsupported SeaDrop phase selected");
     if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Mint quantity must be a positive integer");
     const { config, mintPrice, startTime, endTime, maxPerWallet, chainTimestamp: now } = await publicDrop(collection, provider);
     if (!options?.allowBeforeStart && startTime > 0n && now < startTime) throw new Error("Public mint has not started");

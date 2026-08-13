@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/lib/db";
-import { getMintAdapter } from "@/lib/adapters";
-import { selectExecutionPhase } from "@/lib/mint-policy";
+import { resolveWalletPhasePlan } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { requireAdminPassword } from "@/lib/admin-auth";
 import { safeErrorMessage } from "@/lib/safety";
@@ -38,9 +37,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       : [];
     const eligibilityError = mintWalletEligibilityError(wallet, collection.chainId, parent);
     if (eligibilityError) throw new Error(eligibilityError);
-    const adapter = getMintAdapter(collection.adapterKey);
-    if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
-    const phase = selectExecutionPhase((await adapter.resolve(collection, "name")).phases);
+    const phase = (await resolveWalletPhasePlan(collection, wallet.address, quantity)).selectedPhase;
     if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) throw new Error("Quantity exceeds the reviewed transaction limit");
 
     const scheduledAt = phase.status === "upcoming" ? phase.startsAt || null : null;

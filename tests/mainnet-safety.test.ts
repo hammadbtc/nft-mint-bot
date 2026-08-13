@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import { exactUrlPathMatches } from "../src/lib/adapters";
-import { recoveredJobStatus, selectExecutionPhase } from "../src/lib/mint-policy";
+import { recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase } from "../src/lib/mint-policy";
 import { mintWalletEligibilityError } from "../src/lib/mint-wallet-policy";
 import { broadcastPreparedTransaction, exactSimulationRequest } from "../src/lib/transactions";
 import { liveTransactionsEnabled, safeErrorMessage, safeSecretEqual, stableHash } from "../src/lib/safety";
@@ -22,6 +22,29 @@ test("phase policy prefers live then earliest valid upcoming and rejects ended",
   assert.equal(upcoming.id, "early");
   assert.equal(selectExecutionPhase([{ id: "live", name: "live", status: "live" }, upcoming]).id, "live");
   assert.throws(() => selectExecutionPhase([{ id: "ended", name: "ended", status: "ended" }]), /ended or has no runnable phase/);
+});
+
+test("wallet phase policy skips ineligible live stages and selects the next eligible phase", () => {
+  const phases = [
+    { id: "wl", name: "Allowlist", status: "live" as const },
+    { id: "gtd", name: "GTD", status: "upcoming" as const, startsAt: "2030-01-01T00:00:00.000Z" },
+    { id: "public", name: "Public", status: "upcoming" as const, startsAt: "2030-01-02T00:00:00.000Z" },
+  ];
+  assert.equal(selectEligibleExecutionPhase(phases, [
+    { phaseId: "wl", status: "ineligible", reason: "Wallet is not allowlisted" },
+    { phaseId: "gtd", status: "eligible" },
+    { phaseId: "public", status: "eligible" },
+  ]).id, "gtd");
+  assert.equal(selectEligibleExecutionPhase(phases, [
+    { phaseId: "wl", status: "eligible" },
+    { phaseId: "gtd", status: "eligible" },
+    { phaseId: "public", status: "eligible" },
+  ]).id, "wl");
+  assert.throws(() => selectEligibleExecutionPhase(phases, [
+    { phaseId: "wl", status: "ineligible", reason: "Wallet is not allowlisted" },
+    { phaseId: "gtd", status: "unknown" },
+    { phaseId: "public", status: "unsupported" },
+  ]), /Wallet is not allowlisted/);
 });
 
 test("restart recovery resumes after approval and only completes after mint confirmation", () => {

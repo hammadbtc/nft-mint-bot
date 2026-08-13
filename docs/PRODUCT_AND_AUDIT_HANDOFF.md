@@ -45,7 +45,7 @@ Every supported project has a reviewed adapter/configuration defining accepted d
 
 The full operator procedure and current generic-adapter limitations are documented in `docs/ADDING_A_MINT_PROJECT.md`.
 
-Implemented platform support includes `opensea-seadrop-v1` for reviewed public SeaDrop phases. It reads the live public-drop price, start/end, per-wallet limit, wallet mint stats and collection supply before constructing `mintPublic(address,address,address,uint256)`. Signed, allowlist and token-gated phases remain unsupported. `squiggle-wuiggle-v1` is a bespoke armed adapter for the verified Squiggle Wuiggle inventory-sale contract; OpenSea displaying the collection does not make it a SeaDrop mint.
+Implemented platform support includes `opensea-seadrop-v1` for reviewed public SeaDrop phases. It reads the live public-drop price, start/end, per-wallet limit, wallet mint stats and collection supply before constructing `mintPublic(address,address,address,uint256)`. Signed, allowlist and token-gated phases remain unsupported. The core is multi-phase and wallet-aware: adapters may return every ordered reviewed phase plus per-wallet eligibility, the UI displays them all, and each wallet routes to its first eligible live phase or earliest eligible upcoming phase. Gated phases fail closed unless their adapter implements the exact proof/signature/ownership check. `squiggle-wuiggle-v1` is a bespoke armed adapter for the verified Squiggle Wuiggle inventory-sale contract; OpenSea displaying the collection does not make it a SeaDrop mint.
 
 ## Reliability rules
 
@@ -85,7 +85,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - One main wallet per network; workers must be independent same-network children of that main.
 - Generated worker keys are returned once with no-cache headers for immediate backup.
 - Exact verified domain/contract/name resolution through a registered adapter; unsupported inputs are rejected.
-- Batch requests validate active verified support, server-resolved phase timing, quantity, wallet role/hierarchy and network, then create the whole batch atomically under an idempotency lock.
+- Batch requests validate active verified support, server-resolved phase timing, quantity, wallet role/hierarchy and network, then create the whole batch atomically under an idempotency lock. Wallets in one batch may route to different reviewed phases based on their own verified eligibility.
 - Destructive task/wallet actions use a constant-time checked `ADMIN_ACTION_PASSWORD`, falling back to the existing browser access password when a separate secret is not configured.
 - Jobs may be scheduled while broadcasting is locked. The scheduler holds live work until both safety gates are enabled, while dry-runs can execute.
 - Scheduled jobs and Disperse operations use expiring leases and restart recovery. Confirmed ERC-20 approvals resume the mint rather than counting as a completed mint.

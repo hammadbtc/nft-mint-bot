@@ -2,7 +2,7 @@ import { ethers } from "ethers";
 import type { MintAdapter, MintPhase, ResolvedMint } from "./types";
 
 type AdapterConfig = {
-  phases?: Array<{ id?:string; name:string; startsAt?:string; endsAt?:string; priceWei?:string; maxPerWallet?:number }>;
+  phases?: Array<{ id?:string; name:string; kind?:MintPhase["kind"]; startsAt?:string; endsAt?:string; priceWei?:string; maxPerWallet?:number }>;
 };
 
 function phaseStatus(phase: NonNullable<AdapterConfig["phases"]>[number]): MintPhase["status"] {
@@ -24,12 +24,13 @@ export const evmContractV1: MintAdapter = {
     const phases: MintPhase[] = configured.length ? configured.map((phase, index) => ({
       id: phase.id || `phase-${index + 1}`,
       name: phase.name,
+      kind: phase.kind || "public",
       status: phaseStatus(phase),
       startsAt: phase.startsAt,
       endsAt: phase.endsAt,
       priceWei: phase.priceWei || collection.mintPrice || undefined,
       maxPerWallet: phase.maxPerWallet || collection.maxPerWallet || undefined,
-    })) : [{ id:"public", name:"Public", status:"unknown", priceWei:collection.mintPrice || undefined, maxPerWallet:collection.maxPerWallet || undefined }];
+    })) : [{ id:"public", name:"Public", kind:"public", status:"unknown", priceWei:collection.mintPrice || undefined, maxPerWallet:collection.maxPerWallet || undefined }];
     return {
       supported:true, collectionId:collection.id, adapterKey:collection.adapterKey, name:collection.name,
       slug:collection.slug || undefined, chainId:collection.chainId, contractAddress:collection.contractAddress,
@@ -38,7 +39,14 @@ export const evmContractV1: MintAdapter = {
     };
   },
 
-  async buildTransaction(collection, _signerAddress, quantity): Promise<ethers.TransactionRequest> {
+  async buildTransaction(collection, _signerAddress, quantity, _provider, options): Promise<ethers.TransactionRequest> {
+    let config: AdapterConfig = {};
+    try { config = JSON.parse(collection.adapterConfig || "{}"); } catch { throw new Error("Supported mint has invalid reviewed configuration"); }
+    const configured = config.phases || [];
+    const selected = options?.phaseId
+      ? configured.find((phase, index) => (phase.id || `phase-${index + 1}`) === options.phaseId)
+      : configured.length === 1 ? configured[0] : undefined;
+    if (options?.phaseId && !selected) throw new Error("Unsupported reviewed mint phase selected");
     let mintAbi: ethers.InterfaceAbi;
     try { mintAbi = JSON.parse(collection.mintAbi); }
     catch { throw new Error("Supported mint has an invalid reviewed ABI"); }
@@ -52,7 +60,7 @@ export const evmContractV1: MintAdapter = {
     return {
       to: collection.contractAddress,
       data,
-      value: collection.paymentToken ? 0n : BigInt(collection.mintPrice || "0") * BigInt(quantity),
+      value: collection.paymentToken ? 0n : BigInt(selected?.priceWei || collection.mintPrice || "0") * BigInt(quantity),
       chainId: collection.chainId,
     };
   },

@@ -5,7 +5,9 @@ import { ethers } from "ethers";
 import { formatContractTime } from "@/lib/format-contract-time";
 
 type Wallet = { id: string; label: string; address: string; chainId: number; role: "main" | "worker"; active: boolean };
-type Collection = { id: string; name: string; slug?: string | null; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseName?: string; phaseStatus: string; startsAt: string | null; endsAt: string | null; active?: boolean; verified?: boolean; createdAt: string };
+type Phase = { id: string; name: string; kind?: string; status: string; startsAt?: string; endsAt?: string; priceWei?: string; maxPerWallet?: number };
+type Collection = { id: string; name: string; slug?: string | null; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseName?: string; phaseStatus: string; startsAt: string | null; endsAt: string | null; phases?: Phase[]; active?: boolean; verified?: boolean; createdAt: string };
+type WalletPhasePlan = { walletId: string; eligible: boolean; selectedPhaseId?: string; selectedPhaseName?: string; scheduledAt?: string | null; reason?: string; phases: Array<Phase & { eligibility?: { status: string; reason?: string } }> };
 type Broadcast = { routeLabel: string; status: string; latencyMs: number | null };
 type Attempt = { id: string; kind: "approval" | "mint"; status: string; txHash: string | null; gasUsed: string | null; effectiveGasPrice: string | null; error: string | null; broadcasts?: Broadcast[] };
 type Job = { id: string; batchId: string | null; walletId: string; collectionId: string; status: string; quantity: number; dryRun: boolean; scheduledAt: string | null; launchTargetAt?: string | null; timingDriftMs?: number | null; createdAt: string; error?: string | null; attempts: Attempt[] };
@@ -42,6 +44,8 @@ export default function MintsPage() {
   const [taskEdit, setTaskEdit] = useState<TaskEdit | null>(null);
   const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
   const [adminPassword, setAdminPassword] = useState("");
+  const [phasePlans, setPhasePlans] = useState<Record<string, WalletPhasePlan>>({});
+  const [checkingEligibility, setCheckingEligibility] = useState(false);
 
   const suggestions = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -80,6 +84,7 @@ export default function MintsPage() {
       .sort((left, right) => Number(left.role === "worker") - Number(right.role === "worker")) : [],
     [wallets, project],
   );
+  const quantityLimit = useMemo(() => Math.max(1, ...(project?.phases || []).map((phase) => phase.maxPerWallet || 1), project?.maxPerWallet || 1), [project]);
 
   const resolve = async (rawInput = query) => {
     const input = rawInput.trim();
@@ -98,16 +103,45 @@ export default function MintsPage() {
         mintPrice: phase?.priceWei ? String(phase.priceWei) : null, maxPerWallet: phase?.maxPerWallet ? Number(phase.maxPerWallet) : null,
         maxSupply: data.maxSupply ? Number(data.maxSupply) : null, currentSupply: data.currentSupply == null ? null : Number(data.currentSupply),
         phaseName: phase?.name ? String(phase.name) : "Mint phase", phaseStatus: String(phase?.status || "unknown"), startsAt: phase?.startsAt ? String(phase.startsAt) : null,
-        endsAt: phase?.endsAt ? String(phase.endsAt) : null, createdAt: "",
+        endsAt: phase?.endsAt ? String(phase.endsAt) : null,
+        phases: phases.map((item) => ({
+          id: String(item.id), name: String(item.name), kind: item.kind ? String(item.kind) : undefined, status: String(item.status || "unknown"),
+          startsAt: item.startsAt ? String(item.startsAt) : undefined, endsAt: item.endsAt ? String(item.endsAt) : undefined,
+          priceWei: item.priceWei ? String(item.priceWei) : undefined, maxPerWallet: item.maxPerWallet ? Number(item.maxPerWallet) : undefined,
+        })), createdAt: "",
       });
       setQty(1);
       setSelected(new Set());
+      setPhasePlans({});
       setMessage("");
     } catch (error) {
       setProject(null);
       setMessage(error instanceof Error ? error.message : "This mint isn’t supported yet");
     } finally { setBusy(false); }
   };
+
+  useEffect(() => {
+    if (!project) return;
+    const walletIds = wallets.filter((wallet) => wallet.active && wallet.chainId === project.chainId).map((wallet) => wallet.id);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      if (!walletIds.length) { setPhasePlans({}); return; }
+      setCheckingEligibility(true);
+      void fetch("/api/mints/eligibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionId: project.id, walletIds, quantity: qty }),
+        signal: controller.signal,
+      }).then(json).then((data) => {
+        const value = data as { wallets?: WalletPhasePlan[] };
+        setPhasePlans(Object.fromEntries((value.wallets || []).map((item) => [item.walletId, item])));
+        setSelected((current) => new Set([...current].filter((id) => value.wallets?.find((item) => item.walletId === id)?.eligible)));
+      }).catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setMessage(error instanceof Error ? error.message : "Could not verify wallet eligibility");
+      }).finally(() => setCheckingEligibility(false));
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [project, qty, wallets]);
 
   const loadPastedMint = (value: string) => {
     const input = value.trim();
@@ -117,6 +151,7 @@ export default function MintsPage() {
   };
 
   const toggle = (id: string) => setSelected((current) => {
+    if (!phasePlans[id]?.eligible) return current;
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
@@ -166,7 +201,7 @@ export default function MintsPage() {
     finally { setBusy(false); }
   };
 
-  const formatPrice = (wei: string | null) => wei ? `${ethers.formatEther(wei)} ETH` : "FREE";
+  const formatPrice = (wei: string | null) => wei == null ? "—" : BigInt(wei) === 0n ? "FREE" : `${ethers.formatEther(wei)} ETH`;
   const groups = useMemo(() => {
     const map = new Map<string, Job[]>();
     for (const job of jobs) {
@@ -186,8 +221,14 @@ export default function MintsPage() {
     {!project ? <div className="panel empty"><div><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M20 4c-8 0-14 3.5-14 10 0 3 2 5 5 5 6.5 0 9-7 9-15Z"/><path d="M4 21c2-5 6-8 11-11"/></svg><h2>No mint selected</h2><p>Supported and scheduled mints will appear here.</p></div></div> :
       <section className="panel mint-card">
         <div className="mint-hero"><div className="mint-identity"><div className="project-art">◈</div><div className="mint-title"><h2>{project.name}</h2><p>{short(project.contractAddress)} · Chain {project.chainId}</p></div></div><div className="supply"><b>{project.maxSupply ? `${(project.currentSupply || 0).toLocaleString()} / ${project.maxSupply.toLocaleString()}` : "Supported mint"}</b><span>On-chain supply</span><div className="progress"><i style={{ width: project.maxSupply ? `${Math.min(100, ((project.currentSupply || 0) / project.maxSupply) * 100)}%` : "0%" }}/></div></div></div>
-        <div className="mint-body"><div className="mint-grid"><div className="phase-list"><div className="phase"><div className="phase-top"><h3>{(project.phaseName || "Mint phase").toUpperCase()}</h3><span className="status">{project.phaseStatus === "live" ? "Live" : project.phaseStatus === "upcoming" ? "Upcoming" : "Ended"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(project.mintPrice)}</strong></span><span className="chip">MAX · <strong>{project.maxPerWallet || "—"}</strong></span><span className="chip">ELIGIBLE · <strong>{compatible.length}</strong></span></div></div><div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{ fontSize: 12 }}>Automatic gas</span></div><div className="field" style={{ marginTop: 12 }}><label>Quantity per wallet</label><div className="amount-row"><input type="number" min="1" max={project.maxPerWallet || 100} value={qty} onChange={(event) => setQty(Math.min(project.maxPerWallet || 100, Math.max(1, Number(event.target.value) || 1)))}/><button className="secondary-btn" onClick={() => setQty(project.maxPerWallet || 1)}>Max</button></div></div></div></div>
-          <div className="schedule-box"><div className="field"><label>Active wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => <label className="wallet-option" key={wallet.id}><input type="checkbox" checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label} · {wallet.role === "main" ? "Main" : "Worker"}</span><small>{short(wallet.address)}</small></label>) : <div className="wallet-option muted">No compatible active wallets</div>}</div></div><div className="field"><label>Contract schedule</label><div className="alert">{project.phaseStatus === "upcoming" && project.startsAt ? `Server schedules against ${formatContractTime(project.startsAt)}` : project.phaseStatus === "ended" ? "This reviewed phase has ended." : formatContractTime(null)}</div></div><button className="primary-btn" disabled={!selected.size || busy || project.phaseStatus === "ended"} onClick={() => void schedule()}>{busy ? "Scheduling…" : "Schedule mint →"}</button><div className="alert">Main and worker wallets can mint. Every transaction uses the selected wallet as the simulation sender and is durably recorded before broadcast.</div></div>
+        <div className="mint-body"><div className="mint-grid"><div className="phase-list">
+          {(project.phases?.length ? project.phases : [{ id: "phase", name: project.phaseName || "Mint phase", status: project.phaseStatus, startsAt: project.startsAt || undefined, endsAt: project.endsAt || undefined, priceWei: project.mintPrice || undefined, maxPerWallet: project.maxPerWallet || undefined }]).map((phase) => {
+            const phaseResults = Object.values(phasePlans).map((plan) => plan.phases.find((item) => item.id === phase.id)?.eligibility?.status);
+            const eligibleCount = phaseResults.filter((status) => status === "eligible").length;
+            return <div className="phase" key={phase.id}><div className="phase-top"><h3>{phase.name.toUpperCase()}</h3><span className="status">{phase.status === "live" ? "Live" : phase.status === "upcoming" ? "Upcoming" : phase.status === "ended" ? "Ended" : "Unknown"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(phase.priceWei || null)}</strong></span><span className="chip">MAX · <strong>{phase.maxPerWallet || "—"}</strong></span><span className="chip">ELIGIBLE · <strong>{checkingEligibility ? "…" : `${eligibleCount}/${compatible.length}`}</strong></span></div>{phase.startsAt && <div className="muted" style={{fontSize:12,marginTop:9}}>{phase.status === "upcoming" ? `Opens ${formatContractTime(phase.startsAt)}` : `Started ${formatContractTime(phase.startsAt)}`}</div>}</div>;
+          })}
+          <div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{ fontSize: 12 }}>Automatic gas</span></div><div className="field" style={{ marginTop: 12 }}><label>Quantity per wallet</label><div className="amount-row"><input type="number" min="1" max={quantityLimit} value={qty} onChange={(event) => setQty(Math.min(quantityLimit, Math.max(1, Number(event.target.value) || 1)))}/><button className="secondary-btn" onClick={() => setQty(quantityLimit)}>Max</button></div></div></div></div>
+          <div className="schedule-box"><div className="field"><label>Active wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => { const plan = phasePlans[wallet.id]; return <label className="wallet-option" key={wallet.id}><input type="checkbox" disabled={!plan?.eligible || checkingEligibility} checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label} · {wallet.role === "main" ? "Main" : "Worker"}</span><small>{short(wallet.address)} · {checkingEligibility || !plan ? "Checking phases…" : plan.eligible ? `Eligible → ${plan.selectedPhaseName}` : `Not eligible · ${plan.reason || "No runnable phase"}`}</small></label>; }) : <div className="wallet-option muted">No compatible active wallets</div>}</div></div><div className="field"><label>Phase routing</label><div className="alert">Each wallet uses its first eligible live phase, otherwise its earliest eligible upcoming phase. Ineligible WL/GTD stages are skipped safely.</div></div><button className="primary-btn" disabled={!selected.size || busy || checkingEligibility} onClick={() => void schedule()}>{busy ? "Scheduling…" : "Schedule mint →"}</button><div className="alert">Eligibility is rechecked before transaction construction and again before an armed launch. Proof/signature phases remain unsupported until their adapter verifies the exact wallet-bound flow.</div></div>
         </div></div>
       </section>}
     {groups.length > 0 && <section className="scheduled"><div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{ fontSize: 12 }}>{jobs.length} tasks</span></div>{groups.map(([batchId, items]) => {

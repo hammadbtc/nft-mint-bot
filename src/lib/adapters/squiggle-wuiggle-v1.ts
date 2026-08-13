@@ -92,9 +92,23 @@ async function readState(collection: SupportedCollection, provider: ethers.Provi
 export const squiggleWuiggleV1: MintAdapter = {
   key: "squiggle-wuiggle-v1",
   supportsArming: true,
+  canArmPhase: (phaseId) => phaseId === "public-fcfs",
   // The pre-open call intentionally reverts. This conservative ceiling covers
   // two ERC-721 safe transfers; exact estimation replaces it after opening.
   recommendedGasLimit: 600_000n,
+
+  async checkEligibility(collection, signerAddress, quantity, provider) {
+    const state = await readState(collection, provider);
+    if (BigInt(quantity) > state.maxPerTransaction) return [{ phaseId: "public-fcfs", status: "ineligible", reason: `Quantity exceeds the ${state.maxPerTransaction} transaction limit` }];
+    if (BigInt(quantity) > state.remaining) return [{ phaseId: "public-fcfs", status: "ineligible", reason: "Quantity exceeds remaining inventory" }];
+    const [inventoryReady, policyAllowsSale] = await Promise.all([
+      state.minter.getFunction("inventoryReady").staticCall().then(Boolean),
+      state.minter.getFunction("transferPolicyAllowsSale").staticCall(signerAddress).then(Boolean),
+    ]);
+    if (!inventoryReady) return [{ phaseId: "public-fcfs", status: "ineligible", reason: "Mint inventory is not ready" }];
+    if (!policyAllowsSale) return [{ phaseId: "public-fcfs", status: "ineligible", reason: "Transfer policy rejects this wallet" }];
+    return [{ phaseId: "public-fcfs", status: "eligible" }];
+  },
 
   async resolve(collection, source): Promise<ResolvedMint> {
     const provider = getProvider(collection.chainId);
@@ -115,6 +129,7 @@ export const squiggleWuiggleV1: MintAdapter = {
       phases: [{
         id: "public-fcfs",
         name: "Public FCFS",
+        kind: "public",
         status: phaseStatus(state.startTime, state.remaining, state.chainTimestamp),
         startsAt,
         priceWei: state.price.toString(),
@@ -125,6 +140,7 @@ export const squiggleWuiggleV1: MintAdapter = {
   },
 
   async buildTransaction(collection, signerAddress, quantity, provider, options) {
+    if (options?.phaseId && options.phaseId !== "public-fcfs") throw new Error("Unsupported Squiggle Wuiggle phase selected");
     if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Mint quantity must be a positive integer");
     const state = await readState(collection, provider);
     if (BigInt(quantity) > state.maxPerTransaction) throw new Error(`Squiggle Wuiggle allows at most ${state.maxPerTransaction} per transaction`);

@@ -1,4 +1,4 @@
-import type { MintPhase } from "@/lib/adapters/types";
+import type { MintPhase, MintPhaseEligibility } from "@/lib/adapters/types";
 
 export function selectExecutionPhase(phases: MintPhase[]): MintPhase {
   const live = phases.find((phase) => phase.status === "live");
@@ -8,6 +8,22 @@ export function selectExecutionPhase(phases: MintPhase[]): MintPhase {
     .sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!))[0];
   if (upcoming) return upcoming;
   throw new Error("The reviewed mint has ended or has no runnable phase");
+}
+
+export function selectEligibleExecutionPhase(phases: MintPhase[], eligibility: MintPhaseEligibility[]): MintPhase {
+  const eligibilityById = new Map(eligibility.map((item) => [item.phaseId, item]));
+  const eligible = (phase: MintPhase) => eligibilityById.get(phase.id)?.status === "eligible";
+  const live = phases.find((phase) => phase.status === "live" && eligible(phase));
+  if (live) return live;
+  const upcoming = phases
+    .filter((phase) => phase.status === "upcoming" && phase.startsAt && Number.isFinite(Date.parse(phase.startsAt)) && eligible(phase))
+    .sort((a, b) => Date.parse(a.startsAt!) - Date.parse(b.startsAt!))[0];
+  if (upcoming) return upcoming;
+  const reasons = phases.flatMap((phase) => {
+    const result = eligibilityById.get(phase.id);
+    return result?.reason ? [`${phase.name}: ${result.reason}`] : [];
+  });
+  throw new Error(reasons[0] || "No live or upcoming phase is eligible for this wallet");
 }
 
 export function recoveredJobStatus(kind: "approval" | "mint", transactionConfirmed: boolean): "pending" | "completed" | "failed" {

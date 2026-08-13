@@ -144,8 +144,10 @@ Adapters live in `src/lib/adapters/` and implement `MintAdapter` from `types.ts`
 export interface MintAdapter {
   key: string;
   supportsArming?: boolean;
+  canArmPhase?(phaseId: string): boolean;
   resolve(collection, source): Promise<ResolvedMint>;
-  buildTransaction?(collection, signerAddress, quantity, provider, options?): Promise<TransactionRequest>;
+  checkEligibility?(collection, signerAddress, quantity, provider, phases): Promise<MintPhaseEligibility[]>;
+  buildTransaction?(collection, signerAddress, quantity, provider, options?: { allowBeforeStart?: boolean; phaseId?: string }): Promise<TransactionRequest>;
   recommendedGasLimit?: bigint;
 }
 ```
@@ -165,6 +167,8 @@ export interface MintAdapter {
 - Construct the exact reviewed `to`, `data`, `value`, and `chainId`.
 - Fail closed on API/schema/version/signature changes.
 - Never send, sign, allocate a nonce, or mutate external state itself. The engine owns simulation, durable signing, broadcasting, retries, receipts, and nonce locks.
+
+For multi-stage projects, `resolve` returns all reviewed phases in precedence order, including ended/current/upcoming stages. `checkEligibility` returns an explicit `eligible`, `ineligible`, `unknown`, or `unsupported` result per phase for the signing wallet. The engine chooses the first eligible live phase, otherwise the earliest eligible upcoming phase, persists its `phaseId`, passes that ID into `buildTransaction`, and rechecks eligibility before execution. A gated phase without a reviewed checker is `unsupported`, never optimistically eligible.
 
 ### Qualifying an adapter for armed FCFS execution
 
