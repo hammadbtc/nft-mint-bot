@@ -99,6 +99,72 @@
     }
   },
   {
+    "id": "a82f9217-2303-4a2c-a536-8acf067afda4",
+    "name": "HoodBirds",
+    "slug": "hoodbirdss",
+    "contractAddress": "0x14A247E9e3aCcBC941A705C984a49E291468bC29",
+    "chainId": 4663,
+    "mintMethod": "mintSigned",
+    "mintAbi": ["function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"],
+    "mintPrice": "0",
+    "maxPerWallet": 1,
+    "maxSupply": 4500,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com", "hoodbirds.xyz"],
+    "siteUrl": "https://opensea.io/collection/hoodbirdss/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/hoodbirds-596143559/image_type_logo/8392c5cdf564682142c6fdc6c59516/1f8392c5cdf564682142c6fdc6c59516.gif",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "hoodbirdss",
+      "stages": [
+        {
+          "id": "gtd",
+          "name": "GTDs",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-13T17:00:00.000Z",
+          "endsAt": "2026-08-13T17:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 4500,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "fcfs",
+          "name": "FCFs",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-13T17:30:00.000Z",
+          "endsAt": "2026-08-13T19:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 4500,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public stage",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-13T19:30:00.000Z",
+          "endsAt": "2026-08-15T21:30:00.000Z",
+          "priceWei": "1000000000000000",
+          "maxPerWallet": 1
+        }
+      ],
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/hoodbirdss/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x14a247e9e3accbc941a705c984a49e291468bc29" },
+        { "domain": "hoodbirds.xyz", "path": "/" }
+      ]
+    }
+  },
+  {
     "id": "ed083dbf-57ab-4467-802c-8436986f8ee6",
     "name": "Squiggle Wuiggle",
     "slug": "squiggle-wuiggle",

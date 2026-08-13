@@ -53,8 +53,8 @@ type ExecutionResult = {
   launchTargetAt?: string;
 };
 
-async function resolvePhase(collection: SupportedCollection, signerAddress: string, quantity: number): Promise<MintPhase> {
-  return (await resolveWalletPhasePlan(collection, signerAddress, quantity)).selectedPhase;
+async function resolvePhase(collection: SupportedCollection, signerAddress: string, quantity: number, signer?: ethers.Signer): Promise<MintPhase> {
+  return (await resolveWalletPhasePlan(collection, signerAddress, quantity, undefined, { signer })).selectedPhase;
 }
 
 async function loadExecutionState(jobId: string) {
@@ -353,14 +353,14 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
   if (job.status !== "armed" || !job.launchTargetAt) return;
   const adapter = getMintAdapter(collection.adapterKey);
   if (!adapter?.buildTransaction || !adapter.supportsArming || !job.phaseId || (adapter.canArmPhase && !adapter.canArmPhase(job.phaseId))) throw new Error("Armed adapter is unavailable for this phase");
-  const plan = await resolveWalletPhasePlan(collection, wallet.address, job.quantity);
+  const provider = getProvider(collection.chainId);
+  const signer = await getSigner(job.walletId, provider);
+  const plan = await resolveWalletPhasePlan(collection, wallet.address, job.quantity, undefined, { signer });
   const phase = plan.phases.find((item) => item.id === job.phaseId);
   const eligibility = plan.eligibility.find((item) => item.phaseId === job.phaseId);
   if (!phase || eligibility?.status !== "eligible") throw new Error("The armed wallet is no longer eligible for its reviewed phase");
   if (phase.status === "ended") throw new Error("The reviewed mint phase ended before launch");
   if (phase.startsAt !== job.launchTargetAt) throw new Error("The on-chain launch time changed after arming");
-  const provider = getProvider(collection.chainId);
-  const signer = await getSigner(job.walletId, provider);
   const address = await signer.getAddress();
   const request = await adapter.buildTransaction(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: phase.id });
   const attempt = await latestRecoverableAttempt(job.id, "mint");
@@ -429,7 +429,9 @@ export async function launchArmedJob(jobId: string, firedAt = Date.now()): Promi
 
 export async function executeMint(jobId: string): Promise<ExecutionResult> {
   const { job, collection, wallet } = await loadExecutionState(jobId);
-  const phase = await resolvePhase(collection, wallet.address, job.quantity);
+  const provider = getProvider(collection.chainId);
+  const signer = await getSigner(job.walletId, provider);
+  const phase = await resolvePhase(collection, wallet.address, job.quantity, signer);
   if (job.phaseId !== phase.id || job.phaseStartsAt !== (phase.startsAt || null) || job.phaseEndsAt !== (phase.endsAt || null)) {
     await db.update(schema.mintJobs).set({
       phaseId: phase.id,
@@ -447,8 +449,6 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   if (phase.endsAt && Date.now() >= Date.parse(phase.endsAt)) throw new Error("The reviewed mint phase has ended");
   if (phase.maxPerWallet && job.quantity > phase.maxPerWallet) throw new Error("Quantity exceeds the current on-chain wallet limit");
 
-  const provider = getProvider(collection.chainId);
-  const signer = await getSigner(job.walletId, provider);
   const address = await signer.getAddress();
   const adapter = getMintAdapter(collection.adapterKey);
   if (!adapter?.buildTransaction) throw new Error("Mint adapter cannot build a reviewed transaction");
@@ -584,10 +584,12 @@ export async function batchMint(
   const adapter = getMintAdapter(collection.adapterKey);
   if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
   const phases = (await adapter.resolve(collection, "name")).phases;
+  const provider = getProvider(collection.chainId);
   const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet]));
   const plans = await Promise.all(uniqueWalletIds.map(async (walletId) => {
     const wallet = walletById.get(walletId)!;
-    const plan = await resolveWalletPhasePlan(collection, wallet.address, quantity, phases);
+    const signer = adapter.requiresSignerForEligibility ? await getSigner(wallet.id, provider) : undefined;
+    const plan = await resolveWalletPhasePlan(collection, wallet.address, quantity, phases, { signer });
     const phase = plan.selectedPhase;
     if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
       throw new Error(`${wallet.label} exceeds the ${phase.name} wallet limit`);

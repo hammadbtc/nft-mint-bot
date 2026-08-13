@@ -21,6 +21,21 @@ type Seed = {
     expectedMaxPerTransaction?: number;
     expectedInventory?: number;
     contractAliases?: string[];
+    openSeaSlug?: string;
+    stages?: Array<{
+      id: string;
+      name: string;
+      kind: "signed" | "public";
+      stageType: string;
+      startsAt: string;
+      endsAt: string;
+      priceWei: string;
+      maxPerWallet: number;
+      dropStageIndex?: number;
+      maxTokenSupplyForStage?: number;
+      feeBps?: number;
+      restrictFeeRecipients?: boolean;
+    }>;
   };
 };
 
@@ -33,8 +48,8 @@ test("reviewed project seeds have unique identities and exact URL matchers", () 
   assert.equal(new Set(resolvableContracts).size, resolvableContracts.length);
   for (const seed of seeds) {
     assert.equal(ethers.isAddress(seed.contractAddress), true);
-    assert.ok(["opensea-seadrop-v1", "squiggle-wuiggle-v1"].includes(seed.adapterKey));
-    if (seed.adapterKey === "opensea-seadrop-v1") {
+    assert.ok(["opensea-seadrop-v1", "opensea-signed-seadrop-v1", "squiggle-wuiggle-v1"].includes(seed.adapterKey));
+    if (seed.adapterKey.startsWith("opensea-")) {
       assert.equal(typeof seed.adapterConfig.seaDropAddress === "string" && ethers.isAddress(seed.adapterConfig.seaDropAddress), true);
       assert.equal(typeof seed.adapterConfig.feeRecipient === "string" && ethers.isAddress(seed.adapterConfig.feeRecipient), true);
     } else {
@@ -73,4 +88,23 @@ test("CHIMPS, WEASELS, and Purr Cat public phases are named and bound to supplie
   assert.ok(weasels?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/weaselsinstock/overview"));
   assert.ok(purrCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/purr-cats-nft/overview"));
   assert.ok(purrCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0xce905281c45014b37a4597f9964299f1e9b6df06"));
+});
+
+test("HoodBirds keeps GTD, FCFS, then public as distinct reviewed phases", () => {
+  const hoodBirds = seeds.find((seed) => seed.slug === "hoodbirdss");
+  assert.equal(hoodBirds?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(hoodBirds?.contractAddress.toLowerCase(), "0x14a247e9e3accbc941a705c984a49e291468bc29");
+  assert.equal(hoodBirds?.adapterConfig.openSeaSlug, "hoodbirdss");
+  assert.deepEqual(hoodBirds?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["gtd", "signed", "0", 1],
+    ["fcfs", "signed", "0", 1],
+    ["public", "public", "1000000000000000", 1],
+  ]);
+  assert.deepEqual(hoodBirds?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, undefined]);
+  assert.deepEqual(hoodBirds?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [4500, 1000, true],
+    [4500, 1000, true],
+  ]);
+  assert.ok(hoodBirds?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/hoodbirdss/overview"));
+  assert.ok(hoodBirds?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x14a247e9e3accbc941a705c984a49e291468bc29"));
 });

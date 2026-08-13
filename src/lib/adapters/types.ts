@@ -39,6 +39,7 @@ export type ResolvedMint = {
 export interface MintAdapter {
   key: string;
   supportsArming?: boolean;
+  requiresSignerForEligibility?: boolean;
   canArmPhase?: (phaseId: string) => boolean;
   resolve(collection: SupportedCollection, source: ResolvedMint["source"]): Promise<ResolvedMint>;
   checkEligibility?: (
@@ -47,6 +48,7 @@ export interface MintAdapter {
     quantity: number,
     provider: ethers.Provider,
     phases: MintPhase[],
+    context?: { signer?: ethers.Signer },
   ) => Promise<MintPhaseEligibility[]>;
   buildTransaction?: (
     collection: SupportedCollection,

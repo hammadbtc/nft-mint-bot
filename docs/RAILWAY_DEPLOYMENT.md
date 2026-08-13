@@ -47,6 +47,7 @@ Never change `VAULT_PASSPHRASE` after wallets have been imported or generated; c
 
 ```env
 ALCHEMY_API_KEY=<Alchemy key>
+OPENSEA_API_KEY=<permanent OpenSea server API key for signed drops>
 ROBINHOOD_DRPC_URL=<full private Robinhood mainnet HTTPS endpoint>
 ROBINHOOD_QUICKNODE_URL=<full private Robinhood mainnet HTTPS endpoint>
 ROBINHOOD_CHAINSTACK_URL=<full private Robinhood mainnet HTTPS endpoint when available>
@@ -54,6 +55,8 @@ ROBINHOOD_RPC_URLS=<optional comma-separated independent HTTPS providers>
 ```
 
 Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Never commit their URLs: provider credentials are commonly embedded in the URL path or query string. The app also has a public fallback, but private providers are strongly recommended for live FCFS minting.
+
+`OPENSEA_API_KEY` is required when a reviewed collection uses `opensea-signed-seadrop-v1`. The server authenticates each selected vault wallet with a scoped SIWE session, keeps OpenSea tokens in memory only, and requests the wallet-bound signed mint transaction just in time. Without this variable, public SeaDrop stages remain usable but signed-stage eligibility is reported as unknown and cannot execute.
 
 ## Optional variables
 

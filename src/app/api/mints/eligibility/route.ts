@@ -6,6 +6,8 @@ import { getMintAdapter } from "@/lib/adapters";
 import { inspectWalletPhases } from "@/lib/phase-planning";
 import { selectEligibleExecutionPhase } from "@/lib/mint-policy";
 import { safeErrorMessage } from "@/lib/safety";
+import { getProvider } from "@/lib/chains";
+import { getSigner } from "@/lib/vault";
 
 const inputSchema = z.object({
   collectionId: z.string().uuid(),
@@ -30,7 +32,10 @@ export async function POST(req: NextRequest) {
       const walletError = !wallet.active ? "Wallet is inactive" : wallet.chainId !== collection.chainId ? "Wallet is on a different chain" : undefined;
       if (walletError) return { walletId: wallet.id, eligible: false, reason: walletError, phases: [] };
       try {
-        const plan = await inspectWalletPhases(collection, wallet.address, input.quantity, phases);
+        const signer = adapter.requiresSignerForEligibility
+          ? await getSigner(wallet.id, getProvider(collection.chainId))
+          : undefined;
+        const plan = await inspectWalletPhases(collection, wallet.address, input.quantity, phases, { signer });
         const displayedPhases = plan.phases.map((phase) => ({ ...phase, eligibility: plan.eligibility.find((item) => item.phaseId === phase.id) }));
         try {
           const selectedPhase = selectEligibleExecutionPhase(plan.phases, plan.eligibility);

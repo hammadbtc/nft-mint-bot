@@ -2,6 +2,7 @@ import { getMintAdapter } from "@/lib/adapters";
 import type { MintPhase, MintPhaseEligibility, SupportedCollection } from "@/lib/adapters/types";
 import { getProvider } from "@/lib/chains";
 import { selectEligibleExecutionPhase } from "@/lib/mint-policy";
+import type { ethers } from "ethers";
 
 export type WalletPhasePlan = {
   phases: MintPhase[];
@@ -19,6 +20,7 @@ export async function inspectWalletPhases(
   signerAddress: string,
   quantity: number,
   knownPhases?: MintPhase[],
+  context?: { signer?: ethers.Signer },
 ): Promise<Omit<WalletPhasePlan, "selectedPhase">> {
   const adapter = getMintAdapter(collection.adapterKey);
   if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
@@ -29,7 +31,7 @@ export async function inspectWalletPhases(
   }
   const provider = getProvider(collection.chainId);
   const eligibility = adapter.checkEligibility
-    ? await adapter.checkEligibility(collection, signerAddress, quantity, provider, phases)
+    ? await adapter.checkEligibility(collection, signerAddress, quantity, provider, phases, context)
     : phases.map((phase) => phase.kind && phase.kind !== "public"
       ? { phaseId: phase.id, status: "unsupported" as const, reason: `${phase.name} requires a reviewed wallet-eligibility adapter` }
       : { phaseId: phase.id, status: "eligible" as const });
@@ -49,7 +51,8 @@ export async function resolveWalletPhasePlan(
   signerAddress: string,
   quantity: number,
   knownPhases?: MintPhase[],
+  context?: { signer?: ethers.Signer },
 ): Promise<WalletPhasePlan> {
-  const inspected = await inspectWalletPhases(collection, signerAddress, quantity, knownPhases);
+  const inspected = await inspectWalletPhases(collection, signerAddress, quantity, knownPhases, context);
   return { ...inspected, selectedPhase: selectEligibleExecutionPhase(inspected.phases, inspected.eligibility) };
 }

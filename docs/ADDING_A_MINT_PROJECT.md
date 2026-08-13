@@ -27,10 +27,11 @@ Use an existing adapter only when the project uses the same reviewed protocol ve
 Current adapters:
 
 - `opensea-seadrop-v1`: public SeaDrop only. It rereads price, start/end, wallet cap, fee-recipient permission, wallet mint stats, and supply on-chain at execution.
+- `opensea-signed-seadrop-v1`: reviewed OpenSea SeaDrop schedules containing signed presales plus public. It authenticates each vault signer with the official scoped SIWE flow, checks per-stage eligibility, fetches the signed transaction just in time, and validates its decoded target, recipient, phase, limits, timing, quantity, and exact value. It requires server-only `OPENSEA_API_KEY`.
 - `evm-contract-v1`: only a verified payable function with either no arguments or one integer quantity argument and a static reviewed price.
 - `squiggle-wuiggle-v1`: project-specific Robinhood adapter for the verified preminted-inventory contract. It supports deterministic arming but must not be reused for another collection merely because its ABI looks similar.
 
-SeaDrop allowlists, signed mints, token-gated phases, and other launchpads are not covered merely because OpenSea displays the collection.
+SeaDrop Merkle allowlists, token-gated phases, and other launchpads are not covered merely because OpenSea displays the collection. The signed adapter is limited to explicitly reviewed stages and the official OpenSea Drops API.
 
 ### 2. Reusable launchpad adapter
 
@@ -144,9 +145,10 @@ Adapters live in `src/lib/adapters/` and implement `MintAdapter` from `types.ts`
 export interface MintAdapter {
   key: string;
   supportsArming?: boolean;
+  requiresSignerForEligibility?: boolean;
   canArmPhase?(phaseId: string): boolean;
   resolve(collection, source): Promise<ResolvedMint>;
-  checkEligibility?(collection, signerAddress, quantity, provider, phases): Promise<MintPhaseEligibility[]>;
+  checkEligibility?(collection, signerAddress, quantity, provider, phases, context?: { signer?: Signer }): Promise<MintPhaseEligibility[]>;
   buildTransaction?(collection, signerAddress, quantity, provider, options?: { allowBeforeStart?: boolean; phaseId?: string }): Promise<TransactionRequest>;
   recommendedGasLimit?: bigint;
 }
