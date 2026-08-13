@@ -55,6 +55,20 @@ type ApiEligibilityStage = {
   maxTotalMintableByWallet?: string;
 };
 
+type TimedPromise<T> = { expiresAt: number; value: Promise<T> };
+const dropCache = new Map<string, TimedPromise<unknown>>();
+const eligibilityCache = new Map<string, TimedPromise<MintPhaseEligibility[]>>();
+
+function cachedPromise<T>(cache: Map<string, TimedPromise<T>>, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const current = cache.get(key);
+  if (current && current.expiresAt > Date.now()) return current.value;
+  const value = load();
+  const entry = { expiresAt: Date.now() + ttlMs, value };
+  cache.set(key, entry);
+  void value.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
+  return value;
+}
+
 function configFor(collection: SupportedCollection): SignedSeaDropConfig {
   let value: unknown;
   try { value = JSON.parse(collection.adapterConfig || "{}"); }
@@ -122,8 +136,11 @@ async function apiEligibility(
   signer: ethers.Signer,
   quantity: number,
 ): Promise<MintPhaseEligibility[]> {
+  const signerAddress = (await signer.getAddress()).toLowerCase();
+  const cacheKey = `${config.openSeaSlug}:${signerAddress}:${quantity}`;
+  return cachedPromise(eligibilityCache, cacheKey, 15_000, async () => {
   const [dropRaw, eligibilityRaw] = await Promise.all([
-    openSeaApi().then((api) => api.getDrop(config.openSeaSlug)),
+    cachedPromise(dropCache, config.openSeaSlug, 60_000, () => openSeaApi().then((api) => api.getDrop(config.openSeaSlug))),
     withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug)),
   ]);
   const drop = validateApiDrop(collection, config, dropRaw);
@@ -143,6 +160,7 @@ async function apiEligibility(
       return { phaseId: stage.id, status: "ineligible", reason: `Wallet has insufficient room under its ${stage.name} mint limit` };
     }
     return { phaseId: stage.id, status: "eligible" };
+  });
   });
 }
 

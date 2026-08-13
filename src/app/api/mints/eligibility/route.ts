@@ -8,6 +8,7 @@ import { selectEligibleExecutionPhase } from "@/lib/mint-policy";
 import { safeErrorMessage } from "@/lib/safety";
 import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
+import { isOpenSeaRateLimitError } from "@/lib/opensea-auth";
 
 const inputSchema = z.object({
   collectionId: z.string().uuid(),
@@ -44,7 +45,15 @@ export async function POST(req: NextRequest) {
           return { walletId: wallet.id, eligible: false, reason: safeErrorMessage(error, "No runnable phase"), phases: displayedPhases };
         }
       } catch (error) {
-        return { walletId: wallet.id, eligible: false, reason: safeErrorMessage(error, "Eligibility could not be verified"), phases: [] };
+        return {
+          walletId: wallet.id,
+          eligible: false,
+          verificationUnavailable: isOpenSeaRateLimitError(error),
+          reason: isOpenSeaRateLimitError(error)
+            ? "OpenSea rate limited the check — retrying shortly"
+            : safeErrorMessage(error, "Eligibility could not be verified"),
+          phases: [],
+        };
       }
     }));
     return NextResponse.json({ phases, wallets: results }, { headers: { "Cache-Control": "no-store" } });

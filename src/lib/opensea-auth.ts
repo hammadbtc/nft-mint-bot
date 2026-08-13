@@ -5,9 +5,14 @@ import {
   parseSiwxMessage,
 } from "@opensea/sdk";
 import type { ethers } from "ethers";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/lib/db";
+import { decryptPrivateKey, encryptPrivateKey } from "@/lib/vault/crypto";
 
 const OPENSEA_API_BASE_URL = "https://api.opensea.io";
 const SDK_TOKEN_LABEL = /^opensea-sdk-\d+$/;
+const INSTANT_KEY_SETTING = "opensea_instant_api_key_v1";
+const INSTANT_KEY_REFRESH_BUFFER_MS = 300_000;
 
 type ScopedTokenSummary = {
   id: string;
@@ -17,12 +22,56 @@ type ScopedTokenSummary = {
   expiresAt?: string;
 };
 
-const authQueueByAddress = new Map<string, Promise<void>>();
+type AuthEntry = { auth: OpenSeaAuth; ready: Promise<void> };
+const authByAddress = new Map<string, AuthEntry>();
+let authQueue: Promise<void> = Promise.resolve();
 let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
 let cachedInstantKey: { value: string; expiresAt: number } | undefined;
 
 export function configuredOpenSeaApiKey(): string | undefined {
   return process.env.OPENSEA_API_KEY?.trim() || undefined;
+}
+
+type StoredInstantKey = { value: string; expiresAt: number };
+
+async function loadStoredInstantKey(): Promise<StoredInstantKey | undefined> {
+  try {
+    const [row] = await db.select().from(schema.appConfig).where(eq(schema.appConfig.key, INSTANT_KEY_SETTING)).limit(1);
+    if (!row) return undefined;
+    const value = JSON.parse(decryptPrivateKey(row.value)) as Partial<StoredInstantKey>;
+    if (typeof value.value !== "string" || !value.value || !Number.isFinite(value.expiresAt)) return undefined;
+    return value as StoredInstantKey;
+  } catch {
+    return undefined;
+  }
+}
+
+async function storeInstantKey(value: StoredInstantKey): Promise<void> {
+  const encrypted = encryptPrivateKey(JSON.stringify(value));
+  await db.insert(schema.appConfig).values({ key: INSTANT_KEY_SETTING, value: encrypted })
+    .onConflictDoUpdate({ target: schema.appConfig.key, set: { value: encrypted, updatedAt: new Date().toISOString() } });
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestInstantKeyWithRetry(): Promise<StoredInstantKey> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const response = await OpenSeaAPI.requestInstantApiKey();
+      if (!response.apiKey || !Number.isFinite(Date.parse(response.expiresAt))) {
+        throw new Error("OpenSea returned an invalid instant API key response");
+      }
+      return { value: response.apiKey, expiresAt: Date.parse(response.expiresAt) };
+    } catch (error) {
+      lastError = error;
+      if (!isOpenSeaRateLimitError(error) || attempt === 3) throw error;
+      await wait(1_500 * (2 ** attempt));
+    }
+  }
+  throw lastError;
 }
 
 /**
@@ -33,14 +82,15 @@ export function configuredOpenSeaApiKey(): string | undefined {
 export async function requireOpenSeaApiKey(): Promise<string> {
   const configured = configuredOpenSeaApiKey();
   if (configured) return configured;
-  if (cachedInstantKey && cachedInstantKey.expiresAt - Date.now() > 300_000) return cachedInstantKey.value;
+  if (cachedInstantKey && cachedInstantKey.expiresAt - Date.now() > INSTANT_KEY_REFRESH_BUFFER_MS) return cachedInstantKey.value;
   if (!instantKeyPromise) {
-    instantKeyPromise = OpenSeaAPI.requestInstantApiKey().then((response) => {
-      if (!response.apiKey || !Number.isFinite(Date.parse(response.expiresAt))) {
-        throw new Error("OpenSea returned an invalid instant API key response");
-      }
-      return { value: response.apiKey, expiresAt: Date.parse(response.expiresAt) };
-    });
+    instantKeyPromise = (async () => {
+      const stored = await loadStoredInstantKey();
+      if (stored && stored.expiresAt - Date.now() > INSTANT_KEY_REFRESH_BUFFER_MS) return stored;
+      const fresh = await requestInstantKeyWithRetry();
+      await storeInstantKey(fresh);
+      return fresh;
+    })();
   }
   try {
     cachedInstantKey = await instantKeyPromise;
@@ -48,6 +98,12 @@ export async function requireOpenSeaApiKey(): Promise<string> {
   } finally {
     instantKeyPromise = undefined;
   }
+}
+
+export function isOpenSeaRateLimitError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const value = error as Error & { statusCode?: number };
+  return value.statusCode === 429 || /(?:server error|failed|error)\s*\(429\)|429\s+too many requests/i.test(value.message);
 }
 
 function requireOk(response: Response, operation: string): Promise<void> | void {
@@ -163,41 +219,29 @@ async function authenticateWithRecovery(auth: OpenSeaAuth, signer: ethers.Signer
   }
 }
 
-async function runWalletAuthenticated<T>(signer: ethers.Signer, operation: (api: OpenSeaAPI) => Promise<T>): Promise<T> {
-  const auth = new OpenSeaAuth();
-  const token = await authenticateWithRecovery(auth, signer);
-  let operationFailed = false;
-  try {
-    const api = new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken });
-    return await operation(api);
-  } catch (error) {
-    operationFailed = true;
-    throw error;
-  } finally {
-    try {
-      const current = await auth.getValidToken();
-      await auth.revoke(current.accessToken);
-    } catch (error) {
-      if (!operationFailed) throw error;
-    }
-  }
-}
-
 /**
- * Run one wallet-authenticated operation at a time per signer. The one-day PAT
- * is revoked immediately afterward so restarts and deploys cannot exhaust the
- * account's scoped-token limit again.
+ * Reuse one narrowly-scoped PAT per wallet for its one-day lifetime. Creating
+ * and revoking a PAT on every UI refresh burns OpenSea's auth rate limit. The
+ * cap-recovery path above safely removes only stale MintBot-created PATs after
+ * a deployment loses its in-memory cache.
  */
 export async function withOpenSeaApiForSigner<T>(signer: ethers.Signer, operation: (api: OpenSeaAPI) => Promise<T>): Promise<T> {
   const address = (await signer.getAddress()).toLowerCase();
-  const previous = authQueueByAddress.get(address) ?? Promise.resolve();
-  const task = previous.catch(() => undefined).then(() => runWalletAuthenticated(signer, operation));
-  const settled = task.then(() => undefined, () => undefined);
-  authQueueByAddress.set(address, settled);
+  let entry = authByAddress.get(address);
+  if (!entry) {
+    const auth = new OpenSeaAuth();
+    const ready = authQueue.catch(() => undefined).then(() => authenticateWithRecovery(auth, signer)).then(() => undefined);
+    authQueue = ready.catch(() => undefined);
+    entry = { auth, ready };
+    authByAddress.set(address, entry);
+  }
   try {
-    return await task;
-  } finally {
-    if (authQueueByAddress.get(address) === settled) authQueueByAddress.delete(address);
+    await entry.ready;
+    const token = await entry.auth.getValidToken();
+    return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
+  } catch (error) {
+    if (!isOpenSeaRateLimitError(error) && authByAddress.get(address) === entry) authByAddress.delete(address);
+    throw error;
   }
 }
 

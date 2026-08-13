@@ -2,8 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isOpenSeaScopedTokenLimitError,
+  isOpenSeaRateLimitError,
   selectStaleOpenSeaSdkToken,
 } from "../src/lib/opensea-auth";
+
+test("OpenSea rate limits are recognized without treating eligibility failures as throttling", () => {
+  assert.equal(isOpenSeaRateLimitError(new Error("Server Error (429): Too Many Requests")), true);
+  const structured = Object.assign(new Error("429 Too Many Requests"), { statusCode: 429 });
+  assert.equal(isOpenSeaRateLimitError(structured), true);
+  assert.equal(isOpenSeaRateLimitError(new Error("Wallet is not eligible")), false);
+});
 
 test("OpenSea scoped-token cap errors are recognized narrowly", () => {
   assert.equal(isOpenSeaScopedTokenLimitError(new Error(
