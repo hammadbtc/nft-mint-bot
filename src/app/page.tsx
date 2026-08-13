@@ -6,12 +6,13 @@ import { formatContractTime } from "@/lib/format-contract-time";
 
 type Wallet = { id: string; label: string; address: string; chainId: number; role: "main" | "worker"; active: boolean };
 type Phase = { id: string; name: string; kind?: string; status: string; startsAt?: string; endsAt?: string; priceWei?: string; maxPerWallet?: number; manualOpen?: boolean };
-type Collection = { id: string; name: string; slug?: string | null; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseName?: string; phaseStatus: string; startsAt: string | null; endsAt: string | null; phases?: Phase[]; active?: boolean; verified?: boolean; createdAt: string };
+type Collection = { id: string; name: string; slug?: string | null; contractAddress: string; chainId: number; mintPrice: string | null; maxPerWallet: number | null; maxSupply: number | null; currentSupply: number | null; phaseName?: string; phaseStatus: string; startsAt: string | null; endsAt: string | null; phases?: Phase[]; adapterKey?: string; active?: boolean; verified?: boolean; createdAt: string };
 type WalletPhasePlan = { walletId: string; eligible: boolean; verificationUnavailable?: boolean; selectedPhaseId?: string; selectedPhaseName?: string; scheduledAt?: string | null; reason?: string; phases: Array<Phase & { eligibility?: { status: string; reason?: string } }> };
 type Broadcast = { routeLabel: string; status: string; latencyMs: number | null };
 type Attempt = { id: string; kind: "approval" | "mint"; status: string; txHash: string | null; gasUsed: string | null; effectiveGasPrice: string | null; error: string | null; broadcasts?: Broadcast[] };
 type Job = { id: string; batchId: string | null; walletId: string; collectionId: string; phaseId?: string | null; status: string; quantity: number; dryRun: boolean; scheduledAt: string | null; launchTargetAt?: string | null; timingDriftMs?: number | null; createdAt: string; error?: string | null; attempts: Attempt[] };
 type TaskEdit = { id: string; collectionId: string; walletId: string; phaseId: string; addPhaseIds: string[]; scheduledPhaseIds: string[]; quantity: number; phases: Array<Phase & { eligibility?: { status: string; reason?: string } }> };
+type DeleteTarget = { id: string; wholeSchedule: boolean; taskCount: number };
 
 const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-5)}`;
 async function json(response: Response) {
@@ -44,10 +45,11 @@ export default function MintsPage() {
   const [tab, setTab] = useState("minted");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [taskEdit, setTaskEdit] = useState<TaskEdit | null>(null);
-  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [adminPassword, setAdminPassword] = useState("");
   const [phasePlans, setPhasePlans] = useState<Record<string, WalletPhasePlan>>({});
   const [checkingEligibility, setCheckingEligibility] = useState(false);
+  const scheduleRequestRef = useRef<{ signature: string; key: string } | null>(null);
 
   const suggestions = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -112,7 +114,7 @@ export default function MintsPage() {
         mintPrice: phase?.priceWei ? String(phase.priceWei) : null, maxPerWallet: phase?.maxPerWallet ? Number(phase.maxPerWallet) : null,
         maxSupply: data.maxSupply ? Number(data.maxSupply) : null, currentSupply: data.currentSupply == null ? null : Number(data.currentSupply),
         phaseName: phase?.name ? String(phase.name) : "Mint phase", phaseStatus: String(phase?.status || "unknown"), startsAt: phase?.startsAt ? String(phase.startsAt) : null,
-        endsAt: phase?.endsAt ? String(phase.endsAt) : null,
+        endsAt: phase?.endsAt ? String(phase.endsAt) : null, adapterKey: data.adapterKey ? String(data.adapterKey) : undefined,
         phases: phases.map((item) => ({
           id: String(item.id), name: String(item.name), kind: item.kind ? String(item.kind) : undefined, status: String(item.status || "unknown"),
           startsAt: item.startsAt ? String(item.startsAt) : undefined, endsAt: item.endsAt ? String(item.endsAt) : undefined,
@@ -125,6 +127,7 @@ export default function MintsPage() {
       selectedPhasesRef.current = new Set();
       setSelectedPhases(new Set());
       setPhasePlans({});
+      scheduleRequestRef.current = null;
       setMessage("");
     } catch (error) {
       setProject(null);
@@ -173,13 +176,25 @@ export default function MintsPage() {
     if (!plan || !selectedPhases.size || ![...selectedPhases].every((phaseId) => plan.phases.find((phase) => phase.id === phaseId)?.eligibility?.status === "eligible")) return current;
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
+    scheduleRequestRef.current = null;
     return next;
   });
+
+  const selectAllEligible = () => {
+    if (!selectedPhases.size) return;
+    const eligible = compatible.filter((wallet) => {
+      const plan = phasePlans[wallet.id];
+      return [...selectedPhases].every((phaseId) => plan?.phases.find((phase) => phase.id === phaseId)?.eligibility?.status === "eligible");
+    });
+    setSelected(new Set(eligible.map((wallet) => wallet.id)));
+    scheduleRequestRef.current = null;
+  };
 
   const togglePhase = (phaseId: string) => setSelectedPhases((current) => {
     const next = new Set(current);
     if (next.has(phaseId)) next.delete(phaseId); else next.add(phaseId);
     selectedPhasesRef.current = next;
+    scheduleRequestRef.current = null;
     setSelected((walletsSelected) => new Set([...walletsSelected].filter((walletId) => {
       const plan = phasePlans[walletId];
       return next.size > 0 && [...next].every((id) => plan?.phases.find((phase) => phase.id === id)?.eligibility?.status === "eligible");
@@ -192,21 +207,28 @@ export default function MintsPage() {
     setBusy(true);
     setMessage("");
     try {
+      const body = JSON.stringify({
+        collectionId: project.id,
+        walletIds: [...selected],
+        quantity: qty,
+        phases: [...selected].flatMap((walletId) => [...selectedPhases].map((phaseId) => ({ walletId, phaseId }))),
+      });
+      if (scheduleRequestRef.current?.signature !== body) {
+        scheduleRequestRef.current = { signature: body, key: crypto.randomUUID() };
+      }
       const response = await fetch("/api/jobs/batch", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({
-          collectionId: project.id,
-          walletIds: [...selected],
-          quantity: qty,
-          phases: [...selected].flatMap((walletId) => [...selectedPhases].map((phaseId) => ({ walletId, phaseId }))),
-        }),
+        headers: { "Content-Type": "application/json", "Idempotency-Key": scheduleRequestRef.current.key },
+        body,
       });
-      const data = await json(response) as { scheduledAt?: string | null };
+      const data = await json(response) as { scheduledAt?: string | null; waitingForOpen?: boolean };
       const taskCount = selected.size * selectedPhases.size;
-      setMessage(data.scheduledAt
+      setMessage(data.waitingForOpen
+        ? `${taskCount} phase-bound task${taskCount > 1 ? "s" : ""} saved. Waiting for the team’s confirmed on-chain public switch; nothing is prepared or broadcast yet.`
+        : data.scheduledAt
         ? `${taskCount} phase-bound mint task${taskCount > 1 ? "s" : ""} queued for the verified opening times.`
         : `${taskCount} phase-bound mint task${taskCount > 1 ? "s" : ""} queued for immediate processing.`);
+      scheduleRequestRef.current = null;
       await load();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not schedule mint"); }
     finally { setBusy(false); }
@@ -252,12 +274,15 @@ export default function MintsPage() {
 
   const deleteTask = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!deleteTaskId) return;
+    if (!deleteTarget) return;
     setBusy(true); setMessage("");
     try {
-      await json(await fetch(`/api/jobs/${deleteTaskId}`, { method: "DELETE", headers: { "X-Admin-Password": adminPassword } }));
-      setDeleteTaskId(null); setAdminPassword(""); await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not delete mint task"); }
+      const endpoint = deleteTarget.wholeSchedule ? `/api/jobs/batch/${deleteTarget.id}` : `/api/jobs/${deleteTarget.id}`;
+      const result = await json(await fetch(endpoint, { method: "DELETE", headers: { "X-Admin-Password": adminPassword } })) as { deletedCount?: number };
+      setDeleteTarget(null); setAdminPassword("");
+      setMessage(deleteTarget.wholeSchedule ? `Deleted the whole schedule (${result.deletedCount || deleteTarget.taskCount} unsigned tasks).` : "Deleted the scheduled task.");
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not delete scheduled work"); }
     finally { setBusy(false); }
   };
 
@@ -292,22 +317,44 @@ export default function MintsPage() {
             return <label className="phase" key={phase.id} style={{cursor:selectable?"pointer":"default",outline:selectedPhases.has(phase.id)?"2px solid var(--accent)":"none"}}><div className="phase-top"><h3><input type="checkbox" disabled={!selectable} checked={selectedPhases.has(phase.id)} onChange={()=>togglePhase(phase.id)} style={{marginRight:9}}/>{phase.name.toUpperCase()}</h3><span className="status">{phase.status === "live" ? "Live" : phase.status === "upcoming" ? "Upcoming" : phase.status === "ended" ? "Ended" : "Unknown"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(phase.priceWei || null)}</strong></span><span className="chip">MAX QTY / TX · <strong>{phase.maxPerWallet || "—"}</strong></span><span className="chip">ELIGIBLE WALLETS · <strong>{checkingEligibility && phaseResults.length === 0 ? "…" : eligibilityLabel}</strong></span></div>{phase.startsAt && <div className="muted" style={{fontSize:12,marginTop:9}}>{phase.status === "upcoming" ? `Opens ${formatContractTime(phase.startsAt)}` : `Started ${formatContractTime(phase.startsAt)}`}</div>}{phase.manualOpen && <div className="muted" style={{fontSize:12,marginTop:9}}>Waiting for the team’s on-chain open-mint switch</div>}{eligibilityReason && <div className="muted" style={{fontSize:12,marginTop:7}}>{eligibilityReason}</div>}</label>;
           })}
           <div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{ fontSize: 12 }}>Automatic gas</span></div><div className="field" style={{ marginTop: 12 }}><label>Quantity per wallet transaction</label><div className="amount-row"><input type="number" min="1" max={quantityLimit} value={qty} onChange={(event) => setQty(Math.min(quantityLimit, Math.max(1, Number(event.target.value) || 1)))}/><button className="secondary-btn" onClick={() => setQty(quantityLimit)}>Max</button></div></div></div></div>
-          <div className="schedule-box"><div className="field"><label>Active wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => { const plan = phasePlans[wallet.id]; const eligibleForAll = selectedPhases.size > 0 && [...selectedPhases].every((phaseId)=>plan?.phases.find((phase)=>phase.id===phaseId)?.eligibility?.status==="eligible"); return <label className="wallet-option" key={wallet.id}><input type="checkbox" disabled={!eligibleForAll || (checkingEligibility && !plan)} checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label} · {wallet.role === "main" ? "Main" : "Worker"}</span><small>{short(wallet.address)} · {!plan ? "Checking phases…" : !selectedPhases.size ? "Choose phase(s) first" : eligibleForAll ? `Eligible for all ${selectedPhases.size} selected phase${selectedPhases.size>1?"s":""}` : plan.verificationUnavailable ? `Eligibility unavailable · ${plan.reason}` : "Not eligible for every selected phase"}</small></label>; }) : <div className="wallet-option muted">No compatible active wallets</div>}</div></div><div className="field"><label>Explicit phase selection ({selectedPhases.size} selected)</label><div className="alert">Choose any eligible combination above. MintBot creates one phase-bound task per selected wallet and phase; it will never silently reroute that task to another phase.</div></div><button className="primary-btn" disabled={!selected.size || !selectedPhases.size || busy} onClick={() => void schedule()}>{busy ? "Scheduling…" : `Schedule ${selected.size*selectedPhases.size || ""} mint task${selected.size*selectedPhases.size===1?"":"s"} →`}</button><div className="alert">Each exact phase is rechecked before transaction construction. Gated phases still require OpenSea’s fresh wallet-bound eligibility and signed mint payload.</div></div>
+          <div className="schedule-box"><div className="field"><div className="toolbar" style={{justifyContent:"space-between"}}><label>Active wallets ({selected.size} selected)</label><div className="toolbar"><button type="button" className="secondary-btn" style={{padding:"5px 8px"}} disabled={!selectedPhases.size||checkingEligibility} onClick={selectAllEligible}>Select all eligible</button><button type="button" className="secondary-btn" style={{padding:"5px 8px"}} disabled={!selected.size} onClick={()=>{setSelected(new Set());scheduleRequestRef.current=null}}>Clear</button></div></div><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => { const plan = phasePlans[wallet.id]; const eligibleForAll = selectedPhases.size > 0 && [...selectedPhases].every((phaseId)=>plan?.phases.find((phase)=>phase.id===phaseId)?.eligibility?.status==="eligible"); return <label className="wallet-option" key={wallet.id}><input type="checkbox" disabled={!eligibleForAll || (checkingEligibility && !plan)} checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label} · {wallet.role === "main" ? "Main" : "Worker"}</span><small>{short(wallet.address)} · {!plan ? "Checking phases…" : !selectedPhases.size ? "Choose phase(s) first" : eligibleForAll ? `Eligible for all ${selectedPhases.size} selected phase${selectedPhases.size>1?"s":""}` : plan.verificationUnavailable ? `Eligibility unavailable · ${plan.reason}` : "Not eligible for every selected phase"}</small></label>; }) : <div className="wallet-option muted">No compatible active wallets</div>}</div></div><div className="field"><label>Explicit phase selection ({selectedPhases.size} selected)</label><div className="alert">Choose any eligible combination above. MintBot creates one phase-bound task per selected wallet and phase; it will never silently reroute that task to another phase.</div></div><button className="primary-btn" disabled={!selected.size || !selectedPhases.size || busy} onClick={() => void schedule()}>{busy ? "Scheduling…" : `Schedule ${selected.size*selectedPhases.size || ""} mint task${selected.size*selectedPhases.size===1?"":"s"} →`}</button><div className="alert">Each exact phase is rechecked before transaction construction. Gated phases still require OpenSea’s fresh wallet-bound eligibility and signed mint payload.</div></div>
         </div></div>
       </section>}
-    {groups.length > 0 && <section className="scheduled"><div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{ fontSize: 12 }}>{jobs.length} tasks</span></div>{groups.map(([batchId, items]) => {
-      const collection = collections.find((item) => item.id === items[0]?.collectionId);
-      const confirmed = items.filter((item) => item.status === "completed" && !item.dryRun).length;
-      const simulated = items.filter((item) => item.status === "completed" && item.dryRun).length;
-      return <div className="panel job" key={batchId}><div className="job-summary" onClick={() => setExpanded(expanded === batchId ? null : batchId)}><div className="job-art"/><div className="job-main"><b>{collection?.name || "Supported mint"}</b><span>{new Set(items.map((item)=>item.walletId)).size} wallets · {items.length} phase tasks · {confirmed} confirmed{simulated ? ` · ${simulated} simulated` : ""}</span></div><span className="status">{items.some((item) => item.status === "armed") ? "Armed" : items.some((item) => ["running", "confirming"].includes(item.status)) ? "Running" : items.some((item) => item.status === "pending") ? "Scheduled" : "Finished"}</span><span>{expanded === batchId ? "⌃" : "⌄"}</span></div>{expanded === batchId && <div className="result-panel"><div className="result-tabs">{["minted", "transactions", "analytics"].map((name) => <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>{name[0].toUpperCase() + name.slice(1)}</button>)}</div>{tab === "analytics" ? <div className="summary-box"><div className="summary-line"><span>Total tasks</span><b>{items.length}</b></div><div className="summary-line"><span>Confirmed mints</span><b className="ok">{confirmed}</b></div><div className="summary-line"><span>Armed transactions</span><b>{items.filter((item) => item.status === "armed").length}</b></div><div className="summary-line"><span>Best timer drift</span><b>{items.some((item) => item.timingDriftMs != null) ? `${Math.min(...items.flatMap((item) => item.timingDriftMs == null ? [] : [item.timingDriftMs]))} ms` : "—"}</b></div><div className="summary-line"><span>Fastest route ACK</span><b>{items.flatMap((item) => item.attempts.flatMap((attempt) => attempt.broadcasts || [])).some((route) => route.latencyMs != null) ? `${Math.min(...items.flatMap((item) => item.attempts.flatMap((attempt) => (attempt.broadcasts || []).flatMap((route) => route.latencyMs == null ? [] : [route.latencyMs]))))} ms` : "—"}</b></div><div className="summary-line"><span>Simulation-only passes</span><b>{simulated}</b></div><div className="summary-line"><span>Failed</span><b className="failed">{items.filter((item) => item.status === "failed").length}</b></div></div> : <table className="result-table"><thead><tr><th>Status</th><th>{tab === "minted" ? "Wallet" : "Transaction"}</th><th>Phase / amount</th><th>Result</th></tr></thead><tbody>{items.map((job) => {
-        const wallet = wallets.find((item) => item.id === job.walletId);
-        const attempt = job.attempts?.find((item) => item.kind === "mint") || job.attempts?.[0];
-        const status = job.dryRun && job.status === "completed" ? "simulation passed" : attempt?.status || job.status;
-        const gas = attempt?.gasUsed && attempt?.effectiveGasPrice ? `${ethers.formatEther(BigInt(attempt.gasUsed) * BigInt(attempt.effectiveGasPrice))} ETH gas` : null;
-        return <tr key={job.id}><td className={job.status === "failed" ? "failed" : job.status === "completed" ? "ok" : ""}>{job.status === "failed" ? "✕" : job.status === "completed" ? "✓" : "…"}</td><td className="mono">{tab === "minted" ? short(wallet?.address || job.walletId) : attempt?.txHash ? short(attempt.txHash) : "No broadcast"}</td><td>{job.phaseId?.toUpperCase() || "AUTO"} · {job.quantity}</td><td><div>{job.error || attempt?.error || `${status}${gas ? ` · ${gas}` : ""}`}</div>{job.status === "pending" && job.attempts.length === 0 && <div className="toolbar" style={{marginTop:8}}><button className="secondary-btn" style={{padding:"5px 8px"}} onClick={()=>void openTaskEditor(job)}>Edit</button><button className="secondary-btn" style={{padding:"5px 8px",color:"var(--danger)"}} onClick={()=>{setMessage("");setDeleteTaskId(job.id);setAdminPassword("")}}>Delete</button></div>}</td></tr>;
-      })}</tbody></table>}</div>}</div>;
-    })}</section>}
+    {groups.length > 0 && <section className="scheduled">
+      <div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{ fontSize: 12 }}>{jobs.length} tasks</span></div>
+      {groups.map(([batchId, items]) => {
+        const collection = collections.find((item) => item.id === items[0]?.collectionId);
+        const confirmed = items.filter((item) => item.status === "completed" && !item.dryRun).length;
+        const simulated = items.filter((item) => item.status === "completed" && item.dryRun).length;
+        const waitingForPublicOpen = collection?.adapterKey === "bulls-runners-v1" && items.every((item) =>
+          item.phaseId === "open" && ["pending", "running"].includes(item.status) && item.attempts.length === 0,
+        );
+        const cancellableSchedule = items.every((item) => item.status === "pending" && item.attempts.length === 0);
+        const groupStatus = items.some((item) => item.status === "armed") ? "Armed"
+          : waitingForPublicOpen ? "Waiting for public open"
+          : items.some((item) => ["running", "confirming"].includes(item.status)) ? "Running"
+          : items.some((item) => item.status === "pending") ? "Scheduled"
+          : "Finished";
+        return <div className="panel job" key={batchId}>
+          <div className="job-summary" onClick={() => setExpanded(expanded === batchId ? null : batchId)}><div className="job-art"/><div className="job-main"><b>{collection?.name || "Supported mint"}</b><span>{new Set(items.map((item)=>item.walletId)).size} wallets · {items.length} phase tasks · {confirmed} confirmed{simulated ? ` · ${simulated} simulated` : ""}</span></div><span className="status">{groupStatus}</span><span>{expanded === batchId ? "⌃" : "⌄"}</span></div>
+          {expanded === batchId && <div className="result-panel">
+            <div className="result-tabs">
+              {["minted", "transactions", "analytics"].map((name) => <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>{name[0].toUpperCase() + name.slice(1)}</button>)}
+              {cancellableSchedule && <button style={{marginLeft:"auto",color:"var(--danger)"}} onClick={()=>{setMessage("");setDeleteTarget({id:batchId,wholeSchedule:true,taskCount:items.length});setAdminPassword("")}}>Delete whole schedule</button>}
+            </div>
+            {tab === "analytics" ? <div className="summary-box"><div className="summary-line"><span>Total tasks</span><b>{items.length}</b></div><div className="summary-line"><span>Confirmed mints</span><b className="ok">{confirmed}</b></div><div className="summary-line"><span>Armed transactions</span><b>{items.filter((item) => item.status === "armed").length}</b></div><div className="summary-line"><span>Best timer drift</span><b>{items.some((item) => item.timingDriftMs != null) ? `${Math.min(...items.flatMap((item) => item.timingDriftMs == null ? [] : [item.timingDriftMs]))} ms` : "—"}</b></div><div className="summary-line"><span>Fastest route ACK</span><b>{items.flatMap((item) => item.attempts.flatMap((attempt) => attempt.broadcasts || [])).some((route) => route.latencyMs != null) ? `${Math.min(...items.flatMap((item) => item.attempts.flatMap((attempt) => (attempt.broadcasts || []).flatMap((route) => route.latencyMs == null ? [] : [route.latencyMs]))))} ms` : "—"}</b></div><div className="summary-line"><span>Simulation-only passes</span><b>{simulated}</b></div><div className="summary-line"><span>Failed</span><b className="failed">{items.filter((item) => item.status === "failed").length}</b></div></div> : <table className="result-table"><thead><tr><th>Status</th><th>{tab === "minted" ? "Wallet" : "Transaction"}</th><th>Phase / amount</th><th>Result</th></tr></thead><tbody>{items.map((job) => {
+              const wallet = wallets.find((item) => item.id === job.walletId);
+              const attempt = job.attempts?.find((item) => item.kind === "mint") || job.attempts?.[0];
+              const waiting = collection?.adapterKey === "bulls-runners-v1" && job.phaseId === "open" && ["pending", "running"].includes(job.status) && job.attempts.length === 0;
+              const status = waiting ? "Waiting for confirmed public switch · No transaction prepared" : job.dryRun && job.status === "completed" ? "simulation passed" : attempt?.status || job.status;
+              const gas = attempt?.gasUsed && attempt?.effectiveGasPrice ? `${ethers.formatEther(BigInt(attempt.gasUsed) * BigInt(attempt.effectiveGasPrice))} ETH gas` : null;
+              return <tr key={job.id}><td className={job.status === "failed" ? "failed" : job.status === "completed" ? "ok" : ""}>{job.status === "failed" ? "✕" : job.status === "completed" ? "✓" : "…"}</td><td className="mono">{tab === "minted" ? short(wallet?.address || job.walletId) : attempt?.txHash ? short(attempt.txHash) : "No broadcast"}</td><td>{job.phaseId?.toUpperCase() || "AUTO"} · {job.quantity}</td><td><div>{job.error || attempt?.error || `${status}${gas ? ` · ${gas}` : ""}`}</div>{job.status === "pending" && job.attempts.length === 0 && <div className="toolbar" style={{marginTop:8}}><button className="secondary-btn" style={{padding:"5px 8px"}} onClick={()=>void openTaskEditor(job)}>Edit</button><button className="secondary-btn" style={{padding:"5px 8px",color:"var(--danger)"}} onClick={()=>{setMessage("");setDeleteTarget({id:job.id,wholeSchedule:false,taskCount:1});setAdminPassword("")}}>Delete</button></div>}</td></tr>;
+            })}</tbody></table>}
+          </div>}
+        </div>;
+      })}
+    </section>}
     {taskEdit && <div className="modal-backdrop" onMouseDown={()=>setTaskEdit(null)}><form className="panel modal" onSubmit={saveTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Edit scheduled mint</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>Update this task and optionally add separate tasks for more eligible phases.</p></div><button type="button" onClick={()=>setTaskEdit(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Wallet</label><select required value={taskEdit.walletId} onChange={(event)=>setTaskEdit({...taskEdit,walletId:event.target.value})}>{wallets.filter((wallet)=>wallet.active&&wallet.chainId===collections.find((item)=>item.id===taskEdit.collectionId)?.chainId).map((wallet)=><option key={wallet.id} value={wallet.id}>{wallet.label} · {short(wallet.address)}</option>)}</select></div><div className="field"><label>Current task phase</label><select required value={taskEdit.phaseId} onChange={(event)=>setTaskEdit({...taskEdit,phaseId:event.target.value,addPhaseIds:taskEdit.addPhaseIds.filter((id)=>id!==event.target.value)})}>{taskEdit.phases.filter((phase)=>["live","upcoming"].includes(phase.status)).map((phase)=><option key={phase.id} value={phase.id}>{phase.name} · {phase.status}{phase.eligibility?.status?` · ${phase.eligibility.status} for current wallet`:""}</option>)}</select></div><div className="field"><label>Add phase task(s)</label><div className="wallet-picker">{taskEdit.phases.filter((phase)=>["live","upcoming"].includes(phase.status)&&phase.id!==taskEdit.phaseId).map((phase)=>{const alreadyScheduled=taskEdit.scheduledPhaseIds.includes(phase.id);const eligible=phase.eligibility?.status==="eligible";return <label className="wallet-option" key={phase.id}><input type="checkbox" disabled={alreadyScheduled||!eligible} checked={taskEdit.addPhaseIds.includes(phase.id)} onChange={()=>setTaskEdit({...taskEdit,addPhaseIds:taskEdit.addPhaseIds.includes(phase.id)?taskEdit.addPhaseIds.filter((id)=>id!==phase.id):[...taskEdit.addPhaseIds,phase.id]})}/><span>{phase.name}</span><small>{alreadyScheduled?"Already scheduled":eligible?`${phase.status} · ${formatPrice(phase.priceWei||null)}`:`${phase.eligibility?.status||"unknown"} · ${phase.eligibility?.reason||"Not available"}`}</small></label>})}</div><small className="muted">Each checked phase becomes its own phase-bound task; the existing task is kept.</small></div><div className="field"><label>Quantity per task</label><input type="number" min="1" max={Math.min(...[taskEdit.phaseId,...taskEdit.addPhaseIds].map((id)=>taskEdit.phases.find((phase)=>phase.id===id)?.maxPerWallet||100))} value={taskEdit.quantity} onChange={(event)=>setTaskEdit({...taskEdit,quantity:Math.max(1,Number(event.target.value)||1)})}/></div><button className="primary-btn" disabled={busy||!taskEdit.phaseId}>{busy?"Saving…":taskEdit.addPhaseIds.length?`Save + add ${taskEdit.addPhaseIds.length} phase${taskEdit.addPhaseIds.length>1?"s":""}`:"Save task"}</button></div></form></div>}
-    {deleteTaskId && <div className="modal-backdrop" onMouseDown={()=>setDeleteTaskId(null)}><form className="panel modal" onSubmit={deleteTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Delete scheduled task</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>This permanently removes a pending, unsigned task.</p></div><button type="button" onClick={()=>setDeleteTaskId(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Admin password</label><input type="password" required autoFocus autoComplete="current-password" placeholder="App login password" value={adminPassword} onChange={(event)=>setAdminPassword(event.target.value)}/></div><button className="primary-btn" style={{background:"var(--danger)"}} disabled={busy||!adminPassword}>{busy?"Deleting…":"Confirm deletion"}</button></div></form></div>}
+    {deleteTarget && <div className="modal-backdrop" onMouseDown={()=>setDeleteTarget(null)}><form className="panel modal" onSubmit={deleteTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>{deleteTarget.wholeSchedule ? "Delete whole schedule" : "Delete scheduled task"}</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>{deleteTarget.wholeSchedule ? `This permanently removes all ${deleteTarget.taskCount} pending, unsigned tasks in this schedule.` : "This permanently removes a pending, unsigned task."}</p></div><button type="button" onClick={()=>setDeleteTarget(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Admin password</label><input type="password" required autoFocus autoComplete="current-password" placeholder="App login password" value={adminPassword} onChange={(event)=>setAdminPassword(event.target.value)}/></div><button className="primary-btn" style={{background:"var(--danger)"}} disabled={busy||!adminPassword}>{busy?"Deleting…":deleteTarget.wholeSchedule?"Delete entire schedule":"Confirm deletion"}</button></div></form></div>}
   </>;
 }

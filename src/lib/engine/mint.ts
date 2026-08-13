@@ -611,7 +611,13 @@ export async function batchMint(
     if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
       throw new Error(`${wallet.label} exceeds the ${phase.name} wallet limit`);
     }
-    return { walletId, phase, scheduledAt: phase.status === "upcoming" ? phase.startsAt || null : null };
+    return {
+      walletId,
+      phase,
+      scheduledAt: phase.status === "upcoming"
+        ? phase.startsAt || (phase.manualOpen ? new Date(Date.now() + 750).toISOString() : null)
+        : null,
+    };
   }));
   const batchId = randomUUID();
   const values = plans.map(({ walletId, phase, scheduledAt }) => ({
@@ -631,6 +637,7 @@ export async function batchMint(
   }));
   const sharedSchedule = plans.every((plan) => plan.scheduledAt === plans[0]?.scheduledAt) ? plans[0]?.scheduledAt || null : null;
   const sharedPhaseId = plans.every((plan) => plan.phase.id === plans[0]?.phase.id) ? plans[0]?.phase.id || null : null;
+  const waitingForOpen = plans.some((plan) => plan.phase.status === "upcoming" && plan.phase.manualOpen);
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${idempotencyBase}))`);
@@ -641,7 +648,7 @@ export async function batchMint(
     }).from(schema.mintJobs).where(inArray(schema.mintJobs.idempotencyKey, values.map((value) => value.idempotencyKey)));
     if (existing.length) {
       if (existing.length !== values.length) throw new Error("Idempotency key conflicts with a different wallet batch");
-      return { batchId: existing[0]?.batchId || batchId, scheduledAt: sharedSchedule, phaseId: sharedPhaseId, results: existing.map((row) => ({ ...row, status: "duplicate" })) };
+      return { batchId: existing[0]?.batchId || batchId, scheduledAt: sharedSchedule, phaseId: sharedPhaseId, waitingForOpen, results: existing.map((row) => ({ ...row, status: "duplicate" })) };
     }
     for (const walletId of [...uniqueWalletIds].sort()) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${walletId}`}))`);
@@ -668,6 +675,7 @@ export async function batchMint(
       batchId,
       scheduledAt: sharedSchedule,
       phaseId: sharedPhaseId,
+      waitingForOpen,
       results: inserted.map((row) => {
         const value = values.find((item) => item.id === row.id)!;
         const plan = planByWalletPhase.get(`${row.walletId}:${value.phaseId}`)!;

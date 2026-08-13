@@ -90,7 +90,9 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       }
     }
 
-    const scheduledAt = phase.status === "upcoming" ? phase.startsAt || null : null;
+    const scheduledAt = phase.status === "upcoming"
+      ? phase.startsAt || (phase.manualOpen ? new Date(Date.now() + 750).toISOString() : null)
+      : null;
     const result = await db.transaction(async (tx) => {
       for (const lockWalletId of [...new Set([job.walletId, walletId])].sort()) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${lockWalletId}`}))`);
@@ -140,7 +142,9 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         quantity,
         useFlashbots: fresh.useFlashbots,
         dryRun: fresh.dryRun,
-        scheduledAt: addedPhase.status === "upcoming" ? addedPhase.startsAt || null : null,
+        scheduledAt: addedPhase.status === "upcoming"
+          ? addedPhase.startsAt || (addedPhase.manualOpen ? new Date(Date.now() + 750).toISOString() : null)
+          : null,
         phaseId: addedPhase.id,
         phaseStartsAt: addedPhase.startsAt || null,
         phaseEndsAt: addedPhase.endsAt || null,
