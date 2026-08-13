@@ -61,12 +61,9 @@ export function mapSignedStageEligibility(
   eligibilityStages: ApiEligibilityStage[],
   quantity: number,
 ): MintPhaseEligibility[] {
-  const normalizeUuid = (value: string | undefined) => (value || "").trim().replace(/[{}]/g, "").toLowerCase();
-  const reviewedUuids = new Set(stages.filter((stage) => stage.kind === "signed")
-    .map((stage) => matchApiStage(stage, apiStages)?.uuid)
-    .filter((value): value is string => Boolean(value))
-    .map(normalizeUuid));
-  const unmatched = eligibilityStages.filter((item) => !reviewedUuids.has(normalizeUuid(item.stageUuid)));
+  const normalizeUuid = (value: string | undefined) => (value || "").toLowerCase().replace(/[^a-f0-9]/g, "");
+  const apiUuids = new Set(apiStages.map((stage) => normalizeUuid(stage.uuid)).filter(Boolean));
+  const unmatched = eligibilityStages.filter((item) => !apiUuids.has(normalizeUuid(item.stageUuid)));
   const unmatchedEligible = unmatched.filter((item) => item.isEligible);
   const mappingCode = unmatchedEligible.map((item) => normalizeUuid(item.stageUuid).slice(0, 8)).filter(Boolean).join(",");
   return stages.filter((stage) => stage.kind === "signed").map((stage) => {
@@ -188,22 +185,6 @@ async function apiEligibility(
 
   return mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
   });
-}
-
-export async function diagnoseOpenSeaStageMapping(collection: SupportedCollection, signer: ethers.Signer) {
-  const config = configFor(collection);
-  const [dropRaw, eligibilityRaw] = await Promise.all([
-    openSeaApi().then((api) => api.getDrop(config.openSeaSlug)),
-    withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug)),
-  ]);
-  const drop = validateApiDrop(collection, config, dropRaw);
-  const eligibility = eligibilityRaw as unknown as { stages?: ApiEligibilityStage[] };
-  if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
-  return {
-    reviewed: config.stages.map((stage) => ({ id: stage.id, name: stage.name, startsAt: stage.startsAt, endsAt: stage.endsAt, dropStageIndex: stage.dropStageIndex })),
-    dropStages: drop.stages.map((stage) => ({ uuid: stage.uuid.slice(0, 8), label: stage.label, stageType: stage.stageType, startsAt: stage.startTime, endsAt: stage.endTime })),
-    eligibility: eligibility.stages.map((stage) => ({ uuid: stage.stageUuid.slice(0, 8), isEligible: stage.isEligible, price: stage.price, max: stage.maxTotalMintableByWallet })),
-  };
 }
 
 export function validateOpenSeaSignedTransaction(
