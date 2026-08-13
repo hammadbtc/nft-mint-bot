@@ -14,6 +14,7 @@ const READ_ABI = [
 const MINT_ABI = ["function mint(bytes32[] proof)"];
 const MAX_WHITELIST_BYTES = 10_000_000;
 const WHITELIST_CACHE_MS = 60_000;
+const STATE_CACHE_MS = 400;
 
 type BullsRunnersConfig = {
   expectedMerkleRoot: string;
@@ -31,6 +32,15 @@ type WhitelistPayload = {
 
 let whitelistCache: { expiresAt: number; payload: WhitelistPayload } | null = null;
 let whitelistRequest: Promise<WhitelistPayload> | null = null;
+const stateCache = new WeakMap<object, Map<string, { expiresAt: number; promise: Promise<BaseState> }>>();
+
+type BaseState = {
+  config: BullsRunnersConfig;
+  whitelistEnabled: boolean;
+  mintClosed: boolean;
+  totalMinted: bigint;
+  maxSupply: bigint;
+};
 
 function configFor(collection: SupportedCollection): BullsRunnersConfig {
   let value: unknown;
@@ -45,23 +55,44 @@ function configFor(collection: SupportedCollection): BullsRunnersConfig {
   return config as BullsRunnersConfig;
 }
 
-async function readState(collection: SupportedCollection, provider: ethers.Provider, signerAddress?: string) {
+async function readBaseState(collection: SupportedCollection, provider: ethers.Provider): Promise<BaseState> {
   const config = configFor(collection);
   const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
-  const [maxSupply, reserveSupply, merkleRoot, whitelistEnabled, mintClosed, totalMinted, hasMinted] = await Promise.all([
+  const [maxSupply, reserveSupply, merkleRoot, whitelistEnabled, mintClosed, totalMinted] = await Promise.all([
     contract.getFunction("MAX_SUPPLY").staticCall().then(BigInt),
     contract.getFunction("RESERVE_SUPPLY").staticCall().then(BigInt),
     contract.getFunction("merkleRoot").staticCall().then(String),
     contract.getFunction("whitelistEnabled").staticCall().then(Boolean),
     contract.getFunction("mintClosed").staticCall().then(Boolean),
     contract.getFunction("totalMinted").staticCall().then(BigInt),
-    signerAddress ? contract.getFunction("hasMinted").staticCall(signerAddress).then(Boolean) : Promise.resolve(false),
   ]);
   if (maxSupply !== BigInt(config.expectedMaxSupply)) throw new Error("Bulls Runners on-chain maximum supply changed from 4,200");
   if (reserveSupply !== BigInt(config.expectedReserveSupply)) throw new Error("Bulls Runners on-chain reserve changed from 420");
   if (merkleRoot.toLowerCase() !== config.expectedMerkleRoot.toLowerCase()) throw new Error("Bulls Runners on-chain whitelist root changed from the reviewed value");
   if (totalMinted > maxSupply) throw new Error("Bulls Runners on-chain mint accounting is inconsistent");
-  return { config, whitelistEnabled, mintClosed, totalMinted, maxSupply, hasMinted };
+  return { config, whitelistEnabled, mintClosed, totalMinted, maxSupply };
+}
+
+async function readState(collection: SupportedCollection, provider: ethers.Provider, signerAddress?: string) {
+  let byCollection = stateCache.get(provider);
+  if (!byCollection) {
+    byCollection = new Map();
+    stateCache.set(provider, byCollection);
+  }
+  const key = collection.contractAddress.toLowerCase();
+  let cached = byCollection.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    const promise = readBaseState(collection, provider);
+    cached = { expiresAt: Date.now() + STATE_CACHE_MS, promise };
+    byCollection.set(key, cached);
+    void promise.catch(() => { if (byCollection?.get(key)?.promise === promise) byCollection.delete(key); });
+  }
+  const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
+  const [base, hasMinted] = await Promise.all([
+    cached.promise,
+    signerAddress ? contract.getFunction("hasMinted").staticCall(signerAddress).then(Boolean) : Promise.resolve(false),
+  ]);
+  return { ...base, hasMinted };
 }
 
 function isBytes32(value: unknown): value is string {
