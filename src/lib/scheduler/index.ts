@@ -6,6 +6,7 @@ import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 import { processDisperseOperations, recoverDisperseOperation } from "@/lib/disperse";
 import { armLeadMs, revalidateLeadMs, schedulePrecisely } from "@/lib/launch-timing";
 import { firstTaskPerWallet } from "@/lib/task-management";
+import { schedulerHeartbeatFresh } from "./health";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
@@ -173,7 +174,10 @@ async function tick(): Promise<void> {
 
 export function startScheduler(): void {
   if (state.schedulerInterval) return;
-  void recoverStaleWork().then(restoreArmedTimers);
+  void recoverStaleWork()
+    .catch((error) => { state.lastError = safeErrorMessage(error, "Scheduler recovery failed"); })
+    .then(() => restoreArmedTimers())
+    .catch((error) => { state.lastError = safeErrorMessage(error, "Armed timer recovery failed"); });
   void tick();
   state.schedulerInterval = setInterval(() => void tick(), SCHEDULER_INTERVAL_MS);
   state.recoveryInterval = setInterval(() => void recoverStaleWork(), RECOVERY_INTERVAL_MS);
@@ -203,9 +207,26 @@ export function setSchedulerConcurrency(value: number): void {
   state.activeConcurrency = Math.max(1, Math.min(value, 20));
 }
 
+/** Redundant bootstrap/watchdog for the Railway probe and authenticated UI. */
+export function ensureSchedulerRunning(): { restarted: boolean } {
+  const running = Boolean(state.schedulerInterval);
+  if (!running) {
+    startScheduler();
+    return { restarted: true };
+  }
+  if (!schedulerHeartbeatFresh(running, state.lastTickAt)) {
+    stopScheduler();
+    startScheduler();
+    return { restarted: true };
+  }
+  return { restarted: false };
+}
+
 export function schedulerStatus() {
+  const running = Boolean(state.schedulerInterval);
   return {
-    running: Boolean(state.schedulerInterval),
+    running,
+    healthy: schedulerHeartbeatFresh(running, state.lastTickAt),
     tickRunning: state.tickRunning,
     concurrency: state.activeConcurrency,
     lastTickAt: state.lastTickAt,

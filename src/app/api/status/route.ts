@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { checkRpcHealth, getChain } from "@/lib/chains";
-import { schedulerStatus } from "@/lib/scheduler";
+import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 
 export async function GET() {
   try {
+    ensureSchedulerRunning();
     const collections = await db.selectDistinct({ chainId: schema.collections.chainId })
       .from(schema.collections)
       .where(and(eq(schema.collections.active, true), eq(schema.collections.verified, true)));
@@ -44,7 +45,7 @@ export async function GET() {
       order by p50_ms asc
     `);
     const scheduler = schedulerStatus();
-    const ready = scheduler.running && rpc.every((chain) => chain.healthy);
+    const ready = scheduler.healthy && rpc.every((chain) => chain.healthy);
     return NextResponse.json({
       ready,
       liveTransactionsEnabled: liveTransactionsEnabled(),

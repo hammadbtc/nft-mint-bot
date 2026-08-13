@@ -176,8 +176,8 @@
     "maxPerWallet": 2,
     "maxSupply": 7500,
     "adapterKey": "squiggle-wuiggle-v1",
-    "domains": ["opensea.io", "robinhoodchain.blockscout.com", "x.com"],
-    "siteUrl": "https://opensea.io/collection/squiggle-wuiggle",
+    "domains": ["squiggle-wuiggle.xyz", "opensea.io", "robinhoodchain.blockscout.com", "x.com"],
+    "siteUrl": "https://squiggle-wuiggle.xyz/",
     "imageUrl": "https://pbs.twimg.com/media/HPiQ0oIW4AAcpmN.jpg",
     "adapterConfig": {
       "mintContract": "0x2897e59840e6e3Deb1dBf56dD7F32d20C26a69eB",
@@ -190,6 +190,7 @@
         "0x2897e59840e6e3Deb1dBf56dD7F32d20C26a69eB"
       ],
       "urlMatchers": [
+        { "domain": "squiggle-wuiggle.xyz", "path": "/" },
         { "domain": "opensea.io", "path": "/collection/squiggle-wuiggle" },
         { "domain": "opensea.io", "path": "/collection/squiggle-wuiggle/overview" },
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x65e0b476ce5c9849e6c26fb06042479e552e309c" },

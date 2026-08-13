@@ -72,6 +72,8 @@ test("Squiggle Wuiggle is bound to exact official, explorer, and collection URLs
   const squiggle = seeds.find((seed) => seed.slug === "squiggle-wuiggle");
   assert.equal(squiggle?.adapterKey, "squiggle-wuiggle-v1");
   assert.ok(squiggle?.adapterConfig.contractAliases?.some((address) => address.toLowerCase() === "0x2897e59840e6e3deb1dbf56dd7f32d20c26a69eb"));
+  assert.equal(squiggle?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "squiggle-wuiggle.xyz" && matcher.path === "/"), true);
+  assert.equal(exactUrlPathMatches("/claim", "/"), false);
   assert.ok(squiggle?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/squiggle-wuiggle"));
   assert.ok(squiggle?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/squigglerh/status/2087590681426428010"));
 });

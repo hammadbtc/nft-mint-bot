@@ -86,6 +86,13 @@ export default function MintsPage() {
       .sort((left, right) => Number(left.role === "worker") - Number(right.role === "worker")) : [],
     [wallets, project],
   );
+  // Polling replaces the wallets array every five seconds even when its
+  // contents are unchanged. Depend on this stable value so a slow eligibility
+  // request is not repeatedly aborted before a newly added wallet gets a plan.
+  const eligibilityWalletKey = useMemo(
+    () => JSON.stringify(compatible.map((wallet) => wallet.id)),
+    [compatible],
+  );
   const quantityLimit = useMemo(() => Math.max(1, ...(project?.phases || []).map((phase) => phase.maxPerWallet || 1), project?.maxPerWallet || 1), [project]);
 
   const resolve = async (rawInput = query) => {
@@ -126,7 +133,7 @@ export default function MintsPage() {
 
   useEffect(() => {
     if (!project) return;
-    const walletIds = wallets.filter((wallet) => wallet.active && wallet.chainId === project.chainId).map((wallet) => wallet.id);
+    const walletIds = JSON.parse(eligibilityWalletKey) as string[];
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (!walletIds.length) { setPhasePlans({}); return; }
@@ -151,7 +158,7 @@ export default function MintsPage() {
       }).finally(() => setCheckingEligibility(false));
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [project, qty, wallets]);
+  }, [project, qty, eligibilityWalletKey]);
 
   const loadPastedMint = (value: string) => {
     const input = value.trim();
@@ -197,8 +204,8 @@ export default function MintsPage() {
       const data = await json(response) as { scheduledAt?: string | null };
       const taskCount = selected.size * selectedPhases.size;
       setMessage(data.scheduledAt
-        ? `${taskCount} phase-bound mint task${taskCount > 1 ? "s" : ""} queued for the verified opening times. Broadcasting can remain locked until your final verification.`
-        : `${taskCount} phase-bound mint task${taskCount > 1 ? "s" : ""} queued. Broadcasting waits safely if the live gate is locked.`);
+        ? `${taskCount} phase-bound mint task${taskCount > 1 ? "s" : ""} queued for the verified opening times.`
+        : `${taskCount} phase-bound mint task${taskCount > 1 ? "s" : ""} queued for immediate processing.`);
       await load();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not schedule mint"); }
     finally { setBusy(false); }
@@ -279,12 +286,12 @@ export default function MintsPage() {
             const eligibleCount = phaseResults.filter((result) => result?.status === "eligible").length;
             const unknownCount = phaseResults.filter((result) => ["unknown", "unsupported"].includes(result?.status || "")).length;
             const eligibilityReason = phaseResults.find((result) => ["unknown", "unsupported"].includes(result?.status || "") && result?.reason)?.reason;
-            const eligibilityLabel = unknownCount > 0 ? `${eligibleCount} eligible · ${unknownCount} unknown` : `${eligibleCount}/${compatible.length}`;
-            const selectable = ["live", "upcoming"].includes(phase.status) && eligibleCount > 0 && !checkingEligibility;
-            return <label className="phase" key={phase.id} style={{cursor:selectable?"pointer":"default",outline:selectedPhases.has(phase.id)?"2px solid var(--accent)":"none"}}><div className="phase-top"><h3><input type="checkbox" disabled={!selectable} checked={selectedPhases.has(phase.id)} onChange={()=>togglePhase(phase.id)} style={{marginRight:9}}/>{phase.name.toUpperCase()}</h3><span className="status">{phase.status === "live" ? "Live" : phase.status === "upcoming" ? "Upcoming" : phase.status === "ended" ? "Ended" : "Unknown"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(phase.priceWei || null)}</strong></span><span className="chip">MAX · <strong>{phase.maxPerWallet || "—"}</strong></span><span className="chip">ELIGIBLE · <strong>{checkingEligibility ? "…" : eligibilityLabel}</strong></span></div>{phase.startsAt && <div className="muted" style={{fontSize:12,marginTop:9}}>{phase.status === "upcoming" ? `Opens ${formatContractTime(phase.startsAt)}` : `Started ${formatContractTime(phase.startsAt)}`}</div>}{eligibilityReason && <div className="muted" style={{fontSize:12,marginTop:7}}>{eligibilityReason}</div>}</label>;
+            const eligibilityLabel = unknownCount > 0 ? `${eligibleCount} wallets eligible · ${unknownCount} unknown` : `${eligibleCount} of ${compatible.length} wallets`;
+            const selectable = ["live", "upcoming"].includes(phase.status) && eligibleCount > 0;
+            return <label className="phase" key={phase.id} style={{cursor:selectable?"pointer":"default",outline:selectedPhases.has(phase.id)?"2px solid var(--accent)":"none"}}><div className="phase-top"><h3><input type="checkbox" disabled={!selectable} checked={selectedPhases.has(phase.id)} onChange={()=>togglePhase(phase.id)} style={{marginRight:9}}/>{phase.name.toUpperCase()}</h3><span className="status">{phase.status === "live" ? "Live" : phase.status === "upcoming" ? "Upcoming" : phase.status === "ended" ? "Ended" : "Unknown"}</span></div><div className="chip-row"><span className="chip">PRICE · <strong>{formatPrice(phase.priceWei || null)}</strong></span><span className="chip">MAX QTY / TX · <strong>{phase.maxPerWallet || "—"}</strong></span><span className="chip">ELIGIBLE WALLETS · <strong>{checkingEligibility && phaseResults.length === 0 ? "…" : eligibilityLabel}</strong></span></div>{phase.startsAt && <div className="muted" style={{fontSize:12,marginTop:9}}>{phase.status === "upcoming" ? `Opens ${formatContractTime(phase.startsAt)}` : `Started ${formatContractTime(phase.startsAt)}`}</div>}{eligibilityReason && <div className="muted" style={{fontSize:12,marginTop:7}}>{eligibilityReason}</div>}</label>;
           })}
-          <div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{ fontSize: 12 }}>Automatic gas</span></div><div className="field" style={{ marginTop: 12 }}><label>Quantity per wallet</label><div className="amount-row"><input type="number" min="1" max={quantityLimit} value={qty} onChange={(event) => setQty(Math.min(quantityLimit, Math.max(1, Number(event.target.value) || 1)))}/><button className="secondary-btn" onClick={() => setQty(quantityLimit)}>Max</button></div></div></div></div>
-          <div className="schedule-box"><div className="field"><label>Active wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => { const plan = phasePlans[wallet.id]; const eligibleForAll = selectedPhases.size > 0 && [...selectedPhases].every((phaseId)=>plan?.phases.find((phase)=>phase.id===phaseId)?.eligibility?.status==="eligible"); return <label className="wallet-option" key={wallet.id}><input type="checkbox" disabled={!eligibleForAll || checkingEligibility} checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label} · {wallet.role === "main" ? "Main" : "Worker"}</span><small>{short(wallet.address)} · {checkingEligibility || !plan ? "Checking phases…" : !selectedPhases.size ? "Choose phase(s) first" : eligibleForAll ? `Eligible for all ${selectedPhases.size} selected phase${selectedPhases.size>1?"s":""}` : plan.verificationUnavailable ? `Eligibility unavailable · ${plan.reason}` : "Not eligible for every selected phase"}</small></label>; }) : <div className="wallet-option muted">No compatible active wallets</div>}</div></div><div className="field"><label>Explicit phase selection ({selectedPhases.size} selected)</label><div className="alert">Choose any eligible combination above. MintBot creates one phase-bound task per selected wallet and phase; it will never silently reroute that task to another phase.</div></div><button className="primary-btn" disabled={!selected.size || !selectedPhases.size || busy || checkingEligibility} onClick={() => void schedule()}>{busy ? "Scheduling…" : `Schedule ${selected.size*selectedPhases.size || ""} mint task${selected.size*selectedPhases.size===1?"":"s"} →`}</button><div className="alert">Each exact phase is rechecked before transaction construction. Gated phases still require OpenSea’s fresh wallet-bound eligibility and signed mint payload.</div></div>
+          <div className="phase"><div className="phase-top"><h3>Mint configuration</h3><span className="muted" style={{ fontSize: 12 }}>Automatic gas</span></div><div className="field" style={{ marginTop: 12 }}><label>Quantity per wallet transaction</label><div className="amount-row"><input type="number" min="1" max={quantityLimit} value={qty} onChange={(event) => setQty(Math.min(quantityLimit, Math.max(1, Number(event.target.value) || 1)))}/><button className="secondary-btn" onClick={() => setQty(quantityLimit)}>Max</button></div></div></div></div>
+          <div className="schedule-box"><div className="field"><label>Active wallets ({selected.size} selected)</label><div className="wallet-picker">{compatible.length ? compatible.map((wallet) => { const plan = phasePlans[wallet.id]; const eligibleForAll = selectedPhases.size > 0 && [...selectedPhases].every((phaseId)=>plan?.phases.find((phase)=>phase.id===phaseId)?.eligibility?.status==="eligible"); return <label className="wallet-option" key={wallet.id}><input type="checkbox" disabled={!eligibleForAll || (checkingEligibility && !plan)} checked={selected.has(wallet.id)} onChange={() => toggle(wallet.id)}/><span>{wallet.label} · {wallet.role === "main" ? "Main" : "Worker"}</span><small>{short(wallet.address)} · {!plan ? "Checking phases…" : !selectedPhases.size ? "Choose phase(s) first" : eligibleForAll ? `Eligible for all ${selectedPhases.size} selected phase${selectedPhases.size>1?"s":""}` : plan.verificationUnavailable ? `Eligibility unavailable · ${plan.reason}` : "Not eligible for every selected phase"}</small></label>; }) : <div className="wallet-option muted">No compatible active wallets</div>}</div></div><div className="field"><label>Explicit phase selection ({selectedPhases.size} selected)</label><div className="alert">Choose any eligible combination above. MintBot creates one phase-bound task per selected wallet and phase; it will never silently reroute that task to another phase.</div></div><button className="primary-btn" disabled={!selected.size || !selectedPhases.size || busy} onClick={() => void schedule()}>{busy ? "Scheduling…" : `Schedule ${selected.size*selectedPhases.size || ""} mint task${selected.size*selectedPhases.size===1?"":"s"} →`}</button><div className="alert">Each exact phase is rechecked before transaction construction. Gated phases still require OpenSea’s fresh wallet-bound eligibility and signed mint payload.</div></div>
         </div></div>
       </section>}
     {groups.length > 0 && <section className="scheduled"><div className="section-title"><h2>Scheduled & recent</h2><span className="muted" style={{ fontSize: 12 }}>{jobs.length} tasks</span></div>{groups.map(([batchId, items]) => {
