@@ -81,6 +81,12 @@ test("Bulls Runners refuses open mint before the owner switch, repeat wallets, a
   await assert.rejects(() => bullsRunnersV1.buildTransaction!(collection, signer, 2, fakeProvider(), { phaseId: "open" }), /exactly one/);
 });
 
+test("Bulls Runners uses a lightweight owner-switch readiness probe", async () => {
+  assert.equal(await bullsRunnersV1.pollPhaseReady!(collection, "open", fakeProvider({ whitelistEnabled: true })), false);
+  assert.equal(await bullsRunnersV1.pollPhaseReady!(collection, "open", fakeProvider({ whitelistEnabled: false })), true);
+  assert.equal(await bullsRunnersV1.pollPhaseReady!(collection, "whitelist", fakeProvider({ whitelistEnabled: true })), true);
+});
+
 test("Bulls Runners public mint does not depend on the ignored whitelist root", async () => {
   const signer = "0x1111111111111111111111111111111111111111";
   const replacementRoot = `0x${"ab".repeat(32)}`;

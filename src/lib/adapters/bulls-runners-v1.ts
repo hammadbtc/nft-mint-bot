@@ -14,6 +14,7 @@ const READ_ABI = [
 const MINT_ABI = ["function mint(bytes32[] proof)"];
 const MAX_WHITELIST_BYTES = 10_000_000;
 const STATE_CACHE_MS = 400;
+const SWITCH_CACHE_MS = 1_500;
 
 type BullsRunnersConfig = {
   expectedMerkleRoot: string;
@@ -32,6 +33,7 @@ type WhitelistPayload = {
 let whitelistCache: WhitelistPayload | null = null;
 let whitelistRequest: Promise<WhitelistPayload> | null = null;
 const stateCache = new WeakMap<object, Map<string, { expiresAt: number; promise: Promise<BaseState> }>>();
+const switchCache = new WeakMap<object, Map<string, { expiresAt: number; promise: Promise<boolean> }>>();
 
 type BaseState = {
   config: BullsRunnersConfig;
@@ -72,6 +74,24 @@ async function readBaseState(collection: SupportedCollection, provider: ethers.P
   if (whitelistEnabled && merkleRoot.toLowerCase() !== config.expectedMerkleRoot.toLowerCase()) throw new Error("Bulls Runners on-chain whitelist root changed from the reviewed value");
   if (totalMinted > maxSupply) throw new Error("Bulls Runners on-chain mint accounting is inconsistent");
   return { config, whitelistEnabled, mintClosed, totalMinted, maxSupply };
+}
+
+async function isWhitelistSwitchEnabled(collection: SupportedCollection, provider: ethers.Provider): Promise<boolean> {
+  let byCollection = switchCache.get(provider);
+  if (!byCollection) {
+    byCollection = new Map();
+    switchCache.set(provider, byCollection);
+  }
+  const key = collection.contractAddress.toLowerCase();
+  let cached = byCollection.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
+    const promise = contract.getFunction("whitelistEnabled").staticCall().then(Boolean);
+    cached = { expiresAt: Date.now() + SWITCH_CACHE_MS, promise };
+    byCollection.set(key, cached);
+    void promise.catch(() => { if (byCollection?.get(key)?.promise === promise) byCollection.delete(key); });
+  }
+  return cached.promise;
 }
 
 async function readState(collection: SupportedCollection, provider: ethers.Provider, signerAddress?: string) {
@@ -176,6 +196,11 @@ function unavailable(reason: string): MintPhaseEligibility[] {
 export const bullsRunnersV1: MintAdapter = {
   key: "bulls-runners-v1",
   supportsArming: false,
+
+  async pollPhaseReady(collection, phaseId, provider) {
+    if (phaseId !== "open") return true;
+    return !(await isWhitelistSwitchEnabled(collection, provider));
+  },
 
   async resolve(collection, source): Promise<ResolvedMint> {
     const state = await readState(collection, getProvider(collection.chainId));

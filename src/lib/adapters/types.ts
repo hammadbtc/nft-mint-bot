@@ -43,6 +43,12 @@ export interface MintAdapter {
   supportsArming?: boolean;
   requiresSignerForEligibility?: boolean;
   canArmPhase?: (phaseId: string) => boolean;
+  /** Cheap fail-closed readiness probe for phases controlled by an owner switch. */
+  pollPhaseReady?: (
+    collection: SupportedCollection,
+    phaseId: string,
+    provider: ethers.Provider,
+  ) => Promise<boolean>;
   resolve(collection: SupportedCollection, source: ResolvedMint["source"]): Promise<ResolvedMint>;
   checkEligibility?: (
     collection: SupportedCollection,

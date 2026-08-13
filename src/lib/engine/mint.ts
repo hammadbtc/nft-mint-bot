@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
-import { manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
+import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
 import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { getProvider } from "@/lib/chains";
@@ -438,6 +438,21 @@ export async function launchArmedJob(jobId: string, firedAt = Date.now()): Promi
 export async function executeMint(jobId: string): Promise<ExecutionResult> {
   const { job, collection, wallet } = await loadExecutionState(jobId);
   const provider = getProvider(collection.chainId);
+  const adapter = getMintAdapter(collection.adapterKey);
+  if (!adapter) throw new Error("Mint adapter cannot resolve a reviewed transaction");
+  if (job.phaseId && adapter.pollPhaseReady) {
+    try {
+      if (!(await adapter.pollPhaseReady(collection, job.phaseId, provider))) {
+        throw new MintNotOpenError(new Date(Date.now() + 2_500).toISOString(), null);
+      }
+    } catch (error) {
+      if (error instanceof MintNotOpenError) throw error;
+      if (isTransientRpcReadError(error)) {
+        throw new MintNotOpenError(new Date(Date.now() + 2_500).toISOString(), null);
+      }
+      throw error;
+    }
+  }
   const signer = await getSigner(job.walletId, provider);
   const phase = await resolvePhase(collection, wallet.address, job.quantity, job.phaseId, signer);
   if (job.phaseStartsAt !== (phase.startsAt || null) || job.phaseEndsAt !== (phase.endsAt || null)) {
@@ -459,7 +474,6 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   if (phase.maxPerWallet && job.quantity > phase.maxPerWallet) throw new Error("Quantity exceeds the current on-chain wallet limit");
 
   const address = await signer.getAddress();
-  const adapter = getMintAdapter(collection.adapterKey);
   if (!adapter?.buildTransaction) throw new Error("Mint adapter cannot build a reviewed transaction");
 
   let request = await adapter.buildTransaction(collection, address, job.quantity, provider, { phaseId: phase.id });
@@ -614,9 +628,7 @@ export async function batchMint(
     return {
       walletId,
       phase,
-      scheduledAt: phase.status === "upcoming"
-        ? phase.startsAt || (phase.manualOpen ? new Date(Date.now() + 750).toISOString() : null)
-        : null,
+      scheduledAt: phase.status === "upcoming" ? phase.startsAt || manualOpenRetryAt(phase) : null,
     };
   }));
   const batchId = randomUUID();

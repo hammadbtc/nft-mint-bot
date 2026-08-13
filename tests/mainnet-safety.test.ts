@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import { exactUrlPathMatches } from "../src/lib/adapters";
-import { manualOpenRetryAt, recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase, selectRequestedExecutionPhase } from "../src/lib/mint-policy";
+import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus, selectEligibleExecutionPhase, selectExecutionPhase, selectRequestedExecutionPhase } from "../src/lib/mint-policy";
 import { mintWalletEligibilityError } from "../src/lib/mint-wallet-policy";
 import { broadcastPreparedTransaction, exactSimulationRequest } from "../src/lib/transactions";
 import { liveTransactionsEnabled, safeErrorMessage, safeSecretEqual, stableHash } from "../src/lib/safety";
@@ -69,9 +69,15 @@ test("explicit phase policy never reroutes a phase-bound task", () => {
 });
 
 test("manual owner-opened phases get a short polling retry without inventing a launch time", () => {
-  assert.equal(manualOpenRetryAt({ id: "open", name: "Open Mint", status: "upcoming", manualOpen: true }, 1_000), new Date(1_750).toISOString());
+  assert.equal(manualOpenRetryAt({ id: "open", name: "Open Mint", status: "upcoming", manualOpen: true }, 1_000), new Date(3_500).toISOString());
   assert.equal(manualOpenRetryAt({ id: "timed", name: "Timed", status: "upcoming", startsAt: "2030-01-01T00:00:00Z" }, 1_000), null);
   assert.equal(manualOpenRetryAt({ id: "live", name: "Live", status: "live", manualOpen: true }, 1_000), null);
+});
+
+test("owner-switch polling recognizes transient RPC read failures", () => {
+  assert.equal(isTransientRpcReadError(Object.assign(new Error('timeout (operation="request.send")'), { code: "TIMEOUT" })), true);
+  assert.equal(isTransientRpcReadError(new Error("Server Error (429): Too Many Requests")), true);
+  assert.equal(isTransientRpcReadError(new Error("Bulls Runners on-chain maximum supply changed")), false);
 });
 
 test("restart recovery resumes after approval and only completes after mint confirmation", () => {

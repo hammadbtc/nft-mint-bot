@@ -11,7 +11,7 @@ import { mintTaskMutationError } from "@/lib/task-management";
 import { getMintAdapter } from "@/lib/adapters";
 import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
-import { selectEligibleExecutionPhase, selectRequestedExecutionPhase } from "@/lib/mint-policy";
+import { manualOpenRetryAt, selectEligibleExecutionPhase, selectRequestedExecutionPhase } from "@/lib/mint-policy";
 
 type Context = { params: Promise<{ id: string }> };
 const noStore = { "Cache-Control": "no-store" };
@@ -90,9 +90,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       }
     }
 
-    const scheduledAt = phase.status === "upcoming"
-      ? phase.startsAt || (phase.manualOpen ? new Date(Date.now() + 750).toISOString() : null)
-      : null;
+    const scheduledAt = phase.status === "upcoming" ? phase.startsAt || manualOpenRetryAt(phase) : null;
     const result = await db.transaction(async (tx) => {
       for (const lockWalletId of [...new Set([job.walletId, walletId])].sort()) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${lockWalletId}`}))`);
@@ -142,9 +140,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         quantity,
         useFlashbots: fresh.useFlashbots,
         dryRun: fresh.dryRun,
-        scheduledAt: addedPhase.status === "upcoming"
-          ? addedPhase.startsAt || (addedPhase.manualOpen ? new Date(Date.now() + 750).toISOString() : null)
-          : null,
+        scheduledAt: addedPhase.status === "upcoming" ? addedPhase.startsAt || manualOpenRetryAt(addedPhase) : null,
         phaseId: addedPhase.id,
         phaseStartsAt: addedPhase.startsAt || null,
         phaseEndsAt: addedPhase.endsAt || null,
