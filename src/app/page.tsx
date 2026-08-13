@@ -11,7 +11,7 @@ type WalletPhasePlan = { walletId: string; eligible: boolean; verificationUnavai
 type Broadcast = { routeLabel: string; status: string; latencyMs: number | null };
 type Attempt = { id: string; kind: "approval" | "mint"; status: string; txHash: string | null; gasUsed: string | null; effectiveGasPrice: string | null; error: string | null; broadcasts?: Broadcast[] };
 type Job = { id: string; batchId: string | null; walletId: string; collectionId: string; phaseId?: string | null; status: string; quantity: number; dryRun: boolean; scheduledAt: string | null; launchTargetAt?: string | null; timingDriftMs?: number | null; createdAt: string; error?: string | null; attempts: Attempt[] };
-type TaskEdit = { id: string; collectionId: string; walletId: string; phaseId: string; quantity: number; phases: Array<Phase & { eligibility?: { status: string; reason?: string } }> };
+type TaskEdit = { id: string; collectionId: string; walletId: string; phaseId: string; addPhaseIds: string[]; scheduledPhaseIds: string[]; quantity: number; phases: Array<Phase & { eligibility?: { status: string; reason?: string } }> };
 
 const short = (value: string) => `${value.slice(0, 6)}…${value.slice(-5)}`;
 async function json(response: Response) {
@@ -209,11 +209,13 @@ export default function MintsPage() {
     if (!taskEdit) return;
     setBusy(true); setMessage("");
     try {
-      await json(await fetch(`/api/jobs/${taskEdit.id}`, {
+      const result = await json(await fetch(`/api/jobs/${taskEdit.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletId: taskEdit.walletId, phaseId: taskEdit.phaseId, quantity: taskEdit.quantity }),
-      }));
-      setTaskEdit(null); await load();
+        body: JSON.stringify({ walletId: taskEdit.walletId, phaseId: taskEdit.phaseId, addPhaseIds: taskEdit.addPhaseIds, quantity: taskEdit.quantity }),
+      })) as { added?: Array<{ phaseId: string }> };
+      setTaskEdit(null);
+      setMessage(result.added?.length ? `Task updated and ${result.added.length} additional phase task${result.added.length>1?"s":""} added.` : "Scheduled task updated.");
+      await load();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not update mint task"); }
     finally { setBusy(false); }
   };
@@ -223,6 +225,7 @@ export default function MintsPage() {
     try {
       const data = await json(await fetch(`/api/jobs/${job.id}`, { cache: "no-store" })) as {
         job: { id: string; collectionId: string; walletId: string; phaseId?: string | null; quantity: number };
+        scheduledPhaseIds?: string[];
         phases: TaskEdit["phases"];
       };
       setTaskEdit({
@@ -230,6 +233,8 @@ export default function MintsPage() {
         collectionId: data.job.collectionId,
         walletId: data.job.walletId,
         phaseId: data.job.phaseId || data.phases.find((phase) => phase.eligibility?.status === "eligible")?.id || "",
+        addPhaseIds: [],
+        scheduledPhaseIds: data.scheduledPhaseIds || [],
         quantity: data.job.quantity,
         phases: data.phases,
       });
@@ -294,7 +299,7 @@ export default function MintsPage() {
         return <tr key={job.id}><td className={job.status === "failed" ? "failed" : job.status === "completed" ? "ok" : ""}>{job.status === "failed" ? "✕" : job.status === "completed" ? "✓" : "…"}</td><td className="mono">{tab === "minted" ? short(wallet?.address || job.walletId) : attempt?.txHash ? short(attempt.txHash) : "No broadcast"}</td><td>{job.phaseId?.toUpperCase() || "AUTO"} · {job.quantity}</td><td><div>{job.error || attempt?.error || `${status}${gas ? ` · ${gas}` : ""}`}</div>{job.status === "pending" && job.attempts.length === 0 && <div className="toolbar" style={{marginTop:8}}><button className="secondary-btn" style={{padding:"5px 8px"}} onClick={()=>void openTaskEditor(job)}>Edit</button><button className="secondary-btn" style={{padding:"5px 8px",color:"var(--danger)"}} onClick={()=>{setMessage("");setDeleteTaskId(job.id);setAdminPassword("")}}>Delete</button></div>}</td></tr>;
       })}</tbody></table>}</div>}</div>;
     })}</section>}
-    {taskEdit && <div className="modal-backdrop" onMouseDown={()=>setTaskEdit(null)}><form className="panel modal" onSubmit={saveTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Edit scheduled mint</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>Change wallet, exact phase, and quantity. Eligibility and launch timing are rechecked before saving.</p></div><button type="button" onClick={()=>setTaskEdit(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Wallet</label><select required value={taskEdit.walletId} onChange={(event)=>setTaskEdit({...taskEdit,walletId:event.target.value})}>{wallets.filter((wallet)=>wallet.active&&wallet.chainId===collections.find((item)=>item.id===taskEdit.collectionId)?.chainId).map((wallet)=><option key={wallet.id} value={wallet.id}>{wallet.label} · {short(wallet.address)}</option>)}</select></div><div className="field"><label>Phase</label><select required value={taskEdit.phaseId} onChange={(event)=>setTaskEdit({...taskEdit,phaseId:event.target.value})}>{taskEdit.phases.filter((phase)=>["live","upcoming"].includes(phase.status)).map((phase)=><option key={phase.id} value={phase.id}>{phase.name} · {phase.status}{phase.eligibility?.status?` · ${phase.eligibility.status} for current wallet`:""}</option>)}</select><small className="muted">If you change wallets, MintBot checks that wallet against this exact phase when you save.</small></div><div className="field"><label>Quantity</label><input type="number" min="1" max={taskEdit.phases.find((phase)=>phase.id===taskEdit.phaseId)?.maxPerWallet||collections.find((item)=>item.id===taskEdit.collectionId)?.maxPerWallet||100} value={taskEdit.quantity} onChange={(event)=>setTaskEdit({...taskEdit,quantity:Math.max(1,Number(event.target.value)||1)})}/></div><button className="primary-btn" disabled={busy||!taskEdit.phaseId}>{busy?"Saving…":"Save task"}</button></div></form></div>}
+    {taskEdit && <div className="modal-backdrop" onMouseDown={()=>setTaskEdit(null)}><form className="panel modal" onSubmit={saveTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Edit scheduled mint</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>Update this task and optionally add separate tasks for more eligible phases.</p></div><button type="button" onClick={()=>setTaskEdit(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Wallet</label><select required value={taskEdit.walletId} onChange={(event)=>setTaskEdit({...taskEdit,walletId:event.target.value})}>{wallets.filter((wallet)=>wallet.active&&wallet.chainId===collections.find((item)=>item.id===taskEdit.collectionId)?.chainId).map((wallet)=><option key={wallet.id} value={wallet.id}>{wallet.label} · {short(wallet.address)}</option>)}</select></div><div className="field"><label>Current task phase</label><select required value={taskEdit.phaseId} onChange={(event)=>setTaskEdit({...taskEdit,phaseId:event.target.value,addPhaseIds:taskEdit.addPhaseIds.filter((id)=>id!==event.target.value)})}>{taskEdit.phases.filter((phase)=>["live","upcoming"].includes(phase.status)).map((phase)=><option key={phase.id} value={phase.id}>{phase.name} · {phase.status}{phase.eligibility?.status?` · ${phase.eligibility.status} for current wallet`:""}</option>)}</select></div><div className="field"><label>Add phase task(s)</label><div className="wallet-picker">{taskEdit.phases.filter((phase)=>["live","upcoming"].includes(phase.status)&&phase.id!==taskEdit.phaseId).map((phase)=>{const alreadyScheduled=taskEdit.scheduledPhaseIds.includes(phase.id);const eligible=phase.eligibility?.status==="eligible";return <label className="wallet-option" key={phase.id}><input type="checkbox" disabled={alreadyScheduled||!eligible} checked={taskEdit.addPhaseIds.includes(phase.id)} onChange={()=>setTaskEdit({...taskEdit,addPhaseIds:taskEdit.addPhaseIds.includes(phase.id)?taskEdit.addPhaseIds.filter((id)=>id!==phase.id):[...taskEdit.addPhaseIds,phase.id]})}/><span>{phase.name}</span><small>{alreadyScheduled?"Already scheduled":eligible?`${phase.status} · ${formatPrice(phase.priceWei||null)}`:`${phase.eligibility?.status||"unknown"} · ${phase.eligibility?.reason||"Not available"}`}</small></label>})}</div><small className="muted">Each checked phase becomes its own phase-bound task; the existing task is kept.</small></div><div className="field"><label>Quantity per task</label><input type="number" min="1" max={Math.min(...[taskEdit.phaseId,...taskEdit.addPhaseIds].map((id)=>taskEdit.phases.find((phase)=>phase.id===id)?.maxPerWallet||100))} value={taskEdit.quantity} onChange={(event)=>setTaskEdit({...taskEdit,quantity:Math.max(1,Number(event.target.value)||1)})}/></div><button className="primary-btn" disabled={busy||!taskEdit.phaseId}>{busy?"Saving…":taskEdit.addPhaseIds.length?`Save + add ${taskEdit.addPhaseIds.length} phase${taskEdit.addPhaseIds.length>1?"s":""}`:"Save task"}</button></div></form></div>}
     {deleteTaskId && <div className="modal-backdrop" onMouseDown={()=>setDeleteTaskId(null)}><form className="panel modal" onSubmit={deleteTask} onMouseDown={(event)=>event.stopPropagation()}><div className="modal-head"><div><h2>Delete scheduled task</h2><p className="muted" style={{fontSize:12,margin:"5px 0 0"}}>This permanently removes a pending, unsigned task.</p></div><button type="button" onClick={()=>setDeleteTaskId(null)}>×</button></div>{message&&<div className="alert" style={{color:"var(--danger)",marginBottom:14}}>{message}</div>}<div className="form-grid"><div className="field"><label>Admin password</label><input type="password" required autoFocus autoComplete="current-password" placeholder="App login password" value={adminPassword} onChange={(event)=>setAdminPassword(event.target.value)}/></div><button className="primary-btn" style={{background:"var(--danger)"}} disabled={busy||!adminPassword}>{busy?"Deleting…":"Confirm deletion"}</button></div></form></div>}
   </>;
 }

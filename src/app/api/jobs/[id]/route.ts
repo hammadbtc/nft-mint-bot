@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/lib/db";
-import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
+import { inspectWalletPhases } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { requireAdminPassword } from "@/lib/admin-auth";
 import { safeErrorMessage } from "@/lib/safety";
@@ -10,6 +11,7 @@ import { mintTaskMutationError } from "@/lib/task-management";
 import { getMintAdapter } from "@/lib/adapters";
 import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
+import { selectEligibleExecutionPhase, selectRequestedExecutionPhase } from "@/lib/mint-policy";
 
 type Context = { params: Promise<{ id: string }> };
 const noStore = { "Cache-Control": "no-store" };
@@ -17,6 +19,7 @@ const noStore = { "Cache-Control": "no-store" };
 const editSchema = z.object({
   walletId: z.string().uuid().optional(),
   phaseId: z.string().min(1).max(100).optional(),
+  addPhaseIds: z.array(z.string().min(1).max(100)).max(20).optional(),
   quantity: z.coerce.number().int().min(1).max(100).optional(),
 }).refine((value) => Object.keys(value).length > 0, "No valid task fields to update");
 
@@ -35,8 +38,13 @@ export async function GET(_req: NextRequest, { params }: Context) {
     const phases = (await adapter.resolve(collection, "name")).phases;
     const signer = adapter.requiresSignerForEligibility ? await getSigner(wallet.id, getProvider(collection.chainId)) : undefined;
     const plan = await inspectWalletPhases(collection, wallet.address, job.quantity, phases, { signer });
+    const siblings = job.batchId ? await db.select({ phaseId: schema.mintJobs.phaseId }).from(schema.mintJobs).where(and(
+      eq(schema.mintJobs.batchId, job.batchId),
+      eq(schema.mintJobs.walletId, job.walletId),
+    )) : [{ phaseId: job.phaseId }];
     return NextResponse.json({
       job: { id: job.id, collectionId: job.collectionId, walletId: job.walletId, phaseId: job.phaseId, quantity: job.quantity },
+      scheduledPhaseIds: siblings.map((item) => item.phaseId).filter(Boolean),
       phases: plan.phases.map((phase) => ({ ...phase, eligibility: plan.eligibility.find((item) => item.phaseId === phase.id) })),
     }, { headers: noStore });
   } catch (error) {
@@ -69,13 +77,21 @@ export async function PATCH(req: NextRequest, { params }: Context) {
     const adapter = getMintAdapter(collection.adapterKey);
     if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
     const signer = adapter.requiresSignerForEligibility ? await getSigner(wallet.id, getProvider(collection.chainId)) : undefined;
+    const phases = (await adapter.resolve(collection, "name")).phases;
+    const inspected = await inspectWalletPhases(collection, wallet.address, quantity, phases, { signer });
     const phase = phaseId
-      ? (await resolveWalletSelectedPhase(collection, wallet.address, quantity, phaseId, undefined, { signer })).selectedPhase
-      : (await resolveWalletPhasePlan(collection, wallet.address, quantity, undefined, { signer })).selectedPhase;
-    if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) throw new Error("Quantity exceeds the reviewed transaction limit");
+      ? selectRequestedExecutionPhase(inspected.phases, inspected.eligibility, phaseId)
+      : selectEligibleExecutionPhase(inspected.phases, inspected.eligibility);
+    const addedPhaseIds = [...new Set(input.addPhaseIds || [])].filter((id) => id !== phase.id);
+    const addedPhases = addedPhaseIds.map((id) => selectRequestedExecutionPhase(inspected.phases, inspected.eligibility, id));
+    for (const selectedPhase of [phase, ...addedPhases]) {
+      if (quantity > (selectedPhase.maxPerWallet || collection.maxPerWallet || 100)) {
+        throw new Error(`Quantity exceeds the ${selectedPhase.name} limit`);
+      }
+    }
 
     const scheduledAt = phase.status === "upcoming" ? phase.startsAt || null : null;
-    const updated = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       for (const lockWalletId of [...new Set([job.walletId, walletId])].sort()) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${lockWalletId}`}))`);
       }
@@ -85,6 +101,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         .where(eq(schema.mintAttempts.jobId, id)).limit(1);
       const mutationError = mintTaskMutationError(fresh.status, Boolean(attempt));
       if (mutationError) throw new Error(mutationError);
+      const batchId = fresh.batchId || fresh.id;
       if (fresh.batchId) {
         const [duplicate] = await tx.select({ id: schema.mintJobs.id }).from(schema.mintJobs).where(and(
           eq(schema.mintJobs.batchId, fresh.batchId),
@@ -94,7 +111,8 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         )).limit(1);
         if (duplicate) throw new Error("This batch already has a task for that wallet and phase");
       }
-      return tx.update(schema.mintJobs).set({
+      const updated = await tx.update(schema.mintJobs).set({
+        batchId,
         walletId,
         quantity,
         scheduledAt,
@@ -106,9 +124,32 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       })
         .where(and(eq(schema.mintJobs.id, id), eq(schema.mintJobs.status, "pending")))
         .returning();
+      if (!updated.length) throw new Error("Task could not be updated before processing began");
+
+      const siblings = addedPhases.length ? await tx.select({ phaseId: schema.mintJobs.phaseId }).from(schema.mintJobs).where(and(
+        eq(schema.mintJobs.batchId, batchId),
+        eq(schema.mintJobs.walletId, walletId),
+      )) : [];
+      const existingPhaseIds = new Set(siblings.map((item) => item.phaseId));
+      const additions = addedPhases.filter((item) => !existingPhaseIds.has(item.id));
+      const inserted = additions.length ? await tx.insert(schema.mintJobs).values(additions.map((addedPhase) => ({
+        id: randomUUID(),
+        batchId,
+        walletId,
+        collectionId: fresh.collectionId,
+        quantity,
+        useFlashbots: fresh.useFlashbots,
+        dryRun: fresh.dryRun,
+        scheduledAt: addedPhase.status === "upcoming" ? addedPhase.startsAt || null : null,
+        phaseId: addedPhase.id,
+        phaseStartsAt: addedPhase.startsAt || null,
+        phaseEndsAt: addedPhase.endsAt || null,
+        status: "pending",
+        idempotencyKey: `edit-add:${fresh.id}:${walletId}:${addedPhase.id}`,
+      }))).returning({ id: schema.mintJobs.id, phaseId: schema.mintJobs.phaseId }) : [];
+      return { updated: updated[0], added: inserted };
     });
-    if (!updated.length) throw new Error("Task could not be updated before processing began");
-    return NextResponse.json(updated[0], { headers: noStore });
+    return NextResponse.json(result, { headers: noStore });
   } catch (error) {
     const message = error instanceof z.ZodError ? error.issues[0]?.message : safeErrorMessage(error, "Could not update mint task");
     return NextResponse.json({ error: message }, { status: 400, headers: noStore });
