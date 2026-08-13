@@ -34,11 +34,11 @@ const readInterface = new ethers.Interface([
   "function hasMinted(address) view returns (bool)",
 ]);
 
-function fakeProvider({ whitelistEnabled = false, hasMinted = false } = {}): ethers.Provider {
+function fakeProvider({ whitelistEnabled = false, hasMinted = false, merkleRoot = expectedRoot } = {}): ethers.Provider {
   const answers = new Map<string, string>([
     [readInterface.getFunction("MAX_SUPPLY")!.selector, readInterface.encodeFunctionResult("MAX_SUPPLY", [4200n])],
     [readInterface.getFunction("RESERVE_SUPPLY")!.selector, readInterface.encodeFunctionResult("RESERVE_SUPPLY", [420n])],
-    [readInterface.getFunction("merkleRoot")!.selector, readInterface.encodeFunctionResult("merkleRoot", [expectedRoot])],
+    [readInterface.getFunction("merkleRoot")!.selector, readInterface.encodeFunctionResult("merkleRoot", [merkleRoot])],
     [readInterface.getFunction("whitelistEnabled")!.selector, readInterface.encodeFunctionResult("whitelistEnabled", [whitelistEnabled])],
     [readInterface.getFunction("mintClosed")!.selector, readInterface.encodeFunctionResult("mintClosed", [false])],
     [readInterface.getFunction("totalMinted")!.selector, readInterface.encodeFunctionResult("totalMinted", [10n])],
@@ -77,4 +77,15 @@ test("Bulls Runners refuses open mint before the owner switch, repeat wallets, a
   await assert.rejects(() => bullsRunnersV1.buildTransaction!(collection, signer, 1, fakeProvider({ whitelistEnabled: true }), { phaseId: "open" }), /not been enabled/);
   await assert.rejects(() => bullsRunnersV1.buildTransaction!(collection, signer, 1, fakeProvider({ hasMinted: true }), { phaseId: "open" }), /already minted/);
   await assert.rejects(() => bullsRunnersV1.buildTransaction!(collection, signer, 2, fakeProvider(), { phaseId: "open" }), /exactly one/);
+});
+
+test("Bulls Runners public mint does not depend on the ignored whitelist root", async () => {
+  const signer = "0x1111111111111111111111111111111111111111";
+  const replacementRoot = `0x${"ab".repeat(32)}`;
+  const request = await bullsRunnersV1.buildTransaction!(collection, signer, 1, fakeProvider({ merkleRoot: replacementRoot }), { phaseId: "open" });
+  assert.equal(request.data, encodeBullsRunnersMint([]));
+  await assert.rejects(
+    () => bullsRunnersV1.buildTransaction!(collection, signer, 1, fakeProvider({ whitelistEnabled: true, merkleRoot: replacementRoot }), { phaseId: "whitelist" }),
+    /root changed/,
+  );
 });

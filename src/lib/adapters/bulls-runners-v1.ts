@@ -13,7 +13,6 @@ const READ_ABI = [
 ];
 const MINT_ABI = ["function mint(bytes32[] proof)"];
 const MAX_WHITELIST_BYTES = 10_000_000;
-const WHITELIST_CACHE_MS = 60_000;
 const STATE_CACHE_MS = 400;
 
 type BullsRunnersConfig = {
@@ -30,7 +29,7 @@ type WhitelistPayload = {
   proofs: Record<string, string[]>;
 };
 
-let whitelistCache: { expiresAt: number; payload: WhitelistPayload } | null = null;
+let whitelistCache: WhitelistPayload | null = null;
 let whitelistRequest: Promise<WhitelistPayload> | null = null;
 const stateCache = new WeakMap<object, Map<string, { expiresAt: number; promise: Promise<BaseState> }>>();
 
@@ -68,7 +67,9 @@ async function readBaseState(collection: SupportedCollection, provider: ethers.P
   ]);
   if (maxSupply !== BigInt(config.expectedMaxSupply)) throw new Error("Bulls Runners on-chain maximum supply changed from 4,200");
   if (reserveSupply !== BigInt(config.expectedReserveSupply)) throw new Error("Bulls Runners on-chain reserve changed from 420");
-  if (merkleRoot.toLowerCase() !== config.expectedMerkleRoot.toLowerCase()) throw new Error("Bulls Runners on-chain whitelist root changed from the reviewed value");
+  // The proof root is security-critical only while the contract verifies it.
+  // Once public is enabled, mint([]) ignores the root by verified source.
+  if (whitelistEnabled && merkleRoot.toLowerCase() !== config.expectedMerkleRoot.toLowerCase()) throw new Error("Bulls Runners on-chain whitelist root changed from the reviewed value");
   if (totalMinted > maxSupply) throw new Error("Bulls Runners on-chain mint accounting is inconsistent");
   return { config, whitelistEnabled, mintClosed, totalMinted, maxSupply };
 }
@@ -100,7 +101,9 @@ function isBytes32(value: unknown): value is string {
 }
 
 async function fetchWhitelist(config: BullsRunnersConfig): Promise<WhitelistPayload> {
-  if (whitelistCache && whitelistCache.expiresAt > Date.now()) return whitelistCache.payload;
+  // A payload that verifies to the reviewed root cannot become stale without
+  // an on-chain root change, which readState fails closed during whitelist.
+  if (whitelistCache) return whitelistCache;
   if (whitelistRequest) return whitelistRequest;
   whitelistRequest = (async () => {
     const response = await fetch(config.whitelistUrl, { cache: "no-store", signal: AbortSignal.timeout(12_000) });
@@ -120,7 +123,7 @@ async function fetchWhitelist(config: BullsRunnersConfig): Promise<WhitelistPayl
       throw new Error("Bulls Runners whitelist payload does not match the reviewed list");
     }
     const payload = candidate as WhitelistPayload;
-    whitelistCache = { expiresAt: Date.now() + WHITELIST_CACHE_MS, payload };
+    whitelistCache = payload;
     return payload;
   })();
   try { return await whitelistRequest; }
