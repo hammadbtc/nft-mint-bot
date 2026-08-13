@@ -56,6 +56,73 @@ function fingerprintValue(preview: Omit<DispersePreview, "fingerprint" | "genera
   return stableHash(preview);
 }
 
+function previewCore(preview: DispersePreview): Omit<DispersePreview, "fingerprint" | "generatedAt" | "expiresAt"> {
+  return {
+    version: preview.version,
+    type: preview.type,
+    mainWalletId: preview.mainWalletId,
+    workerWalletIds: preview.workerWalletIds,
+    chainId: preview.chainId,
+    transfers: preview.transfers,
+    estimatedGasWei: preview.estimatedGasWei,
+    totalRequiredWei: preview.totalRequiredWei,
+  };
+}
+
+function transferKey(transfer: Pick<DisperseTransferPlan, "fromWalletId" | "toWalletId">): string {
+  return `${transfer.fromWalletId}:${transfer.toWalletId}`;
+}
+
+/**
+ * Revalidate a client-returned preview without requiring volatile RPC fee
+ * quotes to be byte-identical. The exact reviewed transaction ceilings stay
+ * locked; current state may only move in a direction that remains covered.
+ */
+export function validateDisperseRefresh(
+  input: DisperseInput,
+  expected: DispersePreview,
+  current: DispersePreview,
+  mainBalanceWei?: bigint,
+): void {
+  const expectedCore = previewCore(expected);
+  if (fingerprintValue(expectedCore) !== expected.fingerprint) throw new Error("Disperse preview was modified; review it again");
+  const ids = [...new Set(input.workerWalletIds)].sort();
+  if (
+    expected.version !== 2 || expected.type !== input.type || expected.mainWalletId !== input.mainWalletId ||
+    expected.chainId !== current.chainId || expected.workerWalletIds.join(":") !== ids.join(":")
+  ) throw new Error("Selected Disperse wallets or direction changed; review again");
+
+  const gasTotal = expected.transfers.reduce((sum, transfer) => sum + BigInt(transfer.gasLimit) * BigInt(transfer.maxFeePerGas), 0n);
+  const valueTotal = expected.transfers.reduce((sum, transfer) => sum + BigInt(transfer.amountWei), 0n);
+  if (expected.estimatedGasWei !== gasTotal.toString()) throw new Error("Reviewed Disperse gas total is inconsistent");
+  const required = input.type === "fund" ? valueTotal + gasTotal : valueTotal;
+  if (expected.totalRequiredWei !== required.toString()) throw new Error("Reviewed Disperse total is inconsistent");
+  if (input.type === "fund" && expected.transfers.length !== ids.length) {
+    throw new Error("Reviewed funding plan does not include every selected worker");
+  }
+
+  const currentByTransfer = new Map(current.transfers.map((transfer) => [transferKey(transfer), transfer]));
+  for (const transfer of expected.transfers) {
+    const fresh = currentByTransfer.get(transferKey(transfer));
+    if (!fresh) throw new Error("A reviewed Disperse wallet no longer has a runnable transfer");
+    if (BigInt(fresh.gasLimit) > BigInt(transfer.gasLimit)) throw new Error("Gas requirement exceeded the reviewed limit; preview again");
+    // previewDisperse stores a 125% ceiling. Recover a conservative current
+    // base quote and ensure it remains within the operator-reviewed ceiling.
+    const currentBaseFeeCeiling = (BigInt(fresh.maxFeePerGas) * 100n + 124n) / 125n;
+    if (currentBaseFeeCeiling > BigInt(transfer.maxFeePerGas)) throw new Error("Network fee exceeded the reviewed cap; preview again");
+    if (input.type === "fund") {
+      if (fresh.amountWei !== transfer.amountWei) throw new Error("Fund amount changed after review");
+    } else {
+      const freshAvailable = BigInt(fresh.amountWei) + BigInt(fresh.gasLimit) * BigInt(fresh.maxFeePerGas);
+      const reviewedMaximum = BigInt(transfer.amountWei) + BigInt(transfer.gasLimit) * BigInt(transfer.maxFeePerGas);
+      if (freshAvailable < reviewedMaximum) throw new Error("A worker balance fell below its reviewed sweep plus gas reserve; preview again");
+    }
+  }
+  if (input.type === "fund" && (mainBalanceWei == null || mainBalanceWei < required)) {
+    throw new Error("Main wallet balance fell below the reviewed funding total; preview again");
+  }
+}
+
 export async function previewDisperse(input: DisperseInput): Promise<DispersePreview> {
   const { main, workers, ids } = await walletSet(input);
   const provider = getProvider(main.chainId);
@@ -132,7 +199,9 @@ export async function queueDisperse(input: DisperseInput, expected: DispersePrev
   if (!idempotencyKey || idempotencyKey.length > 200) throw new Error("A valid Idempotency-Key header is required");
   if (expected.version !== 2 || Date.now() > Date.parse(expected.expiresAt)) throw new Error("Disperse preview expired; review current balances and fees again");
   const current = await previewDisperse(input);
-  if (current.fingerprint !== expected.fingerprint) throw new Error("Balances, fees, or selected wallets changed; review the updated preview");
+  const { main } = await walletSet(input);
+  const mainBalance = input.type === "fund" ? await getProvider(main.chainId).getBalance(main.address) : undefined;
+  validateDisperseRefresh(input, expected, current, mainBalance);
   const requestHash = stableHash({ ...input, workerWalletIds: [...new Set(input.workerWalletIds)].sort() });
   const operationId = randomUUID();
 
@@ -152,10 +221,10 @@ export async function queueDisperse(input: DisperseInput, expected: DispersePrev
       status: "pending",
       idempotencyKey,
       requestHash,
-      previewJson: stableJson(current),
+      previewJson: stableJson(expected),
       amountPerWallet: input.amountPerWallet ? ethers.parseEther(input.amountPerWallet).toString() : null,
     });
-    await tx.insert(schema.disperseTransfers).values(current.transfers.map((transfer) => ({
+    await tx.insert(schema.disperseTransfers).values(expected.transfers.map((transfer) => ({
       id: randomUUID(),
       operationId,
       fromWalletId: transfer.fromWalletId,
