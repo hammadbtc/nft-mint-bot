@@ -31,11 +31,14 @@ export type ResolvedMint = {
 
 export interface MintAdapter {
   key: string;
+  supportsArming?: boolean;
   resolve(collection: SupportedCollection, source: ResolvedMint["source"]): Promise<ResolvedMint>;
   buildTransaction?: (
     collection: SupportedCollection,
     signerAddress: string,
     quantity: number,
     provider: ethers.Provider,
+    options?: { allowBeforeStart?: boolean },
   ) => Promise<ethers.TransactionRequest>;
+  recommendedGasLimit?: bigint;
 }

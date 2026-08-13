@@ -48,13 +48,24 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 ## Reliability rules
 
 - Validate wallet/project/chain compatibility and quantities before creating jobs.
-- Simulate and estimate the exact transaction with the signing wallet as `from` before broadcast.
+- Simulate and estimate the exact transaction with the signing wallet as `from` for live/immediate execution. For a contract-timed FCFS launch that reverts before opening, use only an adapter explicitly reviewed for arming: verify authoritative state, build and durably sign early, then compare the exact transaction intent and wallet nonce during final pre-launch revalidation.
 - Use an idempotency key to prevent duplicate task creation.
 - Claim scheduled jobs atomically and recover stale claims after process restarts.
 - Persist the exact signed raw transaction and precomputed hash before broadcast; reconcile or rebroadcast those exact bytes after ambiguity/restart.
 - Reserve nonces under a PostgreSQL advisory lock shared by Mint and Disperse.
 - Report confirmed success only from a successful receipt.
 - External races, sell-outs, project pauses and provider outages mean a 100% hit rate cannot be guaranteed.
+
+## Armed FCFS launch engine
+
+- The scheduler discovers launch work every 250 ms, but polling is not on the launch hot path.
+- Reviewed arming-capable adapters prepare and durably store the exact signed payload 60 seconds before the contract start by default.
+- Five seconds before opening, MintBot rereads authoritative phase/configuration/eligibility state, compares the intended `chainId`, `to`, `data`, and `value`, verifies the signer and exact pending nonce, rechecks balance/spend limits, and warms every write route.
+- An in-process precise timer submits at the contract timestamp. The network requests are fired before any launch-time database write.
+- Robinhood sends the identical signed bytes concurrently to the official sequencer, Alchemy/custom RPCs, and the public fallback. Redundant routes cannot create duplicate mints because the nonce, raw payload, and transaction hash are identical.
+- Receipt reconciliation runs outside the submission path. Restarts restore armed timers from PostgreSQL; ambiguous submissions only rebroadcast the same persisted bytes.
+- Timer drift and per-route acknowledgement latency are persisted without endpoint URLs or API credentials and shown in mint analytics.
+- `MINT_ARM_LEAD_MS` and `MINT_REVALIDATE_LEAD_MS` are bounded environment overrides; defaults are 60,000 and 5,000 ms.
 
 ## Current frontend state
 
@@ -95,7 +106,7 @@ Implemented platform support now includes `opensea-seadrop-v1` for reviewed publ
 - Full ESLint pass with zero errors or warnings.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
-- Twenty unit tests pass, covering randomized encrypted-secret round trips, missing-passphrase failure, exact URL-path and reviewed-seed rejection, reviewed adapter parsing, phase/recovery policy, main/worker mint-wallet eligibility, two-key live gates, sender-aware simulation, ambiguous-broadcast reconciliation, proxy auth/CSRF behavior, error redaction, stable idempotency hashing and exact SeaDrop calldata shape.
+- Twenty-eight unit tests pass, additionally covering precise non-early launch timing, direct-sequencer route order/uniqueness, exact raw-byte submission/hash verification, canonical signed-payload hashing, and supported-project search.
 - Cash Rabbits was rechecked read-only after opening at Robinhood block 34,830,568: restricted fee recipient allowed, supply 3,499/10,000, exact one-mint `eth_call` passed and gas estimated at 112,573. Nothing was signed or broadcast.
 - Mainnet broadcasting is enabled by Hammad's explicit instruction. No live mint or Disperse transaction has yet been broadcast, so a deliberately tiny real transaction remains the final end-to-end proof.
 

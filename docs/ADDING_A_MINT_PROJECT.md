@@ -142,8 +142,10 @@ Adapters live in `src/lib/adapters/` and implement `MintAdapter` from `types.ts`
 ```ts
 export interface MintAdapter {
   key: string;
+  supportsArming?: boolean;
   resolve(collection, source): Promise<ResolvedMint>;
-  buildTransaction?(collection, signerAddress, quantity, provider): Promise<TransactionRequest>;
+  buildTransaction?(collection, signerAddress, quantity, provider, options?): Promise<TransactionRequest>;
+  recommendedGasLimit?: bigint;
 }
 ```
 
@@ -162,6 +164,14 @@ export interface MintAdapter {
 - Construct the exact reviewed `to`, `data`, `value`, and `chainId`.
 - Fail closed on API/schema/version/signature changes.
 - Never send, sign, allocate a nonce, or mutate external state itself. The engine owns simulation, durable signing, broadcasting, retries, receipts, and nonce locks.
+
+### Qualifying an adapter for armed FCFS execution
+
+Set `supportsArming: true` only when the adapter can safely construct the exact future transaction before the phase is open. When `options.allowBeforeStart` is true, the adapter may bypass only the expected start-time rejection; it must still reread and validate router/drop addresses, fee recipients, pause/end state, price, cap, supply, and wallet eligibility.
+
+An arming-capable adapter also needs a conservative `recommendedGasLimit` because pre-open `eth_estimateGas` commonly reverts. The engine uses it only when exact estimation fails, applies its fee ceiling, and records the signed transaction before launch. Final revalidation rebuilds and compares `chainId`, `to`, `data`, and `value`, then checks the signer, nonce, funds, and spend policy. A change fails closed rather than silently signing a different mint.
+
+Do not enable arming for generic timestamp-only configuration, short-lived server signatures obtained too early, unknown dynamic pricing, or a protocol whose payload cannot be deterministically rebuilt. Such adapters remain on the normal safe execution path until a protocol-specific arming design exists.
 
 Register a new adapter explicitly in `src/lib/adapters/index.ts`. A database `adapterKey` that is not in this registry must remain unusable.
 

@@ -7,14 +7,13 @@ import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { recoveredJobStatus, selectExecutionPhase } from "@/lib/mint-policy";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
 import { getProvider } from "@/lib/chains";
+import { broadcastSameHash, warmBroadcastRoutes } from "@/lib/chains/broadcast";
 import { sendPrivateTransaction, hasFlashbotsProtect } from "@/lib/chains/flashbots";
 import { sendAlert } from "@/lib/alerting";
 import { getSigner } from "@/lib/vault";
 import {
-  broadcastPreparedTransaction,
   exactSimulationRequest,
   prepareSignedTransaction,
-  waitForReceipt,
 } from "@/lib/transactions";
 import {
   isPermanentMintError,
@@ -43,13 +42,14 @@ type JobRow = typeof schema.mintJobs.$inferSelect;
 type AttemptRow = typeof schema.mintAttempts.$inferSelect;
 
 type ExecutionResult = {
-  status: "confirmed" | "failed" | "confirming" | "simulation_passed";
+  status: "confirmed" | "failed" | "confirming" | "simulation_passed" | "armed";
   txHash?: string;
   error?: string;
   dryRun?: boolean;
   gasUsed?: string;
   effectiveGasPrice?: string;
   blockNumber?: number;
+  launchTargetAt?: string;
 };
 
 async function resolvePhase(collection: SupportedCollection): Promise<MintPhase> {
@@ -81,16 +81,21 @@ async function applyGas(
   provider: ethers.Provider,
   from: string,
   overrides?: Pick<JobRow, "gasLimit" | "maxFeePerGas" | "maxPriorityFeePerGas">,
+  fallbackGasLimit?: bigint,
 ): Promise<ethers.TransactionRequest> {
   const exact = exactSimulationRequest(request, from);
-  const [estimated, fees] = await Promise.all([
-    provider.estimateGas(exact),
+  const [estimatedResult, fees] = await Promise.all([
+    provider.estimateGas(exact)
+      .then((value): { ok: true; value: bigint } => ({ ok: true, value }))
+      .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error })),
     provider.getFeeData(),
   ]);
+  const estimated = estimatedResult.ok ? estimatedResult.value : fallbackGasLimit;
+  if (!estimated) throw estimatedResult.ok ? new Error("Gas estimation failed") : estimatedResult.error;
   const gasLimit = overrides?.gasLimit ? BigInt(overrides.gasLimit) : (estimated * 120n) / 100n;
   const result: ethers.TransactionRequest = { ...request, gasLimit };
   if (overrides?.maxFeePerGas) result.maxFeePerGas = BigInt(overrides.maxFeePerGas);
-  else if (fees.maxFeePerGas != null) result.maxFeePerGas = fees.maxFeePerGas;
+  else if (fees.maxFeePerGas != null) result.maxFeePerGas = fees.maxFeePerGas * 3n;
   if (overrides?.maxPriorityFeePerGas) result.maxPriorityFeePerGas = BigInt(overrides.maxPriorityFeePerGas);
   else if (fees.maxPriorityFeePerGas != null) result.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
   if (result.maxFeePerGas == null && fees.gasPrice != null) result.gasPrice = fees.gasPrice;
@@ -157,6 +162,59 @@ async function latestRecoverableAttempt(jobId: string, kind: "approval" | "mint"
     : undefined;
 }
 
+function transactionIntentHash(request: ethers.TransactionRequest): string {
+  return stableHash({
+    chainId: Number(request.chainId),
+    to: String(request.to || "").toLowerCase(),
+    data: String(request.data || "0x").toLowerCase(),
+    value: BigInt(request.value ?? 0).toString(),
+  });
+}
+
+async function prepareDurableAttempt(args: {
+  job: JobRow;
+  kind: "approval" | "mint";
+  request: ethers.TransactionRequest;
+  signer: ethers.Signer;
+  provider: ethers.Provider;
+}): Promise<AttemptRow> {
+  const { job, kind, request, signer, provider } = args;
+  const existing = await latestRecoverableAttempt(job.id, kind);
+  if (existing) return existing;
+  const attemptId = randomUUID();
+  const intentHash = transactionIntentHash(request);
+  const prepared = await prepareSignedTransaction(
+    job.walletId,
+    Number(request.chainId),
+    signer,
+    provider,
+    request,
+    async (signed, tx) => {
+      await tx.insert(schema.mintAttempts).values({
+        id: attemptId,
+        jobId: job.id,
+        kind,
+        status: "prepared",
+        nonce: signed.nonce,
+        txHash: signed.txHash,
+        rawTx: signed.rawTx,
+        toAddress: String(signed.request.to || ""),
+        value: BigInt(signed.request.value ?? 0).toString(),
+        dataHash: stableHash(String(signed.request.data || "0x")),
+        preflightHash: intentHash,
+        gasLimit: signed.request.gasLimit?.toString() || null,
+        maxFeePerGas: signed.request.maxFeePerGas?.toString() || signed.request.gasPrice?.toString() || null,
+        maxPriorityFeePerGas: signed.request.maxPriorityFeePerGas?.toString() || null,
+        preparedAt: new Date().toISOString(),
+      });
+    },
+  );
+  const [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.id, attemptId)).limit(1);
+  if (!attempt) throw new Error("Prepared transaction was not durably recorded");
+  if (attempt.txHash?.toLowerCase() !== prepared.txHash.toLowerCase()) throw new Error("Prepared transaction hash mismatch");
+  return attempt;
+}
+
 async function sendDurableAttempt(args: {
   job: JobRow;
   kind: "approval" | "mint";
@@ -165,52 +223,31 @@ async function sendDurableAttempt(args: {
   provider: ethers.Provider;
 }): Promise<ExecutionResult> {
   const { job, kind, request, signer, provider } = args;
-  let attempt = await latestRecoverableAttempt(job.id, kind);
-
-  if (!attempt) {
-    const attemptId = randomUUID();
-    const prepared = await prepareSignedTransaction(
-      job.walletId,
-      Number(request.chainId),
-      signer,
-      provider,
-      request,
-      async (signed, tx) => {
-        await tx.insert(schema.mintAttempts).values({
-          id: attemptId,
-          jobId: job.id,
-          kind,
-          status: "prepared",
-          nonce: signed.nonce,
-          txHash: signed.txHash,
-          rawTx: signed.rawTx,
-          toAddress: String(signed.request.to || ""),
-          value: BigInt(signed.request.value ?? 0).toString(),
-          dataHash: stableHash(String(signed.request.data || "0x")),
-          gasLimit: signed.request.gasLimit?.toString() || null,
-          maxFeePerGas: signed.request.maxFeePerGas?.toString() || signed.request.gasPrice?.toString() || null,
-          maxPriorityFeePerGas: signed.request.maxPriorityFeePerGas?.toString() || null,
-          preparedAt: new Date().toISOString(),
-        });
-      },
-    );
-    [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.id, attemptId)).limit(1);
-    if (!attempt) throw new Error("Prepared transaction was not durably recorded");
-    if (attempt.txHash?.toLowerCase() !== prepared.txHash.toLowerCase()) throw new Error("Prepared transaction hash mismatch");
-  }
+  const attempt = await prepareDurableAttempt({ job, kind, request, signer, provider });
 
   const receiptBeforeBroadcast = await provider.getTransactionReceipt(attempt.txHash!).catch(() => null);
   if (receiptBeforeBroadcast) return finalizeAttempt(attempt.id, receiptBeforeBroadcast);
 
   requireLiveTransactions();
+  let ambiguousBroadcast = false;
   try {
     if (job.useFlashbots && hasFlashbotsProtect(Number(request.chainId))) {
       const response = await sendPrivateTransaction(Number(request.chainId), attempt.rawTx!);
       if (response.hash.toLowerCase() !== attempt.txHash!.toLowerCase()) throw new Error("Private relay returned an unexpected hash");
     } else {
-      await broadcastPreparedTransaction(provider, attempt.rawTx!, attempt.txHash!);
+      const outcome = await broadcastSameHash({
+        attemptId: attempt.id,
+        chainId: Number(request.chainId),
+        rawTx: attempt.rawTx!,
+        expectedHash: attempt.txHash!,
+      });
+      const ambiguous = outcome.results.some((result) => result.status === "timeout" || result.status === "error");
+      ambiguousBroadcast = !outcome.accepted && ambiguous;
+      if (!outcome.accepted && !ambiguous) {
+        throw new Error(outcome.results.map((result) => result.error).filter(Boolean).join("; ") || "Every broadcast route rejected the transaction");
+      }
     }
-    await db.update(schema.mintAttempts).set({ status: "submitted", broadcastAt: new Date().toISOString(), error: null })
+    await db.update(schema.mintAttempts).set({ status: "submitted", broadcastAt: new Date().toISOString(), error: ambiguousBroadcast ? "Broadcast acknowledgement was ambiguous; reconciling by hash" : null })
       .where(eq(schema.mintAttempts.id, attempt.id));
   } catch (error) {
     const existing = await provider.getTransaction(attempt.txHash!).catch(() => null);
@@ -221,13 +258,7 @@ async function sendDurableAttempt(args: {
     }).where(eq(schema.mintAttempts.id, attempt.id));
     if (!existing) throw error;
   }
-
-  const receipt = await waitForReceipt(provider, attempt.txHash!);
-  if (!receipt) {
-    await db.update(schema.mintAttempts).set({ status: "confirming" }).where(eq(schema.mintAttempts.id, attempt.id));
-    return { status: "confirming", txHash: attempt.txHash! };
-  }
-  return finalizeAttempt(attempt.id, receipt);
+  return { status: "confirming", txHash: attempt.txHash! };
 }
 
 async function finalizeAttempt(attemptId: string, receipt: ethers.TransactionReceipt): Promise<ExecutionResult> {
@@ -281,10 +312,127 @@ async function ensureErc20Approval(
   return null;
 }
 
+async function armMint(
+  job: JobRow,
+  collection: SupportedCollection,
+  phase: MintPhase,
+): Promise<ExecutionResult> {
+  if (!phase.startsAt) throw new Error("Upcoming mint has no reviewed contract start time");
+  const adapter = getMintAdapter(collection.adapterKey);
+  if (!adapter?.buildTransaction || !adapter.supportsArming) {
+    throw new MintNotOpenError(phase.startsAt);
+  }
+  const provider = getProvider(collection.chainId);
+  const signer = await getSigner(job.walletId, provider);
+  const address = await signer.getAddress();
+  let request = await adapter.buildTransaction(collection, address, job.quantity, provider, { allowBeforeStart: true });
+  request = await applyGas(request, provider, address, job, adapter.recommendedGasLimit);
+  const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
+  if (approvalResult) return approvalResult;
+  await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
+  const attempt = await prepareDurableAttempt({ job, kind: "mint", request, signer, provider });
+  if (!attempt.rawTx || !attempt.txHash) throw new Error("Armed transaction payload is unavailable");
+  const now = new Date().toISOString();
+  await db.update(schema.mintJobs).set({
+    status: "armed",
+    armedAt: now,
+    launchTargetAt: phase.startsAt,
+    preflightCheckedAt: now,
+    phaseStartsAt: phase.startsAt,
+    phaseEndsAt: phase.endsAt || null,
+    claimToken: null,
+    claimedAt: null,
+    leaseExpiresAt: null,
+    updatedAt: now,
+    error: null,
+  }).where(eq(schema.mintJobs.id, job.id));
+  await warmBroadcastRoutes(collection.chainId);
+  return { status: "armed", txHash: attempt.txHash, launchTargetAt: phase.startsAt };
+}
+
+export async function revalidateArmedJob(jobId: string): Promise<void> {
+  const { job, collection } = await loadExecutionState(jobId);
+  if (job.status !== "armed" || !job.launchTargetAt) return;
+  const adapter = getMintAdapter(collection.adapterKey);
+  if (!adapter?.buildTransaction || !adapter.supportsArming) throw new Error("Armed adapter is unavailable");
+  const phase = await resolvePhase(collection);
+  if (phase.status === "ended") throw new Error("The reviewed mint phase ended before launch");
+  if (phase.startsAt !== job.launchTargetAt) throw new Error("The on-chain launch time changed after arming");
+  const provider = getProvider(collection.chainId);
+  const signer = await getSigner(job.walletId, provider);
+  const address = await signer.getAddress();
+  const request = await adapter.buildTransaction(collection, address, job.quantity, provider, { allowBeforeStart: true });
+  const attempt = await latestRecoverableAttempt(job.id, "mint");
+  if (!attempt?.rawTx || !attempt.txHash || attempt.nonce == null) throw new Error("Armed transaction is missing");
+  if (attempt.preflightHash !== transactionIntentHash(request)) throw new Error("Reviewed mint transaction changed after arming");
+  const parsed = ethers.Transaction.from(attempt.rawTx);
+  if (parsed.hash?.toLowerCase() !== attempt.txHash.toLowerCase()) throw new Error("Armed transaction hash no longer matches its payload");
+  if (parsed.from?.toLowerCase() !== address.toLowerCase()) throw new Error("Armed transaction signer mismatch");
+  const pendingNonce = await provider.getTransactionCount(address, "pending");
+  if (pendingNonce !== attempt.nonce) throw new Error("Wallet nonce changed after arming; refusing a late or blocked launch");
+  await assertBalanceAndSpendLimit(job.walletId, address, parsed, provider, { jobId: job.id, kind: "mint" });
+  await warmBroadcastRoutes(collection.chainId);
+  await db.update(schema.mintJobs).set({ preflightCheckedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: null })
+    .where(and(eq(schema.mintJobs.id, job.id), eq(schema.mintJobs.status, "armed")));
+}
+
+export async function failArmedJob(jobId: string, error: unknown): Promise<void> {
+  const now = new Date().toISOString();
+  await db.update(schema.mintJobs).set({
+    status: "failed",
+    error: safeErrorMessage(error, "Final launch revalidation failed"),
+    completedAt: now,
+    updatedAt: now,
+  }).where(and(eq(schema.mintJobs.id, jobId), eq(schema.mintJobs.status, "armed")));
+}
+
+export async function launchArmedJob(jobId: string, firedAt = Date.now()): Promise<ExecutionResult | undefined> {
+  let { job, collection } = await loadExecutionState(jobId);
+  if (job.status !== "armed" || !job.launchTargetAt) return;
+  const checkedAt = job.preflightCheckedAt ? Date.parse(job.preflightCheckedAt) : 0;
+  if (!checkedAt || firedAt - checkedAt > 15_000) {
+    await revalidateArmedJob(jobId);
+    ({ job, collection } = await loadExecutionState(jobId));
+  }
+  const attempt = await latestRecoverableAttempt(job.id, "mint");
+  if (!attempt?.rawTx || !attempt.txHash) throw new Error("Armed transaction is missing at launch");
+  requireLiveTransactions();
+
+  // Network requests are fired before any launch-time database write. The raw
+  // transaction and hash were already committed durably during arming.
+  const outcome = await broadcastSameHash({
+    attemptId: attempt.id,
+    chainId: collection.chainId,
+    rawTx: attempt.rawTx,
+    expectedHash: attempt.txHash,
+  });
+  const ambiguous = outcome.results.some((result) => result.status === "timeout" || result.status === "error");
+  if (!outcome.accepted && !ambiguous) {
+    throw new Error(outcome.results.map((result) => result.error).filter(Boolean).join("; ") || "Every broadcast route rejected the transaction");
+  }
+  const now = new Date().toISOString();
+  await db.transaction(async (tx) => {
+    await tx.update(schema.mintAttempts).set({ status: "submitted", broadcastAt: now, error: outcome.accepted ? null : "Broadcast acknowledgement was ambiguous; reconciling by hash" })
+      .where(eq(schema.mintAttempts.id, attempt.id));
+    await tx.update(schema.mintJobs).set({
+      status: "confirming",
+      timerFiredAt: new Date(firedAt).toISOString(),
+      timingDriftMs: Math.max(0, firedAt - Date.parse(job.launchTargetAt!)),
+      leaseExpiresAt: leaseExpiry(),
+      updatedAt: now,
+      error: outcome.accepted ? null : "Broadcast acknowledgement was ambiguous; reconciling by hash",
+    }).where(and(eq(schema.mintJobs.id, job.id), eq(schema.mintJobs.status, "armed")));
+  });
+  return { status: "confirming", txHash: attempt.txHash };
+}
+
 export async function executeMint(jobId: string): Promise<ExecutionResult> {
   const { job, collection } = await loadExecutionState(jobId);
   const phase = await resolvePhase(collection);
-  if (phase.status === "upcoming" && phase.startsAt) throw new MintNotOpenError(phase.startsAt);
+  if (phase.status === "upcoming" && phase.startsAt) {
+    if (job.dryRun) throw new MintNotOpenError(phase.startsAt);
+    return armMint(job, collection, phase);
+  }
   if (phase.status !== "live") throw new Error("The reviewed mint phase is not live");
   if (phase.endsAt && Date.now() >= Date.parse(phase.endsAt)) throw new Error("The reviewed mint phase has ended");
   if (phase.maxPerWallet && job.quantity > phase.maxPerWallet) throw new Error("Quantity exceeds the current on-chain wallet limit");
@@ -296,7 +444,7 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   if (!adapter?.buildTransaction) throw new Error("Mint adapter cannot build a reviewed transaction");
 
   let request = await adapter.buildTransaction(collection, address, job.quantity, provider);
-  request = await applyGas(request, provider, address, job);
+  request = await applyGas(request, provider, address, job, adapter.recommendedGasLimit);
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
   await simulateExact(request, provider, address);
@@ -331,6 +479,7 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
     try {
       const result = await executeMint(jobId);
       const now = new Date().toISOString();
+      if (result.status === "armed") return result;
       if (result.status === "confirming") {
         await db.update(schema.mintJobs).set({ status: "confirming", updatedAt: now, error: null })
           .where(eq(schema.mintJobs.id, jobId));
@@ -455,6 +604,18 @@ export async function batchMint(
       if (existing.length !== values.length) throw new Error("Idempotency key conflicts with a different wallet batch");
       return { batchId: existing[0]?.batchId || batchId, scheduledAt: scheduledAt || null, phaseId: phase.id, results: existing.map((row) => ({ ...row, status: "duplicate" })) };
     }
+    for (const walletId of [...uniqueWalletIds].sort()) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${walletId}`}))`);
+    }
+    const activeForWallets = await tx.select({ walletId: schema.mintJobs.walletId })
+      .from(schema.mintJobs)
+      .where(and(
+        inArray(schema.mintJobs.walletId, uniqueWalletIds),
+        inArray(schema.mintJobs.status, ["pending", "running", "armed", "confirming"]),
+      )).limit(1);
+    if (activeForWallets.length) {
+      throw new Error("A selected wallet already has an active mint task; wait for it to finish before reserving another nonce");
+    }
     const inserted = await tx.insert(schema.mintJobs).values(values)
       .returning({ id: schema.mintJobs.id, walletId: schema.mintJobs.walletId, batchId: schema.mintJobs.batchId });
     return { batchId, scheduledAt: scheduledAt || null, phaseId: phase.id, results: inserted.map((row) => ({ ...row, status: scheduledAt ? "scheduled" : "queued" })) };
@@ -467,7 +628,8 @@ export async function recoverMintJob(jobId: string): Promise<void> {
   const [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.jobId, jobId))
     .orderBy(desc(schema.mintAttempts.createdAt)).limit(1);
   if (attempt?.txHash) {
-    const provider = getProvider((await loadExecutionState(jobId)).collection.chainId);
+    const execution = await loadExecutionState(jobId);
+    const provider = getProvider(execution.collection.chainId);
     const receipt = await provider.getTransactionReceipt(attempt.txHash).catch(() => null);
     if (receipt) {
       const result = await finalizeAttempt(attempt.id, receipt);
@@ -493,11 +655,30 @@ export async function recoverMintJob(jobId: string): Promise<void> {
       }).where(eq(schema.mintJobs.id, jobId));
       return;
     }
-    if (attempt.rawTx && liveTransactionsEnabled()) {
-      await runMintJob(jobId);
+    const observed = await provider.getTransaction(attempt.txHash).catch(() => null);
+    const broadcastAge = attempt.broadcastAt ? Date.now() - Date.parse(attempt.broadcastAt) : Number.POSITIVE_INFINITY;
+    if (observed || (["submitted", "confirming"].includes(attempt.status) && broadcastAge < 10_000)) {
+      await db.update(schema.mintJobs).set({ status: "confirming", leaseExpiresAt: leaseExpiry(), updatedAt: new Date().toISOString() })
+        .where(eq(schema.mintJobs.id, jobId));
       return;
     }
-    await db.update(schema.mintJobs).set({ status: "confirming", updatedAt: new Date().toISOString() })
+    if (attempt.rawTx && liveTransactionsEnabled()) {
+      const outcome = await broadcastSameHash({
+        attemptId: attempt.id,
+        chainId: execution.collection.chainId,
+        rawTx: attempt.rawTx,
+        expectedHash: attempt.txHash,
+      });
+      await db.update(schema.mintAttempts).set({
+        status: "confirming",
+        broadcastAt: new Date().toISOString(),
+        error: outcome.accepted ? null : "Rebroadcast acknowledgement remains ambiguous",
+      }).where(eq(schema.mintAttempts.id, attempt.id));
+      await db.update(schema.mintJobs).set({ status: "confirming", leaseExpiresAt: leaseExpiry(), updatedAt: new Date().toISOString() })
+        .where(eq(schema.mintJobs.id, jobId));
+      return;
+    }
+    await db.update(schema.mintJobs).set({ status: "confirming", leaseExpiresAt: leaseExpiry(), updatedAt: new Date().toISOString() })
       .where(eq(schema.mintJobs.id, jobId));
     return;
   }

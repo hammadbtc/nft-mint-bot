@@ -8,6 +8,12 @@ export interface ChainConfig {
   explorerUrl?: string;
 }
 
+export interface BroadcastRoute {
+  key: string;
+  label: string;
+  url: string;
+}
+
 /**
  * Build RPC URL list for a chain. Alchemy URLs are only included when
  * ALCHEMY_API_KEY is set; otherwise they are dropped and public fallbacks
@@ -188,6 +194,23 @@ export function getChain(chainId: number): ChainConfig {
   const chain = CHAINS[chainId];
   if (!chain) throw new Error(`Unknown chain ID: ${chainId}`);
   return chain;
+}
+
+/**
+ * Independent write routes for latency-sensitive submission. Robinhood's
+ * official sequencer is deliberately first, followed by every configured RPC.
+ * Callers must send identical signed bytes to every route.
+ */
+export function getBroadcastRoutes(chainId: number): BroadcastRoute[] {
+  const chain = getChain(chainId);
+  const candidates = chainId === 4663
+    ? [process.env.ROBINHOOD_SEQUENCER_URL || "https://sequencer.mainnet.chain.robinhood.com", ...chain.rpcUrls]
+    : chain.rpcUrls;
+  return [...new Set(candidates)].map((url, index) => ({
+    key: chainId === 4663 && index === 0 ? "sequencer" : `rpc-${index + (chainId === 4663 ? 0 : 1)}`,
+    label: chainId === 4663 && index === 0 ? "Robinhood sequencer" : `RPC route ${index + (chainId === 4663 ? 0 : 1)}`,
+    url,
+  }));
 }
 
 /**

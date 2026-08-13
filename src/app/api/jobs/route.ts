@@ -12,7 +12,13 @@ export async function GET(req: NextRequest) {
   const attempts = rows.length
     ? await db.select().from(schema.mintAttempts).where(inArray(schema.mintAttempts.jobId, rows.map((row) => row.id))).orderBy(desc(schema.mintAttempts.createdAt))
     : [];
-  const byJob = new Map<string, typeof attempts>();
-  for (const attempt of attempts) byJob.set(attempt.jobId, [...(byJob.get(attempt.jobId) || []), { ...attempt, rawTx: null }]);
+  const broadcasts = attempts.length
+    ? await db.select().from(schema.mintBroadcasts).where(inArray(schema.mintBroadcasts.attemptId, attempts.map((attempt) => attempt.id))).orderBy(desc(schema.mintBroadcasts.startedAt))
+    : [];
+  const broadcastsByAttempt = new Map<string, typeof broadcasts>();
+  for (const broadcast of broadcasts) broadcastsByAttempt.set(broadcast.attemptId, [...(broadcastsByAttempt.get(broadcast.attemptId) || []), broadcast]);
+  type AttemptWithBroadcasts = (typeof attempts)[number] & { rawTx: null; broadcasts: typeof broadcasts };
+  const byJob = new Map<string, AttemptWithBroadcasts[]>();
+  for (const attempt of attempts) byJob.set(attempt.jobId, [...(byJob.get(attempt.jobId) || []), { ...attempt, rawTx: null, broadcasts: broadcastsByAttempt.get(attempt.id) || [] }]);
   return NextResponse.json(rows.map((row) => ({ ...row, attempts: byJob.get(row.id) || [] })), { headers:{"Cache-Control":"no-store"} });
 }

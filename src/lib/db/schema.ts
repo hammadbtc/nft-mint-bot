@@ -106,6 +106,11 @@ export const mintJobs = pgTable("mint_jobs", {
   dryRun: boolean("dry_run").notNull().default(false),
   error: text("error"),
   scheduledAt: text("scheduled_at"),
+  armedAt: text("armed_at"),
+  launchTargetAt: text("launch_target_at"),
+  preflightCheckedAt: text("preflight_checked_at"),
+  timerFiredAt: text("timer_fired_at"),
+  timingDriftMs: integer("timing_drift_ms"),
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
   idempotencyKey: varchar("idempotency_key").unique(),
@@ -147,6 +152,7 @@ export const mintAttempts = pgTable("mint_attempts", {
   blockNumber: integer("block_number"),
   error: text("error"),
   rawTx: text("raw_tx"),
+  preflightHash: text("preflight_hash"),
   preparedAt: text("prepared_at"),
   broadcastAt: text("broadcast_at"),
   confirmedAt: text("confirmed_at"),
@@ -166,6 +172,23 @@ export const settings = pgTable("settings", {
     .notNull()
     .default(sql`now()`),
 });
+
+// Per-route launch telemetry. Endpoint URLs are intentionally never stored:
+// provider URLs commonly contain API credentials.
+export const mintBroadcasts = pgTable("mint_broadcasts", {
+  id: varchar("id").primaryKey(),
+  attemptId: varchar("attempt_id").notNull().references(() => mintAttempts.id),
+  routeKey: varchar("route_key").notNull(),
+  routeLabel: varchar("route_label").notNull(),
+  status: varchar("status").notNull(), // accepted | known | rejected | timeout | error
+  latencyMs: integer("latency_ms"),
+  error: text("error"),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at").notNull(),
+}, (table) => [
+  index("mint_broadcasts_attempt_idx").on(table.attemptId),
+  index("mint_broadcasts_route_idx").on(table.routeKey, table.startedAt),
+]);
 
 // ─── RPC Health ────────────────────────────────────────────────────────
 export const rpcHealth = pgTable("rpc_health", {

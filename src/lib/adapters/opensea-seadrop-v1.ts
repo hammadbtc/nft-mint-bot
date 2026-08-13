@@ -67,6 +67,8 @@ async function publicDrop(collection: SupportedCollection, provider: ethers.Prov
 
 export const openseaSeaDropV1: MintAdapter = {
   key: "opensea-seadrop-v1",
+  supportsArming: true,
+  recommendedGasLimit: 500_000n,
 
   async resolve(collection, source): Promise<ResolvedMint> {
     const provider = getProvider(collection.chainId);
@@ -105,10 +107,10 @@ export const openseaSeaDropV1: MintAdapter = {
     };
   },
 
-  async buildTransaction(collection, signerAddress, quantity, provider) {
+  async buildTransaction(collection, signerAddress, quantity, provider, options) {
     if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Mint quantity must be a positive integer");
     const { config, mintPrice, startTime, endTime, maxPerWallet, chainTimestamp: now } = await publicDrop(collection, provider);
-    if (startTime > 0n && now < startTime) throw new Error("Public mint has not started");
+    if (!options?.allowBeforeStart && startTime > 0n && now < startTime) throw new Error("Public mint has not started");
     if (endTime > 0n && now >= endTime) throw new Error("Public mint has ended");
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
     const [minted, supply, maxSupply] = await nft.getFunction("getMintStats").staticCall(signerAddress);
