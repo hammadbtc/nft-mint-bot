@@ -112,6 +112,21 @@ test("CHIMPS, WEASELS, and Purr Cat public phases are named and bound to supplie
   assert.ok(purrCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0xce905281c45014b37a4597f9964299f1e9b6df06"));
 });
 
+test("XCOPUNKS and Cash Dogs are bound to their reviewed OpenSea public drops", () => {
+  const xcopunks = seeds.find((seed) => seed.slug === "xcopunks");
+  const cashDogs = seeds.find((seed) => seed.slug === "cash-dogs-");
+  assert.equal(xcopunks?.adapterKey, "opensea-seadrop-v1");
+  assert.equal(xcopunks?.contractAddress.toLowerCase(), "0xfcba20492b1cd40607b13c9f61b6b6d416a08cf7");
+  assert.equal(xcopunks?.adapterConfig.publicPhaseName, "Public Mint");
+  assert.ok(xcopunks?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/xcopunks/overview"));
+  assert.ok(xcopunks?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0xfcba20492b1cd40607b13c9f61b6b6d416a08cf7"));
+  assert.equal(cashDogs?.adapterKey, "opensea-seadrop-v1");
+  assert.equal(cashDogs?.contractAddress.toLowerCase(), "0x904a3f7e32d7259d9b520b5c0c158e5c3a60d860");
+  assert.equal(cashDogs?.adapterConfig.publicPhaseName, "Public Mint");
+  assert.ok(cashDogs?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/cash-dogs-/overview"));
+  assert.ok(cashDogs?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x904a3f7e32d7259d9b520b5c0c158e5c3a60d860"));
+});
+
 test("HoodBirds keeps GTD, FCFS, then public as distinct reviewed phases", () => {
   const hoodBirds = seeds.find((seed) => seed.slug === "hoodbirdss");
   assert.equal(hoodBirds?.adapterKey, "opensea-signed-seadrop-v1");

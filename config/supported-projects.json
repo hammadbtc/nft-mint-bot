@@ -165,6 +165,56 @@
     }
   },
   {
+    "id": "446463e1-aedf-4aff-a3f0-53d74f409e79",
+    "name": "XCOPUNKS",
+    "slug": "xcopunks",
+    "contractAddress": "0xfcbA20492B1CD40607b13c9F61b6B6D416a08cf7",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "1000000000000000",
+    "maxPerWallet": 5,
+    "maxSupply": 6000,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/xcopunks/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/xcopunks/image_type_logo/505d38e99df8d0f4f186c65ea2e68a/f1505d38e99df8d0f4f186c65ea2e68a.jpeg",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public Mint",
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/xcopunks/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0xfcba20492b1cd40607b13c9f61b6b6d416a08cf7" }
+      ]
+    }
+  },
+  {
+    "id": "3811b155-9cbd-41d4-a4eb-0dc86a76eb35",
+    "name": "Cash Dogs",
+    "slug": "cash-dogs-",
+    "contractAddress": "0x904A3F7E32D7259d9b520b5C0C158e5c3a60D860",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "100000000000000",
+    "maxPerWallet": 3,
+    "maxSupply": 10000,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/cash-dogs-/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/cash-dogs-511341423/image_type_logo/0d7e0e2c79215d0809aeecbea657bf/a50d7e0e2c79215d0809aeecbea657bf.jpeg",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public Mint",
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/cash-dogs-/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x904a3f7e32d7259d9b520b5c0c158e5c3a60d860" }
+      ]
+    }
+  },
+  {
     "id": "ed083dbf-57ab-4467-802c-8436986f8ee6",
     "name": "Squiggle Wuiggle",
     "slug": "squiggle-wuiggle",
