@@ -195,12 +195,35 @@ async function apiEligibility(
       minter: signerAddress,
       quantity,
     });
-    const provenPhaseId = signedPhaseFromTransaction(collection, config, signerAddress, quantity, transaction);
+    const provenPhaseId = eligibilityPhaseFromTransaction(collection, config, quantity, transaction);
     return mapped.map((item) => item.phaseId === provenPhaseId ? { phaseId: item.phaseId, status: "eligible" as const } : item);
   } catch {
     return mapped;
   }
   });
+}
+
+/** A wallet-bound payload proves stage eligibility. Final execution still goes
+ * through validateOpenSeaSignedTransaction and its complete safety checks. */
+export function eligibilityPhaseFromTransaction(
+  collection: SupportedCollection,
+  config: SignedSeaDropConfig,
+  quantity: number,
+  raw: unknown,
+): string {
+  const response = raw as { to?: string; data?: string };
+  if (!response.to || response.to.toLowerCase() !== config.seaDropAddress.toLowerCase()) throw new Error("OpenSea returned an unexpected mint target");
+  if (!response.data || !ethers.isHexString(response.data)) throw new Error("OpenSea returned invalid signed mint calldata");
+  let decoded: ethers.Result;
+  try { decoded = new ethers.Interface(SIGNED_MINT_ABI).decodeFunctionData("mintSigned", response.data); }
+  catch { throw new Error("OpenSea did not return SeaDrop signed-mint calldata"); }
+  const [nftContract, , , decodedQuantity, params, , signature] = decoded;
+  if (String(nftContract).toLowerCase() !== collection.contractAddress.toLowerCase()) throw new Error("OpenSea signed mint targets a different NFT contract");
+  if (BigInt(decodedQuantity) !== BigInt(quantity)) throw new Error("OpenSea signed mint quantity does not match the check");
+  if (typeof signature !== "string" || !ethers.isHexString(signature) || signature === "0x") throw new Error("OpenSea signed mint signature is missing");
+  const stage = config.stages.find((item) => item.kind === "signed" && BigInt(item.dropStageIndex!) === BigInt(params.dropStageIndex));
+  if (!stage) throw new Error("OpenSea signed mint uses an unreviewed stage");
+  return stage.id;
 }
 
 export function signedPhaseFromTransaction(
