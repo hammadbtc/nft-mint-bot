@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
 import { liveTransactionsEnabled } from "@/lib/safety";
+import { deploymentVersion } from "@/lib/deployment";
 
 export async function GET() {
   try {
@@ -16,6 +17,7 @@ export async function GET() {
         status: scheduler.healthy ? "ok" : "error",
         db: "connected",
         service: "mintbot",
+        version: deploymentVersion(),
         liveTransactionsEnabled: liveTransactionsEnabled(),
         scheduler: {
           running: scheduler.running,
@@ -28,6 +30,6 @@ export async function GET() {
       { status: scheduler.healthy ? 200 : 503, headers: { "Cache-Control": "no-store" } },
     );
   } catch {
-    return NextResponse.json({ status: "error", db: "disconnected" }, { status: 503 });
+    return NextResponse.json({ status: "error", db: "disconnected", service: "mintbot", version: deploymentVersion() }, { status: 503 });
   }
 }

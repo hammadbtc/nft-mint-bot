@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ethers } from "ethers";
 import {
+  applyPayloadEligibility,
+  eligibilityPhaseFromTransaction,
   mapSignedStageEligibility,
   validateOpenSeaSignedTransaction,
   type ReviewedOpenSeaStage,
@@ -38,10 +40,10 @@ const collection = {
   adapterConfig: JSON.stringify(config), verified: true, createdAt: new Date().toISOString(),
 };
 
-function signedResponse(overrides: { nft?: string; quantity?: number; stageIndex?: number; recipient?: string } = {}) {
+function signedResponse(overrides: { nft?: string; quantity?: number; stageIndex?: number; recipient?: string; feeRecipient?: string } = {}) {
   const data = new ethers.Interface(mintAbi).encodeFunctionData("mintSigned", [
     overrides.nft || collectionAddress,
-    feeRecipient,
+    overrides.feeRecipient || feeRecipient,
     overrides.recipient || ethers.ZeroAddress,
     overrides.quantity || 1,
     {
@@ -65,6 +67,24 @@ test("OpenSea signed FCFS payload is decoded and bound to the reviewed wallet tr
   assert.equal(String(request.to).toLowerCase(), seaDropAddress.toLowerCase());
   assert.equal(request.value, 0n);
   assert.equal(request.chainId, 4663);
+});
+
+test("wallet-bound payload proves FCFS eligibility without weakening final transaction validation", () => {
+  const payload = signedResponse({ feeRecipient: "0x2222222222222222222222222222222222222222" });
+  assert.equal(eligibilityPhaseFromTransaction(collection, config, 1, payload), "fcfs");
+  assert.throws(() => validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, 1, payload), /fee recipient/);
+});
+
+test("eligibility payload proof rejects an unreviewed stage, collection, quantity, or missing signature", () => {
+  assert.throws(() => eligibilityPhaseFromTransaction(collection, config, 1, signedResponse({ stageIndex: 99 })), /unreviewed stage/);
+  assert.throws(() => eligibilityPhaseFromTransaction(collection, config, 1, signedResponse({ nft: ethers.ZeroAddress })), /different NFT contract/);
+  assert.throws(() => eligibilityPhaseFromTransaction(collection, config, 1, signedResponse({ quantity: 2 })), /quantity/);
+  const missingSignature = { ...signedResponse(), data: new ethers.Interface(mintAbi).encodeFunctionData("mintSigned", [
+    collectionAddress, feeRecipient, ethers.ZeroAddress, 1,
+    { mintPrice: 0, maxTotalMintableByWallet: 1, startTime: Date.parse(stage.startsAt) / 1000, endTime: Date.parse(stage.endsAt) / 1000, dropStageIndex: 2, maxTokenSupplyForStage: 4500, feeBps: 1000, restrictFeeRecipients: true },
+    123, "0x",
+  ]) };
+  assert.throws(() => eligibilityPhaseFromTransaction(collection, config, 1, missingSignature), /signature is missing/);
 });
 
 test("OpenSea signed FCFS validation rejects another stage, NFT, quantity, or recipient", () => {
@@ -95,6 +115,16 @@ test("an omitted GTD stage is skipped while a returned eligible FCFS stage is se
   }], 1);
   assert.deepEqual(result, [
     { phaseId: "gtd", status: "ineligible", reason: "Wallet is not eligible for GTDs" },
+    { phaseId: "fcfs", status: "eligible" },
+  ]);
+});
+
+test("a wallet payload can prove FCFS even while the eligibility list still reports GTD", () => {
+  assert.deepEqual(applyPayloadEligibility([
+    { phaseId: "gtd", status: "eligible" },
+    { phaseId: "fcfs", status: "ineligible", reason: "Wallet is not eligible for FCFS" },
+  ], "fcfs"), [
+    { phaseId: "gtd", status: "eligible" },
     { phaseId: "fcfs", status: "eligible" },
   ]);
 });

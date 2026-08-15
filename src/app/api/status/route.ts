@@ -4,6 +4,7 @@ import { db, schema } from "@/lib/db";
 import { checkRpcHealth, getChain } from "@/lib/chains";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
+import { deploymentVersion } from "@/lib/deployment";
 
 export async function GET() {
   try {
@@ -48,6 +49,7 @@ export async function GET() {
     const ready = scheduler.healthy && rpc.every((chain) => chain.healthy);
     return NextResponse.json({
       ready,
+      version: deploymentVersion(),
       liveTransactionsEnabled: liveTransactionsEnabled(),
       scheduler,
       rpc,
@@ -55,6 +57,6 @@ export async function GET() {
       broadcastPerformance: Array.from(performanceRows),
     }, { status: ready ? 200 : 503, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    return NextResponse.json({ ready: false, error: safeErrorMessage(error, "Status check failed") }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ready: false, version: deploymentVersion(), error: safeErrorMessage(error, "Status check failed") }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }

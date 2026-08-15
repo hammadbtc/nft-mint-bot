@@ -38,11 +38,18 @@ export async function POST(req: NextRequest) {
           : undefined;
         const plan = await inspectWalletPhases(collection, wallet.address, input.quantity, phases, { signer });
         const displayedPhases = plan.phases.map((phase) => ({ ...phase, eligibility: plan.eligibility.find((item) => item.phaseId === phase.id) }));
+        const unavailable = plan.eligibility.find((item) => ["unknown", "unsupported"].includes(item.status));
         try {
           const selectedPhase = selectEligibleExecutionPhase(plan.phases, plan.eligibility);
           return { walletId: wallet.id, eligible: true, selectedPhaseId: selectedPhase.id, selectedPhaseName: selectedPhase.name, scheduledAt: selectedPhase.status === "upcoming" ? selectedPhase.startsAt || null : null, phases: displayedPhases };
         } catch (error) {
-          return { walletId: wallet.id, eligible: false, reason: safeErrorMessage(error, "No runnable phase"), phases: displayedPhases };
+          return {
+            walletId: wallet.id,
+            eligible: false,
+            verificationUnavailable: Boolean(unavailable),
+            reason: unavailable?.reason || safeErrorMessage(error, "No runnable phase"),
+            phases: displayedPhases,
+          };
         }
       } catch (error) {
         return {

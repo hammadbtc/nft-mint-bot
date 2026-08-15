@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
 import { openSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
+import { safeErrorMessage, stableHash } from "@/lib/safety";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
 
 const SIGNED_MINT_ABI = [
@@ -184,23 +185,47 @@ async function apiEligibility(
   if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
 
   const mapped = mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
-  if (mapped.some((item) => item.status === "eligible")) return mapped;
 
-  // The eligibility-list endpoint can omit an upcoming FCFS stage even when
-  // OpenSea will issue a wallet-bound mint payload for it. The mint builder is
-  // the execution authority, so validate that exact unsigned transaction and
-  // use its pinned stage only when every reviewed field matches.
+  // Never stop after the first eligible signed stage. OpenSea can keep an
+  // earlier GTD record while omitting an eligible FCFS record. Its wallet-bound
+  // mint payload is the authoritative proof for the stage it actually offers.
   try {
     const transaction = await (await openSeaApi()).buildDropMintTransaction(config.openSeaSlug, {
       minter: signerAddress,
       quantity,
     });
     const provenPhaseId = eligibilityPhaseFromTransaction(collection, config, quantity, transaction);
-    return mapped.map((item) => item.phaseId === provenPhaseId ? { phaseId: item.phaseId, status: "eligible" as const } : item);
-  } catch {
-    return mapped;
+    console.info("OpenSea eligibility verified", {
+      collection: config.openSeaSlug,
+      walletRef: stableHash(signerAddress).slice(0, 12),
+      quantity,
+      payloadPhaseId: provenPhaseId,
+      listed: mapped.map((item) => `${item.phaseId}:${item.status}`),
+    });
+    return applyPayloadEligibility(mapped, provenPhaseId);
+  } catch (error) {
+    const detail = safeErrorMessage(error, "OpenSea did not issue a verifiable signed mint payload");
+    console.warn("OpenSea payload eligibility verification failed", {
+      collection: config.openSeaSlug,
+      walletRef: stableHash(signerAddress).slice(0, 12),
+      quantity,
+      listed: mapped.map((item) => `${item.phaseId}:${item.status}`),
+      reason: detail,
+    });
+    // Preserve positive API results. An omitted/negative list result is not a
+    // trustworthy negative when payload verification itself failed; expose it
+    // as unknown instead of silently claiming the wallet is ineligible.
+    return mapped.map((item) => item.status === "ineligible" ? {
+      phaseId: item.phaseId,
+      status: "unknown" as const,
+      reason: `${item.reason}; signed-payload verification failed: ${detail}`,
+    } : item);
   }
   });
+}
+
+export function applyPayloadEligibility(mapped: MintPhaseEligibility[], provenPhaseId: string): MintPhaseEligibility[] {
+  return mapped.map((item) => item.phaseId === provenPhaseId ? { phaseId: item.phaseId, status: "eligible" as const } : item);
 }
 
 /** A wallet-bound payload proves stage eligibility. Final execution still goes
