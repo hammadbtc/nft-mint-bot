@@ -35,7 +35,12 @@ export async function POST(req: NextRequest) {
     const adapter = getMintAdapter(collection.adapterKey);
     if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
     const phases = (await adapter.resolve(collection, "name")).phases;
-    const results = await Promise.all(wallets.map(async (wallet) => {
+    // Preserve the caller's order (the UI puts main wallets first). PostgreSQL
+    // does not guarantee IN(...) result order, and cold OpenSea enrollment is
+    // intentionally paced.
+    const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet]));
+    const orderedWallets = walletIds.map((id) => walletById.get(id)!);
+    const results = await Promise.all(orderedWallets.map(async (wallet) => {
       const walletError = !wallet.active ? "Wallet is inactive" : wallet.chainId !== collection.chainId ? "Wallet is on a different chain" : undefined;
       if (walletError) return { walletId: wallet.id, eligible: false, reason: walletError, phases: [] };
       try {

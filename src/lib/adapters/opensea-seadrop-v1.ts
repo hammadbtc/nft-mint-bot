@@ -41,17 +41,12 @@ function statusFor(startTime: bigint, endTime: bigint, now: bigint): MintPhase["
 
 export function publicEligibilityForStats(
   minted: bigint,
-  supply: bigint,
-  maxSupply: bigint,
   maxPerWallet: number,
   quantity: number,
 ) {
   if (!maxPerWallet) return { phaseId: "public", status: "unknown" as const, reason: "Public wallet limit is unavailable" };
   if (minted + BigInt(quantity) > BigInt(maxPerWallet)) {
     return { phaseId: "public", status: "ineligible" as const, reason: `Wallet has insufficient room under the ${maxPerWallet} public mint limit` };
-  }
-  if (supply + BigInt(quantity) > maxSupply) {
-    return { phaseId: "public", status: "ineligible" as const, reason: `Public mint is sold out (${supply.toString()}/${maxSupply.toString()})` };
   }
   return { phaseId: "public", status: "eligible" as const };
 }
@@ -92,7 +87,12 @@ export const openseaSeaDropV1: MintAdapter = {
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
     const [minted, supply, maxSupply] = await nft.getFunction("getMintStats").staticCall(signerAddress);
     const maxPerWallet = phases.find((phase) => phase.id === "public")?.maxPerWallet || 0;
-    return [publicEligibilityForStats(BigInt(minted), BigInt(supply), BigInt(maxSupply), maxPerWallet, quantity)];
+    // Supply is global phase availability, not wallet eligibility. Keep it out
+    // of the dashboard eligibility count; buildTransaction rechecks it before
+    // signing so a sold-out mint can never be executed.
+    void supply;
+    void maxSupply;
+    return [publicEligibilityForStats(BigInt(minted), maxPerWallet, quantity)];
   },
 
   async resolve(collection, source): Promise<ResolvedMint> {

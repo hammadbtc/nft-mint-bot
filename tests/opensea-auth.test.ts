@@ -3,9 +3,24 @@ import test from "node:test";
 import {
   isOpenSeaScopedTokenLimitError,
   isOpenSeaRateLimitError,
+  isOpenSeaWalletAuthError,
+  isUsableStoredWalletCredential,
   openSeaRetryAfterMs,
   selectStaleOpenSeaSdkToken,
 } from "../src/lib/opensea-auth";
+
+test("encrypted OpenSea wallet credentials are accepted only with eligibility scope and safe lifetime", () => {
+  const now = Date.parse("2026-08-15T20:00:00Z");
+  assert.equal(isUsableStoredWalletCredential({ refreshToken: "x".repeat(32), expiresAt: now + 3_600_000, scopes: ["read:eligibility"] }, now), true);
+  assert.equal(isUsableStoredWalletCredential({ refreshToken: "x".repeat(32), expiresAt: now + 60_000, scopes: ["read:eligibility"] }, now), false);
+  assert.equal(isUsableStoredWalletCredential({ refreshToken: "x".repeat(32), expiresAt: now + 3_600_000, scopes: ["write:orders"] }, now), false);
+});
+
+test("only credential failures invalidate a persisted OpenSea wallet token", () => {
+  assert.equal(isOpenSeaWalletAuthError(new Error("OpenSea scoped token exchange failed (401): Unauthorized")), true);
+  assert.equal(isOpenSeaWalletAuthError(new Error("OpenSea eligibility failed (403): wallet is not eligible")), false);
+  assert.equal(isOpenSeaWalletAuthError(new Error("Server Error (429): Too Many Requests")), false);
+});
 
 test("OpenSea rate limits are recognized without treating eligibility failures as throttling", () => {
   assert.equal(isOpenSeaRateLimitError(new Error("Server Error (429): Too Many Requests")), true);

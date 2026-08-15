@@ -17,16 +17,18 @@ test("SeaDrop public mint calldata matches the reviewed OpenSea transaction shap
 });
 
 test("upcoming public stages are schedulable when wallet room and supply remain", () => {
-  assert.deepEqual(publicEligibilityForStats(0n, 500n, 888n, 1, 1), {
+  assert.deepEqual(publicEligibilityForStats(0n, 1, 1), {
     phaseId: "public",
     status: "eligible",
   });
 });
 
-test("sold-out public stages explain supply instead of looking timing-ineligible", () => {
-  assert.deepEqual(publicEligibilityForStats(0n, 888n, 888n, 1, 1), {
-    phaseId: "public",
-    status: "ineligible",
-    reason: "Public mint is sold out (888/888)",
+test("global sell-out does not falsely change a public-eligible wallet to ineligible", () => {
+  assert.deepEqual(publicEligibilityForStats(0n, 1, 1), { phaseId: "public", status: "eligible" });
+});
+
+test("a wallet which used its public allowance remains ineligible", () => {
+  assert.deepEqual(publicEligibilityForStats(1n, 1, 1), {
+    phaseId: "public", status: "ineligible", reason: "Wallet has insufficient room under the 1 public mint limit",
   });
 });

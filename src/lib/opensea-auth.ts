@@ -22,14 +22,29 @@ type ScopedTokenSummary = {
   expiresAt?: string;
 };
 
-type AuthEntry = { auth: OpenSeaAuth; ready: Promise<void> };
+type StoredWalletCredential = {
+  refreshToken: string;
+  expiresAt: number;
+  scopes: string[];
+};
+
+type WalletAuthState = StoredWalletCredential & {
+  accessToken?: string;
+  accessTokenExpiresAt?: number;
+};
+
+type AuthEntry = { ready: Promise<WalletAuthState> };
 const authByAddress = new Map<string, AuthEntry>();
-// OpenSea's SIWE nonce endpoint currently permits only a very small burst.
-// Two concurrent wallet sessions stay within the observed production window;
-// further wallets wait here instead of creating a 429 thundering herd.
-const AUTH_CONCURRENCY = 2;
+// A fresh SIWE enrollment is needed only once per wallet. OpenSea currently
+// returns retry-after ~= 11 seconds for nonce bursts, so cold enrollments are
+// paced instead of repeatedly colliding with that limit.
+const AUTH_CONCURRENCY = 1;
+const AUTH_START_INTERVAL_MS = 12_000;
+const WALLET_CREDENTIAL_TTL_MS = 23 * 60 * 60 * 1_000;
+const ACCESS_TOKEN_REFRESH_BUFFER_MS = 60_000;
 let activeAuthentications = 0;
 const authenticationWaiters: Array<() => void> = [];
+let lastAuthenticationStartedAt = 0;
 let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
 let cachedInstantKey: { value: string; expiresAt: number } | undefined;
 let rejectedConfiguredKey: string | undefined;
@@ -40,6 +55,40 @@ export function configuredOpenSeaApiKey(): string | undefined {
 }
 
 type StoredInstantKey = { value: string; expiresAt: number };
+
+function walletCredentialKey(address: string): string {
+  return `opensea_wallet_eligibility_v1:${address.toLowerCase()}`;
+}
+
+export function isUsableStoredWalletCredential(value: unknown, now = Date.now()): value is StoredWalletCredential {
+  if (!value || typeof value !== "object") return false;
+  const credential = value as Partial<StoredWalletCredential>;
+  return typeof credential.refreshToken === "string" && credential.refreshToken.length > 20
+    && Number.isFinite(credential.expiresAt) && credential.expiresAt! - now > INSTANT_KEY_REFRESH_BUFFER_MS
+    && Array.isArray(credential.scopes) && credential.scopes.includes("read:eligibility");
+}
+
+async function loadStoredWalletCredential(address: string): Promise<StoredWalletCredential | undefined> {
+  try {
+    const [row] = await db.select().from(schema.appConfig)
+      .where(eq(schema.appConfig.key, walletCredentialKey(address))).limit(1);
+    if (!row) return undefined;
+    const value = JSON.parse(decryptPrivateKey(row.value)) as unknown;
+    return isUsableStoredWalletCredential(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function storeWalletCredential(address: string, value: StoredWalletCredential): Promise<void> {
+  const encrypted = encryptPrivateKey(JSON.stringify(value));
+  await db.insert(schema.appConfig).values({ key: walletCredentialKey(address), value: encrypted })
+    .onConflictDoUpdate({ target: schema.appConfig.key, set: { value: encrypted, updatedAt: new Date().toISOString() } });
+}
+
+async function deleteStoredWalletCredential(address: string): Promise<void> {
+  await db.delete(schema.appConfig).where(eq(schema.appConfig.key, walletCredentialKey(address)));
+}
 
 async function loadStoredInstantKey(): Promise<StoredInstantKey | undefined> {
   try {
@@ -266,11 +315,69 @@ async function withAuthenticationSlot<T>(operation: () => Promise<T>): Promise<T
   }
   activeAuthentications += 1;
   try {
+    const waitMs = Math.max(0, lastAuthenticationStartedAt + AUTH_START_INTERVAL_MS - Date.now());
+    if (waitMs) await wait(waitMs);
+    lastAuthenticationStartedAt = Date.now();
     return await operation();
   } finally {
     activeAuthentications -= 1;
     authenticationWaiters.shift()?.();
   }
+}
+
+async function exchangeWalletCredential(credential: StoredWalletCredential): Promise<WalletAuthState> {
+  const response = await fetch(`${OPENSEA_API_BASE_URL}/api/v2/auth/tokens/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subjectToken: credential.refreshToken, subjectTokenType: "ACCESS_TOKEN" }),
+  });
+  await requireOk(response, "OpenSea scoped token exchange");
+  const value = await response.json() as { accessToken?: unknown; access_token?: unknown; expiresIn?: unknown; expires_in?: unknown };
+  const accessToken = typeof value.accessToken === "string" ? value.accessToken
+    : typeof value.access_token === "string" ? value.access_token : undefined;
+  const expiresIn = Number(value.expiresIn ?? value.expires_in ?? 3600);
+  if (!accessToken || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw new Error("OpenSea returned an invalid scoped token exchange");
+  }
+  return { ...credential, accessToken, accessTokenExpiresAt: Date.now() + expiresIn * 1_000 };
+}
+
+async function enrollWalletCredential(signer: ethers.Signer, address: string): Promise<WalletAuthState> {
+  const auth = new OpenSeaAuth();
+  const token = await withAuthenticationSlot(() => authenticateWithRecovery(auth, signer));
+  const credential: StoredWalletCredential = {
+    refreshToken: token.refreshToken,
+    // OpenSea's SDK creates a one-day scoped token. Expire our copy early so
+    // execution never depends on a credential near its real deadline.
+    expiresAt: Date.now() + WALLET_CREDENTIAL_TTL_MS,
+    scopes: token.scopes,
+  };
+  await storeWalletCredential(address, credential);
+  return {
+    ...credential,
+    accessToken: token.accessToken,
+    accessTokenExpiresAt: token.expiresAt.getTime(),
+  };
+}
+
+async function loadOrEnrollWalletCredential(signer: ethers.Signer, address: string): Promise<WalletAuthState> {
+  const stored = await loadStoredWalletCredential(address);
+  if (stored) {
+    try {
+      return await exchangeWalletCredential(stored);
+    } catch (error) {
+      // A revoked/expired PAT cannot be repaired. Remove only MintBot's
+      // encrypted copy, then perform one clean wallet enrollment.
+      if (!isOpenSeaWalletAuthError(error)) throw error;
+      await deleteStoredWalletCredential(address);
+    }
+  }
+  return enrollWalletCredential(signer, address);
+}
+
+async function validWalletAccessToken(state: WalletAuthState): Promise<WalletAuthState> {
+  if (state.accessToken && (state.accessTokenExpiresAt || 0) - Date.now() > ACCESS_TOKEN_REFRESH_BUFFER_MS) return state;
+  return exchangeWalletCredential(state);
 }
 
 /**
@@ -283,9 +390,8 @@ export async function withOpenSeaApiForSigner<T>(signer: ethers.Signer, operatio
   const address = (await signer.getAddress()).toLowerCase();
   let entry = authByAddress.get(address);
   if (!entry) {
-    const auth = new OpenSeaAuth();
-    const ready = withAuthenticationSlot(() => authenticateWithRecovery(auth, signer)).then(() => undefined);
-    entry = { auth, ready };
+    const ready = loadOrEnrollWalletCredential(signer, address);
+    entry = { ready };
     authByAddress.set(address, entry);
   }
   try {
@@ -297,17 +403,28 @@ export async function withOpenSeaApiForSigner<T>(signer: ethers.Signer, operatio
       if (authByAddress.get(address) === entry) authByAddress.delete(address);
       throw error;
     }
-    const token = await entry.auth.getValidToken();
+    let state = await entry.ready;
+    state = await validWalletAccessToken(state);
+    entry.ready = Promise.resolve(state);
     try {
-      return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
+      return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: state.accessToken }));
     } catch (error) {
       if (!rejectConfiguredOpenSeaApiKey(error)) throw error;
-      return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
+      return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: state.accessToken }));
     }
   } catch (error) {
-    if (!isOpenSeaRateLimitError(error) && authByAddress.get(address) === entry) authByAddress.delete(address);
+    if (isOpenSeaWalletAuthError(error)) {
+      if (authByAddress.get(address) === entry) authByAddress.delete(address);
+      await deleteStoredWalletCredential(address).catch(() => undefined);
+    } else if (!isOpenSeaRateLimitError(error) && authByAddress.get(address) === entry) {
+      authByAddress.delete(address);
+    }
     throw error;
   }
+}
+
+export function isOpenSeaWalletAuthError(error: unknown): boolean {
+  return error instanceof Error && /(?:failed|error)\s*\(401\)|\b401\b.*unauthorized|invalid.*(?:scoped |access )?token|token.*(?:expired|revoked)/i.test(error.message);
 }
 
 export async function openSeaApi(): Promise<OpenSeaAPI> {

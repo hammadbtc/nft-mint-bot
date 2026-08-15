@@ -145,22 +145,31 @@ export default function MintsPage() {
     const timer = setTimeout(() => {
       if (!walletIds.length) { setPhasePlans({}); return; }
       setCheckingEligibility(true);
-      void fetch("/api/mints/eligibility", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ collectionId: project.id, walletIds, quantity: qty }),
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(210_000)]),
-      }).then(json).then((data) => {
-        const value = data as { wallets?: WalletPhasePlan[] };
-        setPhasePlans(Object.fromEntries((value.wallets || []).map((item) => [item.walletId, item])));
-        const validSelectedPhases = new Set([...selectedPhasesRef.current].filter((phaseId) => value.wallets?.some((item) => item.phases.find((phase) => phase.id === phaseId)?.eligibility?.status === "eligible")));
+      void (async () => {
+        const accumulated: Record<string, WalletPhasePlan> = {};
+        // Return useful results progressively. Four cold wallets take about
+        // one OpenSea rate-limit window; warm encrypted credentials are fast.
+        for (let offset = 0; offset < walletIds.length; offset += 4) {
+          const batch = walletIds.slice(offset, offset + 4);
+          const response = await fetch("/api/mints/eligibility", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ collectionId: project.id, walletIds: batch, quantity: qty }),
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(210_000)]),
+          });
+          const value = await json(response) as { wallets?: WalletPhasePlan[] };
+          for (const item of value.wallets || []) accumulated[item.walletId] = item;
+          setPhasePlans({ ...accumulated });
+        }
+        const plans = Object.values(accumulated);
+        const validSelectedPhases = new Set([...selectedPhasesRef.current].filter((phaseId) => plans.some((item) => item.phases.find((phase) => phase.id === phaseId)?.eligibility?.status === "eligible")));
         selectedPhasesRef.current = validSelectedPhases;
         setSelectedPhases(validSelectedPhases);
         setSelected((current) => new Set([...current].filter((id) => {
-          const plan = value.wallets?.find((item) => item.walletId === id);
+          const plan = accumulated[id];
           return validSelectedPhases.size > 0 && [...validSelectedPhases].every((phaseId) => plan?.phases.find((phase) => phase.id === phaseId)?.eligibility?.status === "eligible");
         })));
-      }).catch((error) => {
+      })().catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setMessage(error instanceof DOMException && error.name === "TimeoutError"
           ? "OpenSea eligibility timed out. Refresh to retry; no wallet was marked ineligible."
