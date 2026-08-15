@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
-import { withOpenSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
+import { isOpenSeaRateLimitError, withOpenSeaApi } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import { safeErrorMessage, stableHash } from "@/lib/safety";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
@@ -96,6 +96,37 @@ type TimedPromise<T> = { expiresAt: number; value: Promise<T> };
 const dropCache = new Map<string, TimedPromise<unknown>>();
 const eligibilityCache = new Map<string, TimedPromise<MintPhaseEligibility[]>>();
 
+const PAYLOAD_CHECK_CONCURRENCY = 6;
+let activePayloadChecks = 0;
+const payloadCheckWaiters: Array<() => void> = [];
+
+async function withPayloadCheckSlot<T>(operation: () => Promise<T>): Promise<T> {
+  if (activePayloadChecks >= PAYLOAD_CHECK_CONCURRENCY) {
+    await new Promise<void>((resolve) => payloadCheckWaiters.push(resolve));
+  }
+  activePayloadChecks += 1;
+  try {
+    return await operation();
+  } finally {
+    activePayloadChecks -= 1;
+    payloadCheckWaiters.shift()?.();
+  }
+}
+
+async function buildEligibilityPayload(slug: string, minter: string, quantity: number): Promise<unknown> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await withPayloadCheckSlot(() => withOpenSeaApi((api) => api.buildDropMintTransaction(slug, { minter, quantity })));
+    } catch (error) {
+      lastError = error;
+      if (!isOpenSeaRateLimitError(error) || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 750 * (2 ** attempt)));
+    }
+  }
+  throw lastError;
+}
+
 function cachedPromise<T>(cache: Map<string, TimedPromise<T>>, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const current = cache.get(key);
   if (current && current.expiresAt > Date.now()) return current.value;
@@ -170,56 +201,47 @@ function validateApiDrop(collection: SupportedCollection, config: SignedSeaDropC
 async function apiEligibility(
   collection: SupportedCollection,
   config: SignedSeaDropConfig,
-  signer: ethers.Signer,
+  signerAddress: string,
   quantity: number,
 ): Promise<MintPhaseEligibility[]> {
-  const signerAddress = (await signer.getAddress()).toLowerCase();
+  signerAddress = signerAddress.toLowerCase();
   const cacheKey = `${config.openSeaSlug}:${signerAddress}:${quantity}`;
   return cachedPromise(eligibilityCache, cacheKey, 15_000, async () => {
-  const [dropRaw, eligibilityRaw] = await Promise.all([
-    cachedPromise(dropCache, config.openSeaSlug, 60_000, () => withOpenSeaApi((api) => api.getDrop(config.openSeaSlug))),
-    withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug)),
-  ]);
-  const drop = validateApiDrop(collection, config, dropRaw);
-  const eligibility = eligibilityRaw as unknown as { stages?: ApiEligibilityStage[] };
-  if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
+  const dropRaw = await cachedPromise(dropCache, config.openSeaSlug, 60_000, () => withOpenSeaApi((api) => api.getDrop(config.openSeaSlug)));
+  validateApiDrop(collection, config, dropRaw);
 
-  const mapped = mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
-
-  // Never stop after the first eligible signed stage. OpenSea can keep an
-  // earlier GTD record while omitting an eligible FCFS record. Its wallet-bound
-  // mint payload is the authoritative proof for the stage it actually offers.
+  // The mint-payload endpoint is wallet-bound and is the same authoritative
+  // proof needed for execution. Unlike walletAuth.getDropEligibility it does
+  // not require creating a SIWE session and scoped PAT for every vault wallet.
+  // That auth flow was serialized and could not complete a 24-wallet scan after
+  // a deployment before the browser/server deadlines expired.
   try {
-    const transaction = await withOpenSeaApi((api) => api.buildDropMintTransaction(config.openSeaSlug, {
-      minter: signerAddress,
-      quantity,
-    }));
+    const transaction = await buildEligibilityPayload(config.openSeaSlug, signerAddress, quantity);
     const provenPhaseId = eligibilityPhaseFromTransaction(collection, config, quantity, transaction);
     console.info("OpenSea eligibility verified", {
       collection: config.openSeaSlug,
       walletRef: stableHash(signerAddress).slice(0, 12),
       quantity,
       payloadPhaseId: provenPhaseId,
-      listed: mapped.map((item) => `${item.phaseId}:${item.status}`),
     });
-    return applyPayloadEligibility(mapped, provenPhaseId);
+    return config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
+      phaseId: stage.id,
+      status: stage.id === provenPhaseId ? "eligible" as const : "ineligible" as const,
+      reason: stage.id === provenPhaseId ? undefined : `OpenSea issued the wallet payload for ${config.stages.find((item) => item.id === provenPhaseId)?.name || provenPhaseId}`,
+    }));
   } catch (error) {
     const detail = safeErrorMessage(error, "OpenSea did not issue a verifiable signed mint payload");
     console.warn("OpenSea payload eligibility verification failed", {
       collection: config.openSeaSlug,
       walletRef: stableHash(signerAddress).slice(0, 12),
       quantity,
-      listed: mapped.map((item) => `${item.phaseId}:${item.status}`),
       reason: detail,
     });
-    // Preserve positive API results. An omitted/negative list result is not a
-    // trustworthy negative when payload verification itself failed; expose it
-    // as unknown instead of silently claiming the wallet is ineligible.
-    return mapped.map((item) => item.status === "ineligible" ? {
-      phaseId: item.phaseId,
+    return config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
+      phaseId: stage.id,
       status: "unknown" as const,
-      reason: `${item.reason}; signed-payload verification failed: ${detail}`,
-    } : item);
+      reason: `OpenSea signed-payload verification failed: ${detail}`,
+    }));
   }
   });
 }
@@ -309,7 +331,7 @@ export function validateOpenSeaSignedTransaction(
 export const openseaSignedSeaDropV1: MintAdapter = {
   key: "opensea-signed-seadrop-v1",
   supportsArming: true,
-  requiresSignerForEligibility: true,
+  requiresSignerForEligibility: false,
   canArmPhase: (phaseId) => phaseId === "public",
   recommendedGasLimit: 500_000n,
 
@@ -340,29 +362,21 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     return { ...publicResolved, adapterKey: collection.adapterKey, phases, source };
   },
 
-  async checkEligibility(collection, signerAddress, quantity, provider, phases, context) {
+  async checkEligibility(collection, signerAddress, quantity, provider, phases) {
     const config = configFor(collection);
     const publicResults = await openseaSeaDropV1.checkEligibility!(collection, signerAddress, quantity, provider, phases);
     let signedResults: MintPhaseEligibility[];
-    if (!context?.signer) {
+    try {
+      signedResults = await apiEligibility(collection, config, signerAddress, quantity);
+    } catch (error) {
+      const reason = isOpenSeaEligibilityUnavailable(error)
+        ? "OpenSea signed-stage eligibility is temporarily unavailable — retrying shortly"
+        : error instanceof Error ? error.message : "OpenSea signed-stage eligibility could not be verified";
       signedResults = config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
         phaseId: stage.id,
         status: "unknown",
-        reason: "Wallet signing is unavailable for OpenSea eligibility",
+        reason,
       }));
-    } else {
-      try {
-        signedResults = await apiEligibility(collection, config, context.signer, quantity);
-      } catch (error) {
-        const reason = isOpenSeaEligibilityUnavailable(error)
-          ? "OpenSea signed-stage eligibility is temporarily unavailable — retrying shortly"
-          : error instanceof Error ? error.message : "OpenSea signed-stage eligibility could not be verified";
-        signedResults = config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
-          phaseId: stage.id,
-          status: "unknown",
-          reason,
-        }));
-      }
     }
     return [...signedResults, ...publicResults];
   },

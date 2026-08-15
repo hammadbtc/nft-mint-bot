@@ -5,6 +5,7 @@ import {
   applyPayloadEligibility,
   eligibilityPhaseFromTransaction,
   mapSignedStageEligibility,
+  openseaSignedSeaDropV1,
   validateOpenSeaSignedTransaction,
   type ReviewedOpenSeaStage,
   type SignedSeaDropConfig,
@@ -40,6 +41,10 @@ const collection = {
   domains: '["opensea.io"]', siteUrl: "https://opensea.io/collection/hoodbirdss/overview", imageUrl: null,
   adapterConfig: JSON.stringify(config), verified: true, createdAt: new Date().toISOString(),
 };
+
+test("dashboard eligibility uses the wallet-bound OpenSea payload without per-wallet SIWE", () => {
+  assert.equal(openseaSignedSeaDropV1.requiresSignerForEligibility, false);
+});
 
 test("OpenSea invalid or expired API-key responses are recognized for automatic failover", () => {
   assert.equal(isOpenSeaInvalidApiKeyError(new Error("Server Error: Invalid API key")), true);
