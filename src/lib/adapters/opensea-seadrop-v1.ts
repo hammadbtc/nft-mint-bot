@@ -39,6 +39,23 @@ function statusFor(startTime: bigint, endTime: bigint, now: bigint): MintPhase["
   return "live";
 }
 
+export function publicEligibilityForStats(
+  minted: bigint,
+  supply: bigint,
+  maxSupply: bigint,
+  maxPerWallet: number,
+  quantity: number,
+) {
+  if (!maxPerWallet) return { phaseId: "public", status: "unknown" as const, reason: "Public wallet limit is unavailable" };
+  if (minted + BigInt(quantity) > BigInt(maxPerWallet)) {
+    return { phaseId: "public", status: "ineligible" as const, reason: `Wallet has insufficient room under the ${maxPerWallet} public mint limit` };
+  }
+  if (supply + BigInt(quantity) > maxSupply) {
+    return { phaseId: "public", status: "ineligible" as const, reason: `Public mint is sold out (${supply.toString()}/${maxSupply.toString()})` };
+  }
+  return { phaseId: "public", status: "eligible" as const };
+}
+
 async function publicDrop(collection: SupportedCollection, provider: ethers.Provider) {
   const config = configFor(collection);
   const seaDrop = new ethers.Contract(config.seaDropAddress, SEA_DROP_READ_ABI, provider);
@@ -75,14 +92,7 @@ export const openseaSeaDropV1: MintAdapter = {
     const nft = new ethers.Contract(collection.contractAddress, COLLECTION_ABI, provider);
     const [minted, supply, maxSupply] = await nft.getFunction("getMintStats").staticCall(signerAddress);
     const maxPerWallet = phases.find((phase) => phase.id === "public")?.maxPerWallet || 0;
-    if (!maxPerWallet) return [{ phaseId: "public", status: "unknown", reason: "Public wallet limit is unavailable" }];
-    if (BigInt(minted) + BigInt(quantity) > BigInt(maxPerWallet)) {
-      return [{ phaseId: "public", status: "ineligible", reason: `Wallet has insufficient room under the ${maxPerWallet} public mint limit` }];
-    }
-    if (BigInt(supply) + BigInt(quantity) > BigInt(maxSupply)) {
-      return [{ phaseId: "public", status: "ineligible", reason: "Quantity exceeds remaining public supply" }];
-    }
-    return [{ phaseId: "public", status: "eligible" }];
+    return [publicEligibilityForStats(BigInt(minted), BigInt(supply), BigInt(maxSupply), maxPerWallet, quantity)];
   },
 
   async resolve(collection, source): Promise<ResolvedMint> {

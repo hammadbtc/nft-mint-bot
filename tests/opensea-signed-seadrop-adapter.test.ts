@@ -42,8 +42,8 @@ const collection = {
   adapterConfig: JSON.stringify(config), verified: true, createdAt: new Date().toISOString(),
 };
 
-test("dashboard eligibility uses the wallet-bound OpenSea payload without per-wallet SIWE", () => {
-  assert.equal(openseaSignedSeaDropV1.requiresSignerForEligibility, false);
+test("dashboard eligibility retains authenticated per-stage OpenSea checks", () => {
+  assert.equal(openseaSignedSeaDropV1.requiresSignerForEligibility, true);
 });
 
 test("OpenSea invalid or expired API-key responses are recognized for automatic failover", () => {

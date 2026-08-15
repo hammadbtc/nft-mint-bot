@@ -24,7 +24,9 @@ type ScopedTokenSummary = {
 
 type AuthEntry = { auth: OpenSeaAuth; ready: Promise<void> };
 const authByAddress = new Map<string, AuthEntry>();
-let authQueue: Promise<void> = Promise.resolve();
+const AUTH_CONCURRENCY = 6;
+let activeAuthentications = 0;
+const authenticationWaiters: Array<() => void> = [];
 let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
 let cachedInstantKey: { value: string; expiresAt: number } | undefined;
 let rejectedConfiguredKey: string | undefined;
@@ -228,12 +230,33 @@ async function recoverOpenSeaScopedTokenSlot(signer: ethers.Signer): Promise<voi
 }
 
 async function authenticateWithRecovery(auth: OpenSeaAuth, signer: ethers.Signer) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await auth.authenticate(signer, { scopes: ["read:eligibility"] });
+    } catch (error) {
+      lastError = error;
+      if (isOpenSeaScopedTokenLimitError(error)) {
+        await recoverOpenSeaScopedTokenSlot(signer);
+        return auth.authenticate(signer, { scopes: ["read:eligibility"] });
+      }
+      if (!isOpenSeaRateLimitError(error) || attempt === 2) throw error;
+      await wait(750 * (2 ** attempt));
+    }
+  }
+  throw lastError;
+}
+
+async function withAuthenticationSlot<T>(operation: () => Promise<T>): Promise<T> {
+  if (activeAuthentications >= AUTH_CONCURRENCY) {
+    await new Promise<void>((resolve) => authenticationWaiters.push(resolve));
+  }
+  activeAuthentications += 1;
   try {
-    return await auth.authenticate(signer, { scopes: ["read:eligibility"] });
-  } catch (error) {
-    if (!isOpenSeaScopedTokenLimitError(error)) throw error;
-    await recoverOpenSeaScopedTokenSlot(signer);
-    return auth.authenticate(signer, { scopes: ["read:eligibility"] });
+    return await operation();
+  } finally {
+    activeAuthentications -= 1;
+    authenticationWaiters.shift()?.();
   }
 }
 
@@ -248,13 +271,19 @@ export async function withOpenSeaApiForSigner<T>(signer: ethers.Signer, operatio
   let entry = authByAddress.get(address);
   if (!entry) {
     const auth = new OpenSeaAuth();
-    const ready = authQueue.catch(() => undefined).then(() => authenticateWithRecovery(auth, signer)).then(() => undefined);
-    authQueue = ready.catch(() => undefined);
+    const ready = withAuthenticationSlot(() => authenticateWithRecovery(auth, signer)).then(() => undefined);
     entry = { auth, ready };
     authByAddress.set(address, entry);
   }
   try {
-    await entry.ready;
+    try {
+      await entry.ready;
+    } catch (error) {
+      // A failed initial authentication must not poison this wallet's cache.
+      // The next scan should be able to establish a fresh SIWE session.
+      if (authByAddress.get(address) === entry) authByAddress.delete(address);
+      throw error;
+    }
     const token = await entry.auth.getValidToken();
     try {
       return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
