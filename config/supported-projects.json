@@ -276,5 +276,71 @@
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x4d908ec6f8b6b63dcd57e68ede19e595c402d83b" }
       ]
     }
+  },
+  {
+    "id": "61140209-f6ce-4bd4-9499-416698056f58",
+    "name": "Retail Shrooms",
+    "slug": "retail-shrooms-423133943",
+    "contractAddress": "0xB342f37e2b85238db86Dab49d042ECF87E41bfEe",
+    "chainId": 4663,
+    "mintMethod": "mintSigned",
+    "mintAbi": ["function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"],
+    "mintPrice": "0",
+    "maxPerWallet": 1,
+    "maxSupply": 888,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/retail-shrooms-423133943/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/retail-shrooms-423133943/image_type_logo/f3cd8884cc9a495189b66a34520a2e/58f3cd8884cc9a495189b66a34520a2e.gif",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "retail-shrooms-423133943",
+      "stages": [
+        {
+          "id": "gtd",
+          "name": "GTD",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-15T19:30:00.000Z",
+          "endsAt": "2026-08-15T20:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 3,
+          "maxTokenSupplyForStage": 888,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "fcfs",
+          "name": "FCFS",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-15T20:30:00.000Z",
+          "endsAt": "2026-08-15T21:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 4,
+          "maxTokenSupplyForStage": 888,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public stage",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-15T21:30:00.000Z",
+          "endsAt": "2026-08-16T21:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1
+        }
+      ],
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/retail-shrooms-423133943" },
+        { "domain": "opensea.io", "path": "/collection/retail-shrooms-423133943/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0xb342f37e2b85238db86dab49d042ecf87e41bfee" }
+      ]
+    }
   }
 ]

@@ -145,3 +145,22 @@ test("HoodBirds keeps GTD, FCFS, then public as distinct reviewed phases", () =>
   assert.ok(hoodBirds?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/hoodbirdss/overview"));
   assert.ok(hoodBirds?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x14a247e9e3accbc941a705c984a49e291468bc29"));
 });
+
+test("Retail Shrooms pins GTD, FCFS, and public to the supplied OpenSea drop", () => {
+  const shrooms = seeds.find((seed) => seed.slug === "retail-shrooms-423133943");
+  assert.equal(shrooms?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(shrooms?.contractAddress.toLowerCase(), "0xb342f37e2b85238db86dab49d042ecf87e41bfee");
+  assert.equal(shrooms?.adapterConfig.openSeaSlug, "retail-shrooms-423133943");
+  assert.deepEqual(shrooms?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["gtd", "signed", "0", 1],
+    ["fcfs", "signed", "0", 1],
+    ["public", "public", "0", 1],
+  ]);
+  assert.deepEqual(shrooms?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [3, 4, undefined]);
+  assert.deepEqual(shrooms?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [888, 1000, true],
+    [888, 1000, true],
+  ]);
+  assert.ok(shrooms?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/retail-shrooms-423133943/overview"));
+  assert.ok(shrooms?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0xb342f37e2b85238db86dab49d042ecf87e41bfee"));
+});
