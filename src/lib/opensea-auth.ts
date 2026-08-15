@@ -27,9 +27,11 @@ const authByAddress = new Map<string, AuthEntry>();
 let authQueue: Promise<void> = Promise.resolve();
 let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
 let cachedInstantKey: { value: string; expiresAt: number } | undefined;
+let rejectedConfiguredKey: string | undefined;
 
 export function configuredOpenSeaApiKey(): string | undefined {
-  return process.env.OPENSEA_API_KEY?.trim() || undefined;
+  const value = process.env.OPENSEA_API_KEY?.trim() || undefined;
+  return value && value !== rejectedConfiguredKey ? value : undefined;
 }
 
 type StoredInstantKey = { value: string; expiresAt: number };
@@ -98,6 +100,18 @@ export async function requireOpenSeaApiKey(): Promise<string> {
   } finally {
     instantKeyPromise = undefined;
   }
+}
+
+export function isOpenSeaInvalidApiKeyError(error: unknown): boolean {
+  return error instanceof Error && /invalid api key|unauthorized.*api key|api key.*(?:invalid|expired)/i.test(error.message);
+}
+
+function rejectConfiguredOpenSeaApiKey(error: unknown): boolean {
+  const configured = process.env.OPENSEA_API_KEY?.trim();
+  if (!configured || rejectedConfiguredKey === configured || !isOpenSeaInvalidApiKeyError(error)) return false;
+  rejectedConfiguredKey = configured;
+  console.warn("Configured OpenSea API key was rejected; switching to an automatically refreshed instant key");
+  return true;
 }
 
 export function isOpenSeaRateLimitError(error: unknown): boolean {
@@ -238,7 +252,12 @@ export async function withOpenSeaApiForSigner<T>(signer: ethers.Signer, operatio
   try {
     await entry.ready;
     const token = await entry.auth.getValidToken();
-    return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
+    try {
+      return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
+    } catch (error) {
+      if (!rejectConfiguredOpenSeaApiKey(error)) throw error;
+      return await operation(new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey(), authToken: token.accessToken }));
+    }
   } catch (error) {
     if (!isOpenSeaRateLimitError(error) && authByAddress.get(address) === entry) authByAddress.delete(address);
     throw error;
@@ -247,4 +266,15 @@ export async function withOpenSeaApiForSigner<T>(signer: ethers.Signer, operatio
 
 export async function openSeaApi(): Promise<OpenSeaAPI> {
   return new OpenSeaAPI({ apiKey: await requireOpenSeaApiKey() });
+}
+
+/** Run an unauthenticated OpenSea operation, retrying once with an automatically
+ * refreshed instant key when a configured production key has expired/revoked. */
+export async function withOpenSeaApi<T>(operation: (api: OpenSeaAPI) => Promise<T>): Promise<T> {
+  try {
+    return await operation(await openSeaApi());
+  } catch (error) {
+    if (!rejectConfiguredOpenSeaApiKey(error)) throw error;
+    return operation(await openSeaApi());
+  }
 }

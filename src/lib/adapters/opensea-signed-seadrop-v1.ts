@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
-import { openSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
+import { withOpenSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import { safeErrorMessage, stableHash } from "@/lib/safety";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
@@ -177,7 +177,7 @@ async function apiEligibility(
   const cacheKey = `${config.openSeaSlug}:${signerAddress}:${quantity}`;
   return cachedPromise(eligibilityCache, cacheKey, 15_000, async () => {
   const [dropRaw, eligibilityRaw] = await Promise.all([
-    cachedPromise(dropCache, config.openSeaSlug, 60_000, () => openSeaApi().then((api) => api.getDrop(config.openSeaSlug))),
+    cachedPromise(dropCache, config.openSeaSlug, 60_000, () => withOpenSeaApi((api) => api.getDrop(config.openSeaSlug))),
     withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug)),
   ]);
   const drop = validateApiDrop(collection, config, dropRaw);
@@ -190,10 +190,10 @@ async function apiEligibility(
   // earlier GTD record while omitting an eligible FCFS record. Its wallet-bound
   // mint payload is the authoritative proof for the stage it actually offers.
   try {
-    const transaction = await (await openSeaApi()).buildDropMintTransaction(config.openSeaSlug, {
+    const transaction = await withOpenSeaApi((api) => api.buildDropMintTransaction(config.openSeaSlug, {
       minter: signerAddress,
       quantity,
-    });
+    }));
     const provenPhaseId = eligibilityPhaseFromTransaction(collection, config, quantity, transaction);
     console.info("OpenSea eligibility verified", {
       collection: config.openSeaSlug,
@@ -379,7 +379,7 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const now = Number(latest.timestamp) * 1000;
     if (now < Date.parse(stage.startsAt)) throw new Error(`${stage.name} has not started`);
     if (now >= Date.parse(stage.endsAt)) throw new Error(`${stage.name} has ended`);
-    const response = await (await openSeaApi()).buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity });
+    const response = await withOpenSeaApi((api) => api.buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity }));
     return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, response);
   },
 };

@@ -9,6 +9,7 @@ import {
   type ReviewedOpenSeaStage,
   type SignedSeaDropConfig,
 } from "../src/lib/adapters/opensea-signed-seadrop-v1";
+import { isOpenSeaInvalidApiKeyError } from "../src/lib/opensea-auth";
 
 const collectionAddress = "0x14A247E9e3aCcBC941A705C984a49E291468bC29";
 const seaDropAddress = "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5";
@@ -39,6 +40,12 @@ const collection = {
   domains: '["opensea.io"]', siteUrl: "https://opensea.io/collection/hoodbirdss/overview", imageUrl: null,
   adapterConfig: JSON.stringify(config), verified: true, createdAt: new Date().toISOString(),
 };
+
+test("OpenSea invalid or expired API-key responses are recognized for automatic failover", () => {
+  assert.equal(isOpenSeaInvalidApiKeyError(new Error("Server Error: Invalid API key")), true);
+  assert.equal(isOpenSeaInvalidApiKeyError(new Error("API key expired")), true);
+  assert.equal(isOpenSeaInvalidApiKeyError(new Error("Too many requests")), false);
+});
 
 function signedResponse(overrides: { nft?: string; quantity?: number; stageIndex?: number; recipient?: string; feeRecipient?: string } = {}) {
   const data = new ethers.Interface(mintAbi).encodeFunctionData("mintSigned", [
