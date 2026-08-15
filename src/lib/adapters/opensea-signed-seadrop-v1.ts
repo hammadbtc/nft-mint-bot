@@ -183,8 +183,43 @@ async function apiEligibility(
   const eligibility = eligibilityRaw as unknown as { stages?: ApiEligibilityStage[] };
   if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
 
-  return mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
+  const mapped = mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
+  if (mapped.some((item) => item.status === "eligible")) return mapped;
+
+  // The eligibility-list endpoint can omit an upcoming FCFS stage even when
+  // OpenSea will issue a wallet-bound mint payload for it. The mint builder is
+  // the execution authority, so validate that exact unsigned transaction and
+  // use its pinned stage only when every reviewed field matches.
+  try {
+    const transaction = await (await openSeaApi()).buildDropMintTransaction(config.openSeaSlug, {
+      minter: signerAddress,
+      quantity,
+    });
+    const provenPhaseId = signedPhaseFromTransaction(collection, config, signerAddress, quantity, transaction);
+    return mapped.map((item) => item.phaseId === provenPhaseId ? { phaseId: item.phaseId, status: "eligible" as const } : item);
+  } catch {
+    return mapped;
+  }
   });
+}
+
+export function signedPhaseFromTransaction(
+  collection: SupportedCollection,
+  config: SignedSeaDropConfig,
+  signerAddress: string,
+  quantity: number,
+  transaction: unknown,
+): string {
+  for (const stage of config.stages.filter((item) => item.kind === "signed")) {
+    try {
+      validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, transaction);
+      return stage.id;
+    } catch {
+      // Try the next reviewed signed stage; nothing is trusted until one
+      // complete transaction shape validates.
+    }
+  }
+  throw new Error("OpenSea mint payload does not match a reviewed signed stage");
 }
 
 export function validateOpenSeaSignedTransaction(
