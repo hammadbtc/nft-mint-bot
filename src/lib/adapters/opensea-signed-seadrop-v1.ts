@@ -268,7 +268,18 @@ export const openseaSignedSeaDropV1: MintAdapter = {
         reason: "Wallet signing is unavailable for OpenSea eligibility",
       }));
     } else {
-      signedResults = await apiEligibility(collection, config, context.signer, quantity);
+      try {
+        signedResults = await apiEligibility(collection, config, context.signer, quantity);
+      } catch (error) {
+        const reason = isOpenSeaEligibilityUnavailable(error)
+          ? "OpenSea signed-stage eligibility is temporarily unavailable — retrying shortly"
+          : error instanceof Error ? error.message : "OpenSea signed-stage eligibility could not be verified";
+        signedResults = config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
+          phaseId: stage.id,
+          status: "unknown",
+          reason,
+        }));
+      }
     }
     return [...signedResults, ...publicResults];
   },
@@ -289,3 +300,7 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, response);
   },
 };
+
+function isOpenSeaEligibilityUnavailable(error: unknown): boolean {
+  return error instanceof Error && /429|rate limit|too many requests|temporar|timeout|fetch failed/i.test(error.message);
+}
