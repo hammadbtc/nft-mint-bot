@@ -56,7 +56,7 @@ ROBINHOOD_RPC_URLS=<optional comma-separated independent HTTPS providers>
 
 Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Never commit their URLs: provider credentials are commonly embedded in the URL path or query string. The app also has a public fallback, but private providers are strongly recommended for live FCFS minting.
 
-`OPENSEA_API_KEY` is strongly recommended when a reviewed collection uses `opensea-signed-seadrop-v1`. The server authenticates each selected vault wallet with a scoped SIWE session, keeps OpenSea tokens in memory only, and requests the wallet-bound signed mint transaction just in time. If the permanent key is absent, the server requests and memory-caches OpenSea's official seven-day instant key; this is a launch fallback, not a durable substitute for the permanent key.
+`OPENSEA_API_KEY` is strongly recommended when a reviewed collection uses `opensea-signed-seadrop-v1`. The server authenticates selected vault wallets, encrypts reusable OpenSea wallet credentials in PostgreSQL using the vault encryption boundary, and reads stage eligibility without constructing a mint transaction. Wallet-bound signed mint data is requested only when preparing execution. If the permanent key is absent, the server may use OpenSea's official instant-key flow as a launch fallback; it is not a durable substitute for the permanent key.
 
 ## Optional variables
 

@@ -27,7 +27,7 @@ Use an existing adapter only when the project uses the same reviewed protocol ve
 Current adapters:
 
 - `opensea-seadrop-v1`: public SeaDrop only. It rereads price, start/end, wallet cap, fee-recipient permission, wallet mint stats, and supply on-chain at execution.
-- `opensea-signed-seadrop-v1`: reviewed OpenSea SeaDrop schedules containing signed presales plus public. It authenticates each vault signer with the official scoped SIWE flow, checks per-stage eligibility, fetches the signed transaction just in time, and validates its decoded target, recipient, phase, limits, timing, quantity, and exact value. Prefer a permanent server-only `OPENSEA_API_KEY`; an official seven-day instant key is memory-cached only as a fallback.
+- `opensea-signed-seadrop-v1`: reviewed OpenSea SeaDrop schedules containing signed presales plus public. It authenticates each vault signer, reads per-stage eligibility without constructing or simulating a mint, and fetches the signed transaction only when preparing execution. Reusable wallet sessions are encrypted at rest and survive deploys. Prefer a permanent server-only `OPENSEA_API_KEY`; an official instant key is only a launch fallback.
 - `evm-contract-v1`: only a verified payable function with either no arguments or one integer quantity argument and a static reviewed price.
 - `squiggle-wuiggle-v1`: project-specific Robinhood adapter for the verified preminted-inventory contract. It supports deterministic arming but must not be reused for another collection merely because its ABI looks similar.
 
@@ -171,6 +171,20 @@ export interface MintAdapter {
 - Never send, sign, allocate a nonce, or mutate external state itself. The engine owns simulation, durable signing, broadcasting, retries, receipts, and nonce locks.
 
 For multi-stage projects, `resolve` returns all reviewed phases in precedence order, including ended/current/upcoming stages. `checkEligibility` returns an explicit `eligible`, `ineligible`, `unknown`, or `unsupported` result per phase for the signing wallet. The engine chooses the first eligible live phase, otherwise the earliest eligible upcoming phase, persists its `phaseId`, passes that ID into `buildTransaction`, and rechecks eligibility before execution. A gated phase without a reviewed checker is `unsupported`, never optimistically eligible.
+
+### Eligibility scan contract
+
+Eligibility answers only: **may this wallet participate in this phase for this quantity?** Keep it separate from mint readiness and transaction execution.
+
+- Do not build, simulate, estimate gas, allocate a nonce, check native/ERC-20 funding, or require remaining global supply merely to display eligibility.
+- Public eligibility is derived from the reviewed wallet rule (for example, remaining per-wallet allowance). `upcoming`, `ended`, paused, or sold out may affect phase readiness/status, but must not rewrite an otherwise eligible wallet as ineligible.
+- Gated eligibility comes from that protocol's authoritative source: on-chain allowlist/root and proof, official wallet-scoped API, recovered server signature, token ownership rule, or other reviewed mechanism. OpenSea authentication is specific to OpenSea and must not be reused as a generic launchpad check.
+- API failure, rate limiting, schema drift, authentication failure, or timeout produces `unknown` with a redacted reason. Only an authoritative negative result produces `ineligible`.
+- Scan wallets with bounded concurrency, prioritize main wallets, respect `Retry-After`, show progressive results, and cache only credentials/results whose lifetime and revocation behavior are understood.
+- Persist reusable credentials only encrypted at rest. Never log or expose wallet signatures, calldata, proofs, access tokens, API keys, or private keys.
+- `buildTransaction` and final pre-sign revalidation separately enforce live timing, pause state, supply, funds, gas, allowance, exact price/value, recipient, calldata, proof/signature freshness, nonce, and spend policy.
+
+Every eligibility adapter needs tests proving: eligible, authoritative ineligible, upstream failure becomes unknown, upcoming public remains wallet-eligible, sold-out does not become wallet-ineligible, insufficient funds does not change eligibility, and execution still rejects unsafe or unready transactions.
 
 ### Qualifying an adapter for armed FCFS execution
 
