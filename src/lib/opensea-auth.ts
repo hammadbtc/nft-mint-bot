@@ -48,6 +48,8 @@ let lastAuthenticationStartedAt = 0;
 let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
 let cachedInstantKey: { value: string; expiresAt: number } | undefined;
 let rejectedConfiguredKey: string | undefined;
+const eligibilitySessionByAddress = new Map<string, { accessToken: string; expiresAt: number }>();
+const ELIGIBILITY_SESSION_TTL_MS = 45 * 60 * 1_000;
 
 export function configuredOpenSeaApiKey(): string | undefined {
   const value = process.env.OPENSEA_API_KEY?.trim() || undefined;
@@ -233,6 +235,12 @@ function extractSessionCookies(headers: Headers): string {
   return [...cookies.values()].join("; ");
 }
 
+function cookieValue(cookie: string, name: string): string | undefined {
+  const prefix = `${name}=`;
+  const pair = cookie.split("; ").find((item) => item.startsWith(prefix));
+  return pair?.slice(prefix.length);
+}
+
 async function createSiweSession(signer: ethers.Signer): Promise<string> {
   const nonceResponse = await fetch(`${OPENSEA_API_BASE_URL}/api/v2/auth/siwe/nonce`, {
     method: "POST",
@@ -251,6 +259,61 @@ async function createSiweSession(signer: ethers.Signer): Promise<string> {
   });
   await requireOk(verification, "OpenSea SIWE verification");
   return extractSessionCookies(verification.headers);
+}
+
+export function isOpenSeaScopeEntitlementError(error: unknown): boolean {
+  return error instanceof Error && /requested scopes exceed account entitlement/i.test(error.message);
+}
+
+/**
+ * Read drop eligibility without constructing a mint transaction. Some OpenSea
+ * accounts can use the normal read:eligibility PAT while others expose the
+ * same wallet endpoint only through their SIWE session. The latter is the
+ * session OpenSea's own web app establishes; it is still wallet-bound and is
+ * never returned to the browser or logged.
+ */
+export async function getOpenSeaDropEligibilityForSigner(signer: ethers.Signer, slug: string): Promise<unknown> {
+  try {
+    return await withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(slug));
+  } catch (error) {
+    if (!isOpenSeaScopeEntitlementError(error)) throw error;
+  }
+
+  const address = (await signer.getAddress()).toLowerCase();
+  let session = eligibilitySessionByAddress.get(address);
+  if (!session || session.expiresAt <= Date.now()) {
+    const cookie = await withAuthenticationSlot(() => createSiweSession(signer));
+    const accessToken = cookieValue(cookie, "access_token");
+    if (!accessToken) throw new Error("OpenSea SIWE session did not include an access token");
+    session = { accessToken, expiresAt: Date.now() + ELIGIBILITY_SESSION_TTL_MS };
+    eligibilitySessionByAddress.set(address, session);
+  }
+
+  const request = async (accessToken: string) => fetch(
+    `${OPENSEA_API_BASE_URL}/api/v2/drops/${encodeURIComponent(slug)}/eligibility`,
+    { headers: { Accept: "application/json", "X-API-KEY": await requireOpenSeaApiKey(), Authorization: `Bearer ${accessToken}` } },
+  );
+  let response = await request(session.accessToken);
+  if (response.status === 401) {
+    eligibilitySessionByAddress.delete(address);
+    const cookie = await withAuthenticationSlot(() => createSiweSession(signer));
+    const accessToken = cookieValue(cookie, "access_token");
+    if (!accessToken) throw new Error("OpenSea SIWE session did not include an access token");
+    session = { accessToken, expiresAt: Date.now() + ELIGIBILITY_SESSION_TTL_MS };
+    eligibilitySessionByAddress.set(address, session);
+    response = await request(accessToken);
+  }
+  await requireOk(response, "OpenSea wallet eligibility");
+  const raw = await response.json() as { stages?: Array<Record<string, unknown>> };
+  return {
+    ...raw,
+    stages: raw.stages?.map((stage) => ({
+      ...stage,
+      stageUuid: stage.stageUuid ?? stage.stage_uuid,
+      isEligible: stage.isEligible ?? stage.is_eligible,
+      maxTotalMintableByWallet: stage.maxTotalMintableByWallet ?? stage.max_total_mintable_by_wallet,
+    })),
+  };
 }
 
 export function isOpenSeaScopedTokenLimitError(error: unknown): boolean {

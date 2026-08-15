@@ -1,8 +1,8 @@
 import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
-import { isOpenSeaRateLimitError, openSeaRetryAfterMs, withOpenSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
+import { getOpenSeaDropEligibilityForSigner, withOpenSeaApi } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
-import { safeErrorMessage, stableHash } from "@/lib/safety";
+import { stableHash } from "@/lib/safety";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
 
 const SIGNED_MINT_ABI = [
@@ -96,37 +96,6 @@ type TimedPromise<T> = { expiresAt: number; value: Promise<T> };
 const dropCache = new Map<string, TimedPromise<unknown>>();
 const eligibilityCache = new Map<string, TimedPromise<MintPhaseEligibility[]>>();
 
-const PAYLOAD_CHECK_CONCURRENCY = 6;
-let activePayloadChecks = 0;
-const payloadCheckWaiters: Array<() => void> = [];
-
-async function withPayloadCheckSlot<T>(operation: () => Promise<T>): Promise<T> {
-  if (activePayloadChecks >= PAYLOAD_CHECK_CONCURRENCY) {
-    await new Promise<void>((resolve) => payloadCheckWaiters.push(resolve));
-  }
-  activePayloadChecks += 1;
-  try {
-    return await operation();
-  } finally {
-    activePayloadChecks -= 1;
-    payloadCheckWaiters.shift()?.();
-  }
-}
-
-async function buildEligibilityPayload(slug: string, minter: string, quantity: number): Promise<unknown> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      return await withPayloadCheckSlot(() => withOpenSeaApi((api) => api.buildDropMintTransaction(slug, { minter, quantity })));
-    } catch (error) {
-      lastError = error;
-      if (!isOpenSeaRateLimitError(error) || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, openSeaRetryAfterMs(error, 750 * (2 ** attempt))));
-    }
-  }
-  throw lastError;
-}
-
 function cachedPromise<T>(cache: Map<string, TimedPromise<T>>, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const current = cache.get(key);
   if (current && current.expiresAt > Date.now()) return current.value;
@@ -207,63 +176,21 @@ async function apiEligibility(
   const signerAddress = (await signer.getAddress()).toLowerCase();
   const cacheKey = `${config.openSeaSlug}:${signerAddress}:${quantity}`;
   return cachedPromise(eligibilityCache, cacheKey, 15_000, async () => {
-  const [dropRaw, listedResult, payloadResult] = await Promise.all([
+  const [dropRaw, eligibilityRaw] = await Promise.all([
     cachedPromise(dropCache, config.openSeaSlug, 60_000, () => withOpenSeaApi((api) => api.getDrop(config.openSeaSlug))),
-    withOpenSeaApiForSigner(signer, (api) => api.walletAuth.getDropEligibility(config.openSeaSlug))
-      .then((value) => ({ ok: true as const, value }))
-      .catch((error: unknown) => ({ ok: false as const, error })),
-    buildEligibilityPayload(config.openSeaSlug, signerAddress, quantity)
-      .then((value) => ({ ok: true as const, value }))
-      .catch((error: unknown) => ({ ok: false as const, error })),
+    getOpenSeaDropEligibilityForSigner(signer, config.openSeaSlug),
   ]);
   const drop = validateApiDrop(collection, config, dropRaw);
-  let mapped: MintPhaseEligibility[] | undefined;
-  let listedError: unknown;
-  if (listedResult.ok) {
-    const eligibility = listedResult.value as unknown as { stages?: ApiEligibilityStage[] };
-    if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
-    mapped = mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
-  } else {
-    listedError = listedResult.error;
-  }
-
-  // The authenticated per-stage list is authoritative for GTD, FCFS and
-  // upcoming stages. The active-stage payload is an independent positive proof
-  // and covers cases where that list is stale or omits a currently claimable
-  // stage. A negative payload must never erase a positive listed result.
-  if (payloadResult.ok) {
-    const transaction = payloadResult.value;
-    const provenPhaseId = eligibilityPhaseFromTransaction(collection, config, quantity, transaction);
-    console.info("OpenSea eligibility verified", {
-      collection: config.openSeaSlug,
-      walletRef: stableHash(signerAddress).slice(0, 12),
-      quantity,
-      payloadPhaseId: provenPhaseId,
-    });
-    const base = mapped || config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
-      phaseId: stage.id,
-      status: "ineligible" as const,
-      reason: `OpenSea issued its active-stage payload for ${config.stages.find((item) => item.id === provenPhaseId)?.name || provenPhaseId}`,
-    }));
-    return applyPayloadEligibility(base, provenPhaseId);
-  }
-
-  const payloadDetail = safeErrorMessage(payloadResult.error, "OpenSea did not issue a verifiable signed mint payload");
-  console.warn("OpenSea payload eligibility verification failed", {
-      collection: config.openSeaSlug,
-      walletRef: stableHash(signerAddress).slice(0, 12),
-      quantity,
-      listed: mapped?.map((item) => `${item.phaseId}:${item.status}`),
-      reason: payloadDetail,
+  const eligibility = eligibilityRaw as { stages?: ApiEligibilityStage[] };
+  if (!Array.isArray(eligibility.stages)) throw new Error("OpenSea did not return wallet stage eligibility");
+  const mapped = mapSignedStageEligibility(config.stages, drop.stages, eligibility.stages, quantity);
+  console.info("OpenSea eligibility checked", {
+    collection: config.openSeaSlug,
+    walletRef: stableHash(signerAddress).slice(0, 12),
+    quantity,
+    stages: mapped.map((item) => `${item.phaseId}:${item.status}`),
   });
-  if (mapped) return mapped;
-
-  const listedDetail = safeErrorMessage(listedError, "OpenSea did not return per-stage eligibility");
-    return config.stages.filter((stage) => stage.kind === "signed").map((stage) => ({
-      phaseId: stage.id,
-      status: "unknown" as const,
-      reason: `OpenSea eligibility failed: ${listedDetail}; active-stage payload failed: ${payloadDetail}`,
-    }));
+  return mapped;
   });
 }
 

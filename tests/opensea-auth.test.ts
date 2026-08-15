@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isOpenSeaScopeEntitlementError,
   isOpenSeaScopedTokenLimitError,
   isOpenSeaRateLimitError,
   isOpenSeaWalletAuthError,
@@ -41,6 +42,13 @@ test("OpenSea scoped-token cap errors are recognized narrowly", () => {
   )), true);
   assert.equal(isOpenSeaScopedTokenLimitError(new Error("Scoped token creation failed (429): rate limited")), false);
   assert.equal(isOpenSeaScopedTokenLimitError(new Error("Wallet is not eligible")), false);
+});
+
+test("OpenSea scoped-token entitlement failures trigger the SIWE-session eligibility fallback", () => {
+  assert.equal(isOpenSeaScopeEntitlementError(new Error(
+    'Scoped token creation failed (400): {"error":{"message":"Requested scopes exceed account entitlement"}}',
+  )), true);
+  assert.equal(isOpenSeaScopeEntitlementError(new Error("Server Error: Insufficient balance to mint")), false);
 });
 
 test("only the oldest SDK-created OpenSea token is selected for recovery", () => {
