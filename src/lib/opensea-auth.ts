@@ -24,7 +24,10 @@ type ScopedTokenSummary = {
 
 type AuthEntry = { auth: OpenSeaAuth; ready: Promise<void> };
 const authByAddress = new Map<string, AuthEntry>();
-const AUTH_CONCURRENCY = 6;
+// OpenSea's SIWE nonce endpoint currently permits only a very small burst.
+// Two concurrent wallet sessions stay within the observed production window;
+// further wallets wait here instead of creating a 429 thundering herd.
+const AUTH_CONCURRENCY = 2;
 let activeAuthentications = 0;
 const authenticationWaiters: Array<() => void> = [];
 let instantKeyPromise: Promise<{ value: string; expiresAt: number }> | undefined;
@@ -124,6 +127,16 @@ export function isOpenSeaRateLimitError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const value = error as Error & { statusCode?: number };
   return value.statusCode === 429 || /(?:server error|failed|error)\s*\(429\)|429\s+too many requests/i.test(value.message);
+}
+
+export function openSeaRetryAfterMs(error: unknown, fallbackMs: number): number {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const match = message.match(/["']?retry-after["']?\s*[:=]\s*["']?(\d+(?:\.\d+)?)/i);
+  const seconds = match ? Number(match[1]) : Number.NaN;
+  // Add a small safety margin so a retry does not land on the same boundary.
+  return Number.isFinite(seconds) && seconds >= 0
+    ? Math.min(60_000, Math.ceil(seconds * 1_000) + 250)
+    : fallbackMs;
 }
 
 function requireOk(response: Response, operation: string): Promise<void> | void {
@@ -231,7 +244,7 @@ async function recoverOpenSeaScopedTokenSlot(signer: ethers.Signer): Promise<voi
 
 async function authenticateWithRecovery(auth: OpenSeaAuth, signer: ethers.Signer) {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
       return await auth.authenticate(signer, { scopes: ["read:eligibility"] });
     } catch (error) {
@@ -240,8 +253,8 @@ async function authenticateWithRecovery(auth: OpenSeaAuth, signer: ethers.Signer
         await recoverOpenSeaScopedTokenSlot(signer);
         return auth.authenticate(signer, { scopes: ["read:eligibility"] });
       }
-      if (!isOpenSeaRateLimitError(error) || attempt === 2) throw error;
-      await wait(750 * (2 ** attempt));
+      if (!isOpenSeaRateLimitError(error) || attempt === 5) throw error;
+      await wait(openSeaRetryAfterMs(error, 1_500 * (2 ** attempt)));
     }
   }
   throw lastError;

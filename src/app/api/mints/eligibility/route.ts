@@ -11,7 +11,10 @@ import { getSigner } from "@/lib/vault";
 import { isOpenSeaRateLimitError } from "@/lib/opensea-auth";
 import { OperationTimeoutError, withTimeout } from "@/lib/async-timeout";
 
-const WALLET_ELIGIBILITY_TIMEOUT_MS = 30_000;
+// A cold deployment may need to establish narrowly-scoped OpenSea sessions
+// for many vault wallets. OpenSea deliberately rate-limits SIWE nonces, so let
+// the bounded server queue finish instead of falsely returning unknown at 30s.
+const WALLET_ELIGIBILITY_TIMEOUT_MS = 180_000;
 
 const inputSchema = z.object({
   collectionId: z.string().uuid(),

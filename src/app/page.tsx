@@ -149,7 +149,7 @@ export default function MintsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ collectionId: project.id, walletIds, quantity: qty }),
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(210_000)]),
       }).then(json).then((data) => {
         const value = data as { wallets?: WalletPhasePlan[] };
         setPhasePlans(Object.fromEntries((value.wallets || []).map((item) => [item.walletId, item])));

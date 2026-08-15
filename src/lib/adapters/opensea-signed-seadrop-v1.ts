@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 import { getProvider } from "@/lib/chains";
-import { isOpenSeaRateLimitError, withOpenSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
+import { isOpenSeaRateLimitError, openSeaRetryAfterMs, withOpenSeaApi, withOpenSeaApiForSigner } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import { safeErrorMessage, stableHash } from "@/lib/safety";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
@@ -121,7 +121,7 @@ async function buildEligibilityPayload(slug: string, minter: string, quantity: n
     } catch (error) {
       lastError = error;
       if (!isOpenSeaRateLimitError(error) || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 750 * (2 ** attempt)));
+      await new Promise((resolve) => setTimeout(resolve, openSeaRetryAfterMs(error, 750 * (2 ** attempt))));
     }
   }
   throw lastError;

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   isOpenSeaScopedTokenLimitError,
   isOpenSeaRateLimitError,
+  openSeaRetryAfterMs,
   selectStaleOpenSeaSdkToken,
 } from "../src/lib/opensea-auth";
 
@@ -11,6 +12,12 @@ test("OpenSea rate limits are recognized without treating eligibility failures a
   const structured = Object.assign(new Error("429 Too Many Requests"), { statusCode: 429 });
   assert.equal(isOpenSeaRateLimitError(structured), true);
   assert.equal(isOpenSeaRateLimitError(new Error("Wallet is not eligible")), false);
+});
+
+test("OpenSea retry-after metadata controls SIWE backoff", () => {
+  const error = new Error('Nonce request failed (429): {"meta":{"retry-after":11}}');
+  assert.equal(openSeaRetryAfterMs(error, 750), 11_250);
+  assert.equal(openSeaRetryAfterMs(new Error("429 Too Many Requests"), 1_500), 1_500);
 });
 
 test("OpenSea scoped-token cap errors are recognized narrowly", () => {
