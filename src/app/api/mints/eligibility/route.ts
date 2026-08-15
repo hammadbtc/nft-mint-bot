@@ -9,6 +9,9 @@ import { safeErrorMessage } from "@/lib/safety";
 import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
 import { isOpenSeaRateLimitError } from "@/lib/opensea-auth";
+import { OperationTimeoutError, withTimeout } from "@/lib/async-timeout";
+
+const WALLET_ELIGIBILITY_TIMEOUT_MS = 30_000;
 
 const inputSchema = z.object({
   collectionId: z.string().uuid(),
@@ -36,7 +39,11 @@ export async function POST(req: NextRequest) {
         const signer = adapter.requiresSignerForEligibility
           ? await getSigner(wallet.id, getProvider(collection.chainId))
           : undefined;
-        const plan = await inspectWalletPhases(collection, wallet.address, input.quantity, phases, { signer });
+        const plan = await withTimeout(
+          inspectWalletPhases(collection, wallet.address, input.quantity, phases, { signer }),
+          WALLET_ELIGIBILITY_TIMEOUT_MS,
+          "OpenSea eligibility check timed out",
+        );
         const displayedPhases = plan.phases.map((phase) => ({ ...phase, eligibility: plan.eligibility.find((item) => item.phaseId === phase.id) }));
         const unavailable = plan.eligibility.find((item) => ["unknown", "unsupported"].includes(item.status));
         try {
@@ -52,11 +59,14 @@ export async function POST(req: NextRequest) {
           };
         }
       } catch (error) {
+        const timedOut = error instanceof OperationTimeoutError;
         return {
           walletId: wallet.id,
           eligible: false,
-          verificationUnavailable: isOpenSeaRateLimitError(error),
-          reason: isOpenSeaRateLimitError(error)
+          verificationUnavailable: timedOut || isOpenSeaRateLimitError(error),
+          reason: timedOut
+            ? "OpenSea wallet authentication is still processing — retry after a few seconds"
+            : isOpenSeaRateLimitError(error)
             ? "OpenSea rate limited the check — retrying shortly"
             : safeErrorMessage(error, "Eligibility could not be verified"),
           phases: [],

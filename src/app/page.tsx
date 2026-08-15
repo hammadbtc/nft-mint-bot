@@ -149,7 +149,7 @@ export default function MintsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ collectionId: project.id, walletIds, quantity: qty }),
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
       }).then(json).then((data) => {
         const value = data as { wallets?: WalletPhasePlan[] };
         setPhasePlans(Object.fromEntries((value.wallets || []).map((item) => [item.walletId, item])));
@@ -161,7 +161,10 @@ export default function MintsPage() {
           return validSelectedPhases.size > 0 && [...validSelectedPhases].every((phaseId) => plan?.phases.find((phase) => phase.id === phaseId)?.eligibility?.status === "eligible");
         })));
       }).catch((error) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) setMessage(error instanceof Error ? error.message : "Could not verify wallet eligibility");
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setMessage(error instanceof DOMException && error.name === "TimeoutError"
+          ? "OpenSea eligibility timed out. Refresh to retry; no wallet was marked ineligible."
+          : error instanceof Error ? error.message : "Could not verify wallet eligibility");
       }).finally(() => setCheckingEligibility(false));
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
