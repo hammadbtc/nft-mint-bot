@@ -108,9 +108,13 @@ export function isOpenSeaInvalidApiKeyError(error: unknown): boolean {
 
 function rejectConfiguredOpenSeaApiKey(error: unknown): boolean {
   const configured = process.env.OPENSEA_API_KEY?.trim();
-  if (!configured || rejectedConfiguredKey === configured || !isOpenSeaInvalidApiKeyError(error)) return false;
-  rejectedConfiguredKey = configured;
-  console.warn("Configured OpenSea API key was rejected; switching to an automatically refreshed instant key");
+  if (!configured || !isOpenSeaInvalidApiKeyError(error)) return false;
+  if (rejectedConfiguredKey !== configured) {
+    rejectedConfiguredKey = configured;
+    console.warn("Configured OpenSea API key was rejected; switching to an automatically refreshed instant key");
+  }
+  // Concurrent OpenSea calls may both have started with the same bad key. Each
+  // failed operation must retry even if another call marked the key first.
   return true;
 }
 
