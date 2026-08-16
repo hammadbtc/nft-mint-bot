@@ -24,11 +24,10 @@ const generateSchema = z.object({
   parentWalletId: z.string().uuid(),
 });
 
-async function assertMainWallet(id: string, chainId: number) {
-  const [parent] = await db.select({ id: schema.wallets.id, role: schema.wallets.role, chainId: schema.wallets.chainId, active: schema.wallets.active })
+async function assertMainWallet(id: string) {
+  const [parent] = await db.select({ id: schema.wallets.id, role: schema.wallets.role, active: schema.wallets.active })
     .from(schema.wallets).where(eq(schema.wallets.id, id)).limit(1);
   if (!parent || parent.role !== "main" || !parent.active) throw new Error("An active main wallet is required");
-  if (parent.chainId !== chainId) throw new Error("Main and worker wallets must use the same network");
 }
 
 export async function GET(req: NextRequest) {
@@ -42,7 +41,7 @@ export async function POST(req: NextRequest) {
     const body: unknown = await req.json();
     if (typeof body === "object" && body !== null && "action" in body && body.action === "generate") {
       const input = generateSchema.parse(body);
-      await assertMainWallet(input.parentWalletId, input.chainId);
+      await assertMainWallet(input.parentWalletId);
       const generated: Array<{ id:string; label:string; address:string; chainId:number; keyFormat:"private-key"|"mnemonic"; privateKey:string }> = [];
       const records: ReturnType<typeof prepareWalletRecord>["record"][] = [];
       for (let index = 0; index < input.count; index++) {
@@ -72,7 +71,7 @@ export async function POST(req: NextRequest) {
     }
     if (input.role === "worker") {
       if (!input.parentWalletId) throw new Error("Choose a main wallet for this worker");
-      await assertMainWallet(input.parentWalletId, input.chainId);
+      await assertMainWallet(input.parentWalletId);
     }
     const wallet = await importWallet(input);
     return NextResponse.json(wallet, { status: 201, headers: { "Cache-Control": "no-store" } });

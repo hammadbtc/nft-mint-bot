@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet]));
     const orderedWallets = walletIds.map((id) => walletById.get(id)!);
     const results = await Promise.all(orderedWallets.map(async (wallet) => {
-      const walletError = !wallet.active ? "Wallet is inactive" : wallet.chainId !== collection.chainId ? "Wallet is on a different chain" : undefined;
+      const walletError = !wallet.active ? "Wallet is inactive" : undefined;
       if (walletError) return { walletId: wallet.id, eligible: false, reason: walletError, phases: [] };
       try {
         const signer = adapter.requiresSignerForEligibility

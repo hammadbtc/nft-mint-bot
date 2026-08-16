@@ -131,6 +131,8 @@ async function assertBalanceAndSpendLimit(
   const [wallet] = await db.select({ spendLimit: schema.wallets.spendLimit }).from(schema.wallets)
     .where(eq(schema.wallets.id, walletId)).limit(1);
   if (!wallet?.spendLimit) return;
+  const chainId = Number(request.chainId);
+  if (!Number.isSafeInteger(chainId) || chainId < 1) throw new Error("Transaction chain is unavailable for spend-limit enforcement");
   const rows = await db.execute(sql<{ total: string }>`
     select coalesce(sum(
       cast(a.value as numeric) +
@@ -141,7 +143,9 @@ async function assertBalanceAndSpendLimit(
     ), 0)::text as total
     from mint_attempts a
     join mint_jobs j on j.id = a.job_id
+    join collections c on c.id = j.collection_id
     where j.wallet_id = ${walletId}
+      and c.chain_id = ${chainId}
       and a.status in ('prepared', 'submitted', 'confirming', 'confirmed')
       ${current ? sql`and not (a.job_id = ${current.jobId} and a.kind = ${current.kind})` : sql``}
   `);

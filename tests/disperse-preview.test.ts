@@ -5,7 +5,7 @@ import { stableHash } from "../src/lib/safety";
 
 const main = "11111111-1111-4111-8111-111111111111";
 const worker = "22222222-2222-4222-8222-222222222222";
-const input: DisperseInput = { type: "fund", mainWalletId: main, workerWalletIds: [worker], amountPerWallet: "1" };
+const input: DisperseInput = { type: "fund", mainWalletId: main, workerWalletIds: [worker], chainId: 4663, amountPerWallet: "1" };
 
 function preview(maxFeePerGas: bigint): DispersePreview {
   const transfer = { fromWalletId: main, toWalletId: worker, amountWei: "1000000000000000000", gasLimit: "25200", maxFeePerGas: maxFeePerGas.toString(), maxPriorityFeePerGas: null };
@@ -33,7 +33,7 @@ test("Disperse rejects a modified reviewed preview", () => {
 });
 
 test("Disperse sweep accepts fee movement when the reviewed sweep remains funded", () => {
-  const sweepInput: DisperseInput = { type: "sweep", mainWalletId: main, workerWalletIds: [worker] };
+  const sweepInput: DisperseInput = { type: "sweep", mainWalletId: main, workerWalletIds: [worker], chainId: 4663 };
   const makeSweep = (amount: bigint, maxFee: bigint): DispersePreview => {
     const transfer = { fromWalletId: worker, toWalletId: main, amountWei: amount.toString(), gasLimit: "25200", maxFeePerGas: maxFee.toString(), maxPriorityFeePerGas: null };
     const gas = 25200n * maxFee;

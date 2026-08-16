@@ -14,6 +14,7 @@ export type DisperseInput = {
   type: "fund" | "sweep";
   mainWalletId: string;
   workerWalletIds: string[];
+  chainId: number;
   amountPerWallet?: string;
 };
 
@@ -46,8 +47,8 @@ async function walletSet(input: DisperseInput) {
   const ids = [...new Set(input.workerWalletIds)].sort();
   const workers = ids.length ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, ids)) : [];
   if (workers.length !== ids.length) throw new Error("One or more worker wallets were not found");
-  if (workers.some((worker) => worker.role !== "worker" || worker.parentWalletId !== main.id || worker.chainId !== main.chainId || !worker.active)) {
-    throw new Error("Workers must be active children of the selected main wallet on the same network");
+  if (workers.some((worker) => worker.role !== "worker" || worker.parentWalletId !== main.id || !worker.active)) {
+    throw new Error("Workers must be active children of the selected main wallet");
   }
   return { main, workers: workers.sort((a, b) => a.id.localeCompare(b.id)), ids };
 }
@@ -125,7 +126,7 @@ export function validateDisperseRefresh(
 
 export async function previewDisperse(input: DisperseInput): Promise<DispersePreview> {
   const { main, workers, ids } = await walletSet(input);
-  const provider = getProvider(main.chainId);
+  const provider = getProvider(input.chainId);
   const fees = await provider.getFeeData();
   const baseMaxFee = fees.maxFeePerGas ?? fees.gasPrice;
   if (baseMaxFee == null || baseMaxFee <= 0n) throw new Error("RPC did not return a usable network fee");
@@ -181,7 +182,7 @@ export async function previewDisperse(input: DisperseInput): Promise<DispersePre
     type: input.type,
     mainWalletId: main.id,
     workerWalletIds: ids,
-    chainId: main.chainId,
+    chainId: input.chainId,
     transfers,
     estimatedGasWei: gasTotal.toString(),
     totalRequiredWei: (input.type === "fund" ? valueTotal + gasTotal : valueTotal).toString(),
@@ -200,7 +201,7 @@ export async function queueDisperse(input: DisperseInput, expected: DispersePrev
   if (expected.version !== 2 || Date.now() > Date.parse(expected.expiresAt)) throw new Error("Disperse preview expired; review current balances and fees again");
   const current = await previewDisperse(input);
   const { main } = await walletSet(input);
-  const mainBalance = input.type === "fund" ? await getProvider(main.chainId).getBalance(main.address) : undefined;
+  const mainBalance = input.type === "fund" ? await getProvider(input.chainId).getBalance(main.address) : undefined;
   validateDisperseRefresh(input, expected, current, mainBalance);
   const requestHash = stableHash({ ...input, workerWalletIds: [...new Set(input.workerWalletIds)].sort() });
   const operationId = randomUUID();
@@ -247,7 +248,7 @@ async function runTransfer(transferId: string, chainId: number): Promise<"confir
     db.select().from(schema.wallets).where(eq(schema.wallets.id, transfer.fromWalletId)).limit(1),
     db.select().from(schema.wallets).where(eq(schema.wallets.id, transfer.toWalletId)).limit(1),
   ]);
-  if (!from || !to || !from.active || !to.active || from.chainId !== chainId || to.chainId !== chainId) {
+  if (!from || !to || !from.active || !to.active) {
     throw new Error("Disperse wallet state changed after review");
   }
   const provider = getProvider(chainId);

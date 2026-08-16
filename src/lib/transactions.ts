@@ -23,12 +23,11 @@ export async function prepareSignedTransaction(
   const onChainNonce = await provider.getTransactionCount(address, "pending");
 
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${walletId}))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${walletId}:${chainId}`}))`);
     const rows = await tx.execute(sql<{ next_nonce: number }>`
       insert into wallet_nonce_state (wallet_id, chain_id, next_nonce, updated_at)
       values (${walletId}, ${chainId}, ${onChainNonce}, ${new Date().toISOString()})
-      on conflict (wallet_id) do update set
-        chain_id = excluded.chain_id,
+      on conflict (wallet_id, chain_id) do update set
         next_nonce = greatest(wallet_nonce_state.next_nonce, excluded.next_nonce),
         updated_at = excluded.updated_at
       returning next_nonce
@@ -46,7 +45,7 @@ export async function prepareSignedTransaction(
     await tx.execute(sql`
       update wallet_nonce_state
       set next_nonce = ${nonce + 1}, updated_at = ${new Date().toISOString()}
-      where wallet_id = ${walletId}
+      where wallet_id = ${walletId} and chain_id = ${chainId}
     `);
     return prepared;
   });

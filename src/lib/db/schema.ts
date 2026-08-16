@@ -1,4 +1,4 @@
-import { pgTable, text, integer, boolean, serial, varchar, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, boolean, serial, varchar, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ─── Chains ────────────────────────────────────────────────────────────
@@ -35,16 +35,16 @@ export const wallets = pgTable("wallets", {
     .notNull()
     .default(sql`now()`),
 }, (table) => [
-  uniqueIndex("wallets_chain_address_unique").on(table.chainId, sql`lower(${table.address})`),
+  uniqueIndex("wallets_address_unique").on(sql`lower(${table.address})`),
   index("wallets_parent_idx").on(table.parentWalletId),
 ]);
 
 export const walletNonceState = pgTable("wallet_nonce_state", {
-  walletId: varchar("wallet_id").primaryKey().references(() => wallets.id),
+  walletId: varchar("wallet_id").notNull().references(() => wallets.id),
   chainId: integer("chain_id").notNull(),
   nextNonce: integer("next_nonce").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`now()`),
-});
+}, (table) => [primaryKey({ columns: [table.walletId, table.chainId] })]);
 
 // ─── Collections ───────────────────────────────────────────────────────
 export const collections = pgTable("collections", {

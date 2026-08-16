@@ -104,14 +104,15 @@ test("live broadcasting requires two independent explicit gates", () => {
   if (previousConfirmed === undefined) delete process.env.LIVE_TRANSACTIONS_CONFIRMED; else process.env.LIVE_TRANSACTIONS_CONFIRMED = previousConfirmed;
 });
 
-test("main wallets can mint while workers still require an active same-chain main", () => {
+test("EVM wallets can mint across chains while workers still require an active main", () => {
   const main = { active: true, role: "main", parentWalletId: null, chainId: 4663 };
   const worker = { active: true, role: "worker", parentWalletId: "main-id", chainId: 4663 };
   assert.equal(mintWalletEligibilityError(main, 4663), null);
   assert.equal(mintWalletEligibilityError(worker, 4663, main), null);
   assert.match(mintWalletEligibilityError(worker, 4663) || "", /active main wallet/);
   assert.match(mintWalletEligibilityError({ ...main, active: false }, 4663) || "", /inactive/);
-  assert.match(mintWalletEligibilityError(main, 1) || "", /wrong network/);
+  assert.equal(mintWalletEligibilityError(main, 1), null);
+  assert.equal(mintWalletEligibilityError({ ...worker, chainId: 1 }, 1, main), null);
 });
 
 test("operator errors redact wallet keys, provider keys, credentials, and tokens", () => {

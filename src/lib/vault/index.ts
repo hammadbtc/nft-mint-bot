@@ -2,7 +2,7 @@ import { ethers } from "ethers";
 import { v4 as uuidv4 } from "uuid";
 import { db, schema } from "@/lib/db";
 import { encryptPrivateKey, decryptPrivateKey } from "./crypto";
-import { eq, and } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export interface WalletImport {
   label: string;
@@ -58,6 +58,9 @@ export function prepareWalletKeyReplacement(input: Pick<WalletImport, "keyType" 
  */
 export async function importWallet(input: WalletImport) {
   const prepared = prepareWalletRecord(input);
+  const [existing] = await db.select({ id: schema.wallets.id }).from(schema.wallets)
+    .where(sql`lower(${schema.wallets.address}) = lower(${prepared.record.address})`).limit(1);
+  if (existing) throw new Error("This EVM wallet is already imported and works on every supported network");
   await db.insert(schema.wallets).values(prepared.record);
   return prepared.publicWallet;
 }
@@ -111,10 +114,7 @@ export async function getSigner(walletId: string, provider: ethers.Provider): Pr
  * List wallets (without keys).
  */
 export async function listWallets(chainId?: number) {
-  const conditions = [];
-  if (chainId !== undefined) {
-    conditions.push(eq(schema.wallets.chainId, chainId));
-  }
+  void chainId;
 
   const rows = await db
     .select({
@@ -130,8 +130,7 @@ export async function listWallets(chainId?: number) {
       parentWalletId: schema.wallets.parentWalletId,
       createdAt: schema.wallets.createdAt,
     })
-    .from(schema.wallets)
-    .where(conditions.length ? and(...conditions) : undefined);
+    .from(schema.wallets);
 
   return rows;
 }

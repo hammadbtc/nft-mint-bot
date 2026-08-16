@@ -31,6 +31,7 @@ const input = z.object({
   type: z.enum(["fund", "sweep"]),
   mainWalletId: z.string().uuid(),
   workerWalletIds: z.array(z.string().uuid()).min(1).max(500),
+  chainId: z.number().int().positive(),
   amountPerWallet: z.string().optional(),
   expected: previewSchema.optional(),
 });
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = input.parse(await req.json());
-    const operation = { type: body.type, mainWalletId: body.mainWalletId, workerWalletIds: body.workerWalletIds, amountPerWallet: body.amountPerWallet };
+    const operation = { type: body.type, mainWalletId: body.mainWalletId, workerWalletIds: body.workerWalletIds, chainId: body.chainId, amountPerWallet: body.amountPerWallet };
     if (body.action === "preview") return NextResponse.json(await previewDisperse(operation), { headers: { "Cache-Control": "no-store" } });
     if (!body.expected) throw new Error("An exact reviewed preview is required");
     const key = req.headers.get("idempotency-key");
