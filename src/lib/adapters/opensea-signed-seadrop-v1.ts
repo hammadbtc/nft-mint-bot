@@ -255,7 +255,7 @@ export function validateOpenSeaSignedTransaction(
   raw: unknown,
 ): ethers.TransactionRequest {
   const response = raw as { to?: string; data?: string; value?: string; chain?: string };
-  if (response.chain !== "robinhood") throw new Error("OpenSea built the mint on a different chain");
+  if (response.chain !== openSeaChainForChainId(collection.chainId)) throw new Error("OpenSea built the mint on a different chain");
   if (!response.to || response.to.toLowerCase() !== config.seaDropAddress.toLowerCase()) throw new Error("OpenSea returned an unexpected mint target");
   if (!response.data || !ethers.isHexString(response.data)) throw new Error("OpenSea returned invalid signed mint calldata");
   const value = BigInt(response.value || "0");

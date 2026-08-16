@@ -59,7 +59,7 @@ test("OpenSea invalid or expired API-key responses are recognized for automatic 
   assert.equal(isOpenSeaInvalidApiKeyError(new Error("Too many requests")), false);
 });
 
-function signedResponse(overrides: { nft?: string; quantity?: number; stageIndex?: number; recipient?: string; feeRecipient?: string } = {}) {
+function signedResponse(overrides: { nft?: string; quantity?: number; stageIndex?: number; recipient?: string; feeRecipient?: string; chain?: string } = {}) {
   const data = new ethers.Interface(mintAbi).encodeFunctionData("mintSigned", [
     overrides.nft || collectionAddress,
     overrides.feeRecipient || feeRecipient,
@@ -78,7 +78,7 @@ function signedResponse(overrides: { nft?: string; quantity?: number; stageIndex
     123,
     `0x${"ab".repeat(65)}`,
   ]);
-  return { to: seaDropAddress, data, value: "0x0", chain: "robinhood" };
+  return { to: seaDropAddress, data, value: "0x0", chain: overrides.chain || "robinhood" };
 }
 
 test("OpenSea signed FCFS payload is decoded and bound to the reviewed wallet transaction", () => {
@@ -86,6 +86,16 @@ test("OpenSea signed FCFS payload is decoded and bound to the reviewed wallet tr
   assert.equal(String(request.to).toLowerCase(), seaDropAddress.toLowerCase());
   assert.equal(request.value, 0n);
   assert.equal(request.chainId, 4663);
+});
+
+test("OpenSea signed payload validation accepts the reviewed Ethereum chain and rejects mismatches", () => {
+  const ethereumCollection = { ...collection, chainId: 1 };
+  const request = validateOpenSeaSignedTransaction(ethereumCollection, config, stage, signerAddress, 1, signedResponse({ chain: "ethereum" }));
+  assert.equal(request.chainId, 1);
+  assert.throws(
+    () => validateOpenSeaSignedTransaction(ethereumCollection, config, stage, signerAddress, 1, signedResponse()),
+    /different chain/,
+  );
 });
 
 test("wallet-bound payload proves FCFS eligibility without weakening final transaction validation", () => {
