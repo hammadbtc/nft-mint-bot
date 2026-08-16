@@ -164,3 +164,22 @@ test("Retail Shrooms pins GTD, FCFS, and public to the supplied OpenSea drop", (
   assert.ok(shrooms?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/retail-shrooms-423133943/overview"));
   assert.ok(shrooms?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0xb342f37e2b85238db86dab49d042ecf87e41bfee"));
 });
+
+test("HMM CAT pins team, holder allowlist, and public to the supplied OpenSea drop", () => {
+  const hmmCat = seeds.find((seed) => seed.slug === "hmm-cat-39998770");
+  assert.equal(hmmCat?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(hmmCat?.contractAddress.toLowerCase(), "0x3360556af8e5255ab0fa7d3bc28c6ba54ca31320");
+  assert.equal(hmmCat?.adapterConfig.openSeaSlug, "hmm-cat-39998770");
+  assert.deepEqual(hmmCat?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["team", "signed", "0", 77],
+    ["wl", "signed", "0", 1],
+    ["public", "public", "100000000000000", 10],
+  ]);
+  assert.deepEqual(hmmCat?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, undefined]);
+  assert.deepEqual(hmmCat?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [3333, 1000, true],
+    [3333, 1000, true],
+  ]);
+  assert.ok(hmmCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/hmm-cat-39998770/overview"));
+  assert.ok(hmmCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x3360556af8e5255ab0fa7d3bc28c6ba54ca31320"));
+});

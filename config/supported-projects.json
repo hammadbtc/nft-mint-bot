@@ -342,5 +342,71 @@
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0xb342f37e2b85238db86dab49d042ecf87e41bfee" }
       ]
     }
+  },
+  {
+    "id": "dba43e36-caee-4ed9-bc25-9b54e0e3612d",
+    "name": "HMM CAT",
+    "slug": "hmm-cat-39998770",
+    "contractAddress": "0x3360556aF8e5255Ab0Fa7D3bc28c6bA54Ca31320",
+    "chainId": 4663,
+    "mintMethod": "mintSigned",
+    "mintAbi": ["function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"],
+    "mintPrice": "0",
+    "maxPerWallet": 77,
+    "maxSupply": 3333,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/hmm-cat-39998770/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/hmm-cat-39998770/image_type_logo/0f4c637f7862b7d917d6e5865ac062/390f4c637f7862b7d917d6e5865ac062.gif",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "hmm-cat-39998770",
+      "stages": [
+        {
+          "id": "team",
+          "name": "team",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-16T13:00:00.000Z",
+          "endsAt": "2026-08-16T13:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 77,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 3333,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "wl",
+          "name": "wl",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-16T13:30:00.000Z",
+          "endsAt": "2026-08-16T14:00:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 3333,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public stage",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-16T14:00:00.000Z",
+          "endsAt": "2026-08-19T14:00:00.000Z",
+          "priceWei": "100000000000000",
+          "maxPerWallet": 10
+        }
+      ],
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/hmm-cat-39998770" },
+        { "domain": "opensea.io", "path": "/collection/hmm-cat-39998770/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x3360556af8e5255ab0fa7d3bc28c6ba54ca31320" }
+      ]
+    }
   }
 ]
