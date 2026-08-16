@@ -5,6 +5,7 @@ import {
   applyPayloadEligibility,
   eligibilityPhaseFromTransaction,
   mapSignedStageEligibility,
+  openSeaChainForChainId,
   openseaSignedSeaDropV1,
   validateOpenSeaSignedTransaction,
   type ReviewedOpenSeaStage,
@@ -41,6 +42,12 @@ const collection = {
   domains: '["opensea.io"]', siteUrl: "https://opensea.io/collection/hoodbirdss/overview", imageUrl: null,
   adapterConfig: JSON.stringify(config), verified: true, createdAt: new Date().toISOString(),
 };
+
+test("OpenSea signed drops bind reviewed chain IDs to exact API chain identifiers", () => {
+  assert.equal(openSeaChainForChainId(1), "ethereum");
+  assert.equal(openSeaChainForChainId(4663), "robinhood");
+  assert.throws(() => openSeaChainForChainId(8453), /unsupported on chain 8453/);
+});
 
 test("dashboard eligibility retains authenticated per-stage OpenSea checks", () => {
   assert.equal(openseaSignedSeaDropV1.requiresSignerForEligibility, true);

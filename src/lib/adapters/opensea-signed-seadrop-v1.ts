@@ -138,6 +138,12 @@ function normalizeStageType(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
+export function openSeaChainForChainId(chainId: number): string {
+  const chain = ({ 1: "ethereum", 4663: "robinhood" } as Record<number, string>)[chainId];
+  if (!chain) throw new Error(`OpenSea signed drops are unsupported on chain ${chainId}`);
+  return chain;
+}
+
 function sameInstant(left: string, right: string): boolean {
   return Date.parse(left) === Date.parse(right);
 }
@@ -154,7 +160,7 @@ function matchApiStage(reviewed: ReviewedOpenSeaStage, apiStages: ApiStage[]): A
 function validateApiDrop(collection: SupportedCollection, config: SignedSeaDropConfig, raw: unknown): ApiDrop {
   const drop = raw as Partial<ApiDrop>;
   if (drop.collectionSlug !== config.openSeaSlug) throw new Error("OpenSea returned a different drop slug");
-  if (drop.chain !== "robinhood") throw new Error("OpenSea returned the signed drop on a different chain");
+  if (drop.chain !== openSeaChainForChainId(collection.chainId)) throw new Error("OpenSea returned the signed drop on a different chain");
   if (!drop.dropType || !normalizeStageType(drop.dropType).includes("seadrop")) throw new Error("OpenSea returned a different drop protocol");
   if (!drop.contractAddress || drop.contractAddress.toLowerCase() !== collection.contractAddress.toLowerCase()) throw new Error("OpenSea returned a different drop contract");
   if (!Array.isArray(drop.stages)) throw new Error("OpenSea did not return signed-drop stages");

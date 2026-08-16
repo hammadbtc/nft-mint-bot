@@ -183,3 +183,22 @@ test("HMM CAT pins team, holder allowlist, and public to the supplied OpenSea dr
   assert.ok(hmmCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/hmm-cat-39998770/overview"));
   assert.ok(hmmCat?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x3360556af8e5255ab0fa7d3bc28c6ba54ca31320"));
 });
+
+test("888 society pins its signed and public Ethereum SeaDrop stages", () => {
+  const society = seeds.find((seed) => seed.slug === "888-society-605141138");
+  assert.equal(society?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(society?.contractAddress.toLowerCase(), "0x632b4a985c12b990f4ea22ffa479c7c715e973a7");
+  assert.equal(society?.adapterConfig.openSeaSlug, "888-society-605141138");
+  assert.deepEqual(society?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["team-mods", "signed", "0", 1],
+    ["gtd", "signed", "0", 1],
+    ["public", "public", "2670000000000000", 1],
+  ]);
+  assert.deepEqual(society?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, undefined]);
+  assert.deepEqual(society?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [10014, 1000, true],
+    [10014, 1000, true],
+  ]);
+  assert.ok(society?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/888-society-605141138/overview"));
+  assert.ok(society?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "etherscan.io" && matcher.path === "/address/0x632b4a985c12b990f4ea22ffa479c7c715e973a7"));
+});

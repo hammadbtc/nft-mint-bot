@@ -408,5 +408,71 @@
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x3360556af8e5255ab0fa7d3bc28c6ba54ca31320" }
       ]
     }
+  },
+  {
+    "id": "f9283bf1-0d20-4eec-bcf5-431d822c0c3b",
+    "name": "888 society",
+    "slug": "888-society-605141138",
+    "contractAddress": "0x632b4a985c12b990f4ea22ffa479c7c715e973a7",
+    "chainId": 1,
+    "mintMethod": "mintSigned",
+    "mintAbi": ["function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"],
+    "mintPrice": "0",
+    "maxPerWallet": 1,
+    "maxSupply": 10014,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": ["opensea.io", "etherscan.io"],
+    "siteUrl": "https://opensea.io/collection/888-society-605141138/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/888-society-605141138/image_type_logo/9d3a219b02e434c83fd9b45af2c393/8d9d3a219b02e434c83fd9b45af2c393.jpeg",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "888-society-605141138",
+      "stages": [
+        {
+          "id": "team-mods",
+          "name": "I know a guy (team/mods)",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-16T18:08:00.000Z",
+          "endsAt": "2026-08-16T19:03:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 10014,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "gtd",
+          "name": "don't embarrASS us. (GTD)",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-16T19:03:00.000Z",
+          "endsAt": "2026-08-16T22:36:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 10014,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "the public humiliation ",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-16T22:36:00.000Z",
+          "endsAt": "2026-08-17T04:36:00.000Z",
+          "priceWei": "2670000000000000",
+          "maxPerWallet": 1
+        }
+      ],
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/888-society-605141138" },
+        { "domain": "opensea.io", "path": "/collection/888-society-605141138/overview" },
+        { "domain": "etherscan.io", "path": "/address/0x632b4a985c12b990f4ea22ffa479c7c715e973a7" }
+      ]
+    }
   }
 ]
