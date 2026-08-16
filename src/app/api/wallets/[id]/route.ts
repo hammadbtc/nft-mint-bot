@@ -5,9 +5,27 @@ import { db, schema } from "@/lib/db";
 import { prepareWalletKeyReplacement } from "@/lib/vault";
 import { safeErrorMessage } from "@/lib/safety";
 import { requireAdminPassword } from "@/lib/admin-auth";
+import { getProvider, listChains } from "@/lib/chains";
 
 type Context = { params: Promise<{ id: string }> };
 const noStore = { "Cache-Control": "no-store" };
+
+export async function GET(req: NextRequest, { params }: Context) {
+  try {
+    const { id } = await params;
+    const chainId = Number(req.nextUrl.searchParams.get("chainId"));
+    if (!Number.isSafeInteger(chainId) || chainId < 1 || !listChains().some((chain) => chain.id === chainId)) {
+      throw new Error("Choose a supported EVM network");
+    }
+    const [wallet] = await db.select({ id: schema.wallets.id, address: schema.wallets.address, active: schema.wallets.active })
+      .from(schema.wallets).where(eq(schema.wallets.id, id)).limit(1);
+    if (!wallet) return NextResponse.json({ error: "Wallet not found" }, { status: 404, headers: noStore });
+    const balanceWei = await getProvider(chainId).getBalance(wallet.address);
+    return NextResponse.json({ walletId: wallet.id, address: wallet.address, chainId, balanceWei: balanceWei.toString(), active: wallet.active }, { headers: noStore });
+  } catch (error) {
+    return NextResponse.json({ error: safeErrorMessage(error, "Could not load wallet balance") }, { status: 400, headers: noStore });
+  }
+}
 
 export async function DELETE(req: NextRequest, { params }: Context) {
   try {
