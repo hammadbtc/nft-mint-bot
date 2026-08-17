@@ -278,6 +278,32 @@
     }
   },
   {
+    "id": "4bf17470-3066-4d78-9c27-254ca324b51e",
+    "name": "Terminal Assistants",
+    "slug": "terminal-assistants",
+    "contractAddress": "0xD27039734219816FEF06244D5745fE73aBef832d",
+    "chainId": 4663,
+    "mintMethod": "mint",
+    "mintAbi": ["function mint() payable returns (uint256 id)"],
+    "mintPrice": "1300000000000000",
+    "maxPerWallet": 1,
+    "maxSupply": 6666,
+    "adapterKey": "terminal-assistants-v1",
+    "domains": ["terminalrh.xyz", "robinhoodchain.blockscout.com", "x.com"],
+    "siteUrl": "https://terminalrh.xyz/",
+    "imageUrl": "https://terminalrh.xyz/icon-512.png",
+    "adapterConfig": {
+      "expectedMaxSupply": 6666,
+      "expectedMintPriceWei": "1300000000000000",
+      "expectedMaxPerWallet": 5,
+      "urlMatchers": [
+        { "domain": "terminalrh.xyz", "path": "/" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0xd27039734219816fef06244d5745fe73abef832d" },
+        { "domain": "x.com", "path": "/terminalassist/status/2089039200888688652" }
+      ]
+    }
+  },
+  {
     "id": "61140209-f6ce-4bd4-9499-416698056f58",
     "name": "Retail Shrooms",
     "slug": "retail-shrooms-423133943",
