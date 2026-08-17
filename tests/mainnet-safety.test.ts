@@ -69,7 +69,7 @@ test("explicit phase policy never reroutes a phase-bound task", () => {
 });
 
 test("manual owner-opened phases get a short polling retry without inventing a launch time", () => {
-  assert.equal(manualOpenRetryAt({ id: "open", name: "Open Mint", status: "upcoming", manualOpen: true }, 1_000), new Date(3_500).toISOString());
+  assert.equal(manualOpenRetryAt({ id: "open", name: "Open Mint", status: "upcoming", manualOpen: true }, 1_000), new Date(1_250).toISOString());
   assert.equal(manualOpenRetryAt({ id: "timed", name: "Timed", status: "upcoming", startsAt: "2030-01-01T00:00:00Z" }, 1_000), null);
   assert.equal(manualOpenRetryAt({ id: "live", name: "Live", status: "live", manualOpen: true }, 1_000), null);
 });

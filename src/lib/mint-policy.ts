@@ -1,6 +1,8 @@
 import type { MintPhase, MintPhaseEligibility } from "@/lib/adapters/types";
 
-export const MANUAL_OPEN_POLL_MS = 2_500;
+// Owner-switched FCFS mints can sell out in seconds. The scheduler itself ticks
+// every 250 ms, so do not park a checked task for multiple seconds.
+export const MANUAL_OPEN_POLL_MS = 250;
 
 export function selectExecutionPhase(phases: MintPhase[]): MintPhase {
   const live = phases.find((phase) => phase.status === "live");

@@ -15,14 +15,14 @@ function preview(maxFeePerGas: bigint): DispersePreview {
 }
 
 test("Disperse accepts a fresh fee quote within the reviewed ceiling", () => {
-  const expected = preview(125n);
-  const current = preview(150n); // represents a current base quote of 120
+  const expected = preview(300n);
+  const current = preview(360n); // represents a current base quote of 120
   assert.doesNotThrow(() => validateDisperseRefresh(input, expected, current, BigInt(expected.totalRequiredWei)));
 });
 
 test("Disperse rejects fee movement above the reviewed ceiling", () => {
-  const expected = preview(125n);
-  const current = preview(160n); // represents a current base quote of 128
+  const expected = preview(300n);
+  const current = preview(930n); // represents a current base quote of 310
   assert.throws(() => validateDisperseRefresh(input, expected, current, BigInt(expected.totalRequiredWei)), /fee exceeded/);
 });
 
@@ -41,7 +41,7 @@ test("Disperse sweep accepts fee movement when the reviewed sweep remains funded
     return { ...core, generatedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), fingerprint: stableHash(core) };
   };
   const balance = 10_000_000n;
-  const expected = makeSweep(balance - 25200n * 125n, 125n);
-  const current = makeSweep(balance - 25200n * 150n, 150n);
+  const expected = makeSweep(balance - 25200n * 300n, 300n);
+  const current = makeSweep(balance - 25200n * 360n, 360n);
   assert.doesNotThrow(() => validateDisperseRefresh(sweepInput, expected, current));
 });

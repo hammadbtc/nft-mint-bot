@@ -447,12 +447,12 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   if (job.phaseId && adapter.pollPhaseReady) {
     try {
       if (!(await adapter.pollPhaseReady(collection, job.phaseId, provider))) {
-        throw new MintNotOpenError(new Date(Date.now() + 2_500).toISOString(), null);
+        throw new MintNotOpenError(new Date(Date.now() + 250).toISOString(), null);
       }
     } catch (error) {
       if (error instanceof MintNotOpenError) throw error;
       if (isTransientRpcReadError(error)) {
-        throw new MintNotOpenError(new Date(Date.now() + 2_500).toISOString(), null);
+        throw new MintNotOpenError(new Date(Date.now() + 250).toISOString(), null);
       }
       throw error;
     }

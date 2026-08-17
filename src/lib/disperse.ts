@@ -9,6 +9,7 @@ import { liveTransactionsEnabled, requireLiveTransactions, safeErrorMessage, sta
 
 const PREVIEW_TTL_MS = 60_000;
 const OPERATION_LEASE_MS = 120_000;
+const FEE_CEILING_PERCENT = 300n;
 
 export type DisperseInput = {
   type: "fund" | "sweep";
@@ -107,9 +108,9 @@ export function validateDisperseRefresh(
     const fresh = currentByTransfer.get(transferKey(transfer));
     if (!fresh) throw new Error("A reviewed Disperse wallet no longer has a runnable transfer");
     if (BigInt(fresh.gasLimit) > BigInt(transfer.gasLimit)) throw new Error("Gas requirement exceeded the reviewed limit; preview again");
-    // previewDisperse stores a 125% ceiling. Recover a conservative current
+    // previewDisperse stores a 300% ceiling. Recover a conservative current
     // base quote and ensure it remains within the operator-reviewed ceiling.
-    const currentBaseFeeCeiling = (BigInt(fresh.maxFeePerGas) * 100n + 124n) / 125n;
+    const currentBaseFeeCeiling = (BigInt(fresh.maxFeePerGas) * 100n + FEE_CEILING_PERCENT - 1n) / FEE_CEILING_PERCENT;
     if (currentBaseFeeCeiling > BigInt(transfer.maxFeePerGas)) throw new Error("Network fee exceeded the reviewed cap; preview again");
     if (input.type === "fund") {
       if (fresh.amountWei !== transfer.amountWei) throw new Error("Fund amount changed after review");
@@ -130,8 +131,8 @@ export async function previewDisperse(input: DisperseInput): Promise<DispersePre
   const fees = await provider.getFeeData();
   const baseMaxFee = fees.maxFeePerGas ?? fees.gasPrice;
   if (baseMaxFee == null || baseMaxFee <= 0n) throw new Error("RPC did not return a usable network fee");
-  const maxFee = (baseMaxFee * 125n) / 100n;
-  const priority = fees.maxPriorityFeePerGas == null ? null : (fees.maxPriorityFeePerGas * 125n) / 100n;
+  const maxFee = (baseMaxFee * FEE_CEILING_PERCENT) / 100n;
+  const priority = fees.maxPriorityFeePerGas == null ? null : (fees.maxPriorityFeePerGas * FEE_CEILING_PERCENT) / 100n;
   const transfers: DisperseTransferPlan[] = [];
 
   if (input.type === "fund") {
@@ -344,8 +345,10 @@ export async function runDisperseOperation(operationId: string): Promise<void> {
       const recoverable = Boolean(current?.txHash && current?.rawTx);
       await db.update(schema.disperseTransfers).set({ status: recoverable ? "prepared" : "failed", error: safeErrorMessage(error) })
         .where(eq(schema.disperseTransfers.id, transfer.id));
-      if (recoverable) confirming = true;
-      break;
+      if (recoverable) {
+        confirming = true;
+        break;
+      }
     }
   }
   const refreshed = await db.select({ status: schema.disperseTransfers.status }).from(schema.disperseTransfers)

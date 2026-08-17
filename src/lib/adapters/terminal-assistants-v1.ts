@@ -12,8 +12,8 @@ const READ_ABI = [
   "function mintedBy(address) view returns (uint256)",
 ];
 const MINT_ABI = ["function mint() payable returns (uint256 id)"];
-const SWITCH_CACHE_MS = 1_500;
-const STATE_CACHE_MS = 400;
+const SWITCH_CACHE_MS = 100;
+const STATE_CACHE_MS = 100;
 
 type TerminalConfig = {
   expectedMaxSupply: number;
@@ -23,6 +23,7 @@ type TerminalConfig = {
 
 type BaseState = {
   config: TerminalConfig;
+  blockNumber: number;
   mintOpen: boolean;
   totalMinted: bigint;
   supply: bigint;
@@ -45,19 +46,22 @@ function configFor(collection: SupportedCollection): TerminalConfig {
 async function readBaseState(collection: SupportedCollection, provider: ethers.Provider): Promise<BaseState> {
   const config = configFor(collection);
   const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
+  const block = await provider.getBlock("latest");
+  if (!block) throw new Error("Robinhood RPC did not return a latest block for Terminal Assistants");
+  const atBlock = { blockTag: block.number };
   const [maxSupply, mintPrice, maxPerWallet, mintOpen, totalMinted, supply] = await Promise.all([
-    contract.getFunction("MAX_SUPPLY").staticCall().then(BigInt),
-    contract.getFunction("MINT_PRICE").staticCall().then(BigInt),
-    contract.getFunction("MAX_PER_WALLET").staticCall().then(BigInt),
-    contract.getFunction("mintOpen").staticCall().then(Boolean),
-    contract.getFunction("totalMinted").staticCall().then(BigInt),
-    contract.getFunction("supply").staticCall().then(BigInt),
+    contract.getFunction("MAX_SUPPLY").staticCall(atBlock).then(BigInt),
+    contract.getFunction("MINT_PRICE").staticCall(atBlock).then(BigInt),
+    contract.getFunction("MAX_PER_WALLET").staticCall(atBlock).then(BigInt),
+    contract.getFunction("mintOpen").staticCall(atBlock).then(Boolean),
+    contract.getFunction("totalMinted").staticCall(atBlock).then(BigInt),
+    contract.getFunction("supply").staticCall(atBlock).then(BigInt),
   ]);
   if (maxSupply !== BigInt(config.expectedMaxSupply)) throw new Error("Terminal Assistants on-chain maximum supply changed from 6,666");
   if (mintPrice !== BigInt(config.expectedMintPriceWei)) throw new Error("Terminal Assistants on-chain mint price changed from 0.0013 ETH");
   if (maxPerWallet !== BigInt(config.expectedMaxPerWallet)) throw new Error("Terminal Assistants on-chain wallet cap changed from five");
   if (supply > maxSupply || totalMinted > supply) throw new Error("Terminal Assistants on-chain supply accounting is inconsistent");
-  return { config, mintOpen, totalMinted, supply };
+  return { config, blockNumber: block.number, mintOpen, totalMinted, supply };
 }
 
 async function readState(collection: SupportedCollection, provider: ethers.Provider, signerAddress?: string) {
@@ -75,10 +79,10 @@ async function readState(collection: SupportedCollection, provider: ethers.Provi
     void promise.catch(() => { if (byCollection?.get(key)?.promise === promise) byCollection.delete(key); });
   }
   const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
-  const [base, mintedBy] = await Promise.all([
-    cached.promise,
-    signerAddress ? contract.getFunction("mintedBy").staticCall(signerAddress).then(BigInt) : Promise.resolve(0n),
-  ]);
+  const base = await cached.promise;
+  const mintedBy = signerAddress
+    ? await contract.getFunction("mintedBy").staticCall(signerAddress, { blockTag: base.blockNumber }).then(BigInt)
+    : 0n;
   return { ...base, mintedBy };
 }
 
@@ -100,23 +104,20 @@ async function isMintOpen(collection: SupportedCollection, provider: ethers.Prov
   return cached.promise;
 }
 
-async function confirmMintOpenStable(collection: SupportedCollection, provider: ethers.Provider): Promise<void> {
+async function revalidateMintSnapshot(collection: SupportedCollection, provider: ethers.Provider, signerAddress: string): Promise<void> {
   const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
-  let firstBlock = -1;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const block = await provider.getBlock("latest");
-    if (!block) throw new Error("Robinhood RPC did not return a latest block for Terminal Assistants");
-    if (attempt === 0) firstBlock = block.number;
-    const [mintOpen, totalMinted, supply] = await Promise.all([
-      contract.getFunction("mintOpen").staticCall({ blockTag: block.number }).then(Boolean),
-      contract.getFunction("totalMinted").staticCall({ blockTag: block.number }).then(BigInt),
-      contract.getFunction("supply").staticCall({ blockTag: block.number }).then(BigInt),
-    ]);
-    if (!mintOpen) throw new Error("Terminal Assistants mint has not been opened on-chain");
-    if (totalMinted >= supply) throw new Error("Terminal Assistants is sold out");
-    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250));
-    if (attempt === 2 && block.number <= firstBlock) throw new Error("Terminal Assistants open switch could not be confirmed across fresh blocks");
-  }
+  const block = await provider.getBlock("latest");
+  if (!block) throw new Error("Robinhood RPC did not return a latest block for Terminal Assistants");
+  const atBlock = { blockTag: block.number };
+  const [mintOpen, totalMinted, supply, mintedBy] = await Promise.all([
+    contract.getFunction("mintOpen").staticCall(atBlock).then(Boolean),
+    contract.getFunction("totalMinted").staticCall(atBlock).then(BigInt),
+    contract.getFunction("supply").staticCall(atBlock).then(BigInt),
+    contract.getFunction("mintedBy").staticCall(signerAddress, atBlock).then(BigInt),
+  ]);
+  if (!mintOpen) throw new Error("Terminal Assistants mint has not been opened on-chain");
+  if (totalMinted >= supply) throw new Error("Terminal Assistants is sold out");
+  if (mintedBy >= 5n) throw new Error("This wallet has reached the five-mint contract cap");
 }
 
 function assertMintRequest(collection: SupportedCollection, request: ethers.TransactionRequest): void {
@@ -184,7 +185,6 @@ export const terminalAssistantsV1: MintAdapter = {
     if (!state.mintOpen) throw new Error("Terminal Assistants mint has not been opened on-chain");
     if (state.totalMinted >= state.supply) throw new Error("Terminal Assistants is sold out");
     if (state.mintedBy >= BigInt(state.config.expectedMaxPerWallet)) throw new Error("This wallet has reached the five-mint contract cap");
-    await confirmMintOpenStable(collection, provider);
     return {
       to: collection.contractAddress,
       data: encodeTerminalAssistantsMint(),
@@ -196,9 +196,7 @@ export const terminalAssistantsV1: MintAdapter = {
   async revalidateBeforeSigning(collection, signerAddress, quantity, provider, request, options) {
     if (options?.phaseId !== "open" || quantity !== 1) throw new Error("Unsupported Terminal Assistants mint intent");
     assertMintRequest(collection, request);
-    await confirmMintOpenStable(collection, provider);
-    const contract = new ethers.Contract(collection.contractAddress, READ_ABI, provider);
-    if (await contract.getFunction("mintedBy").staticCall(signerAddress).then(BigInt) >= 5n) throw new Error("This wallet has reached the five-mint contract cap");
+    await revalidateMintSnapshot(collection, provider, signerAddress);
   },
 };
 
