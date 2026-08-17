@@ -152,10 +152,11 @@ export default function MintsPage() {
       setCheckingEligibility(true);
       void (async () => {
         const accumulated: Record<string, WalletPhasePlan> = {};
-        // Return useful results progressively. Four cold wallets take about
-        // one OpenSea rate-limit window; warm encrypted credentials are fast.
-        for (let offset = 0; offset < walletIds.length; offset += 4) {
-          const batch = walletIds.slice(offset, offset + 4);
+        // Publish each wallet as soon as its authoritative check finishes.
+        // OpenSea serializes cold SIWE enrollment; grouping four wallets here
+        // made one slow/retrying wallet hide three already-useful results.
+        for (let offset = 0; offset < walletIds.length; offset += 1) {
+          const batch = walletIds.slice(offset, offset + 1);
           const response = await fetch("/api/mints/eligibility", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
