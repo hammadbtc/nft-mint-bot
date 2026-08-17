@@ -144,12 +144,21 @@ test("XCOPUNKS and Cash Dogs are bound to their reviewed OpenSea public drops", 
   assert.ok(cashDogs?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x904a3f7e32d7259d9b520b5c0c158e5c3a60d860"));
 });
 
-test("OMR EVO pins only its reviewed OpenSea public stage", () => {
+test("OMR EVO pins its signed stages and public sale", () => {
   const omr = seeds.find((seed) => seed.slug === "omrevo");
-  assert.equal(omr?.adapterKey, "opensea-seadrop-v1");
+  assert.equal(omr?.adapterKey, "opensea-signed-seadrop-v1");
   assert.equal(omr?.contractAddress.toLowerCase(), "0x8761d975bc4eccaf48cb650fb0871e066058ea61");
-  assert.equal(omr?.mintPrice, "3000000000000000");
-  assert.equal(omr?.adapterConfig.publicPhaseName, "Public");
+  assert.equal(omr?.adapterConfig.openSeaSlug, "omrevo");
+  assert.deepEqual(omr?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["team", "signed", "0", 25],
+    ["omr-holder", "signed", "0", 2],
+    ["ratlist", "signed", "1500000000000000", 2],
+    ["public", "public", "3000000000000000", 7],
+  ]);
+  assert.deepEqual(omr?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, 3, undefined]);
+  assert.deepEqual(omr?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [3333, 1000, true], [3333, 1000, true], [3333, 1000, true],
+  ]);
   assert.equal(omr?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/omrevo/overview"), true);
   assert.equal(omr?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x8761d975bc4eccaf48cb650fb0871e066058ea61"), true);
 });

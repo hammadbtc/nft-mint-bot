@@ -170,19 +170,44 @@
     "slug": "omrevo",
     "contractAddress": "0x8761d975bc4eccaf48cb650fb0871e066058ea61",
     "chainId": 4663,
-    "mintMethod": "mintPublic",
-    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
-    "mintPrice": "3000000000000000",
+    "mintMethod": "mintSigned",
+    "mintAbi": ["function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"],
+    "mintPrice": "0",
     "maxPerWallet": 7,
     "maxSupply": 3333,
-    "adapterKey": "opensea-seadrop-v1",
+    "adapterKey": "opensea-signed-seadrop-v1",
     "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
     "siteUrl": "https://opensea.io/collection/omrevo/overview",
     "imageUrl": "https://i2c.seadn.io/collection/omrevo/image_type_logo/94708ce499cda108b0aa9db826ff41/f394708ce499cda108b0aa9db826ff41.gif",
     "adapterConfig": {
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
-      "publicPhaseName": "Public",
+      "openSeaSlug": "omrevo",
+      "stages": [
+        {
+          "id": "team", "name": "TEAM MINT", "kind": "signed", "stageType": "signed_presale",
+          "startsAt": "2026-08-17T13:30:00.000Z", "endsAt": "2026-08-17T14:00:00.000Z",
+          "priceWei": "0", "maxPerWallet": 25, "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 3333, "feeBps": 1000, "restrictFeeRecipients": true
+        },
+        {
+          "id": "omr-holder", "name": "OMR HOLDER CLAIM", "kind": "signed", "stageType": "signed_presale",
+          "startsAt": "2026-08-17T14:00:00.000Z", "endsAt": "2026-08-17T15:00:00.000Z",
+          "priceWei": "0", "maxPerWallet": 2, "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 3333, "feeBps": 1000, "restrictFeeRecipients": true
+        },
+        {
+          "id": "ratlist", "name": "RATLIST", "kind": "signed", "stageType": "signed_presale",
+          "startsAt": "2026-08-17T15:00:00.000Z", "endsAt": "2026-08-17T16:00:00.000Z",
+          "priceWei": "1500000000000000", "maxPerWallet": 2, "dropStageIndex": 3,
+          "maxTokenSupplyForStage": 3333, "feeBps": 1000, "restrictFeeRecipients": true
+        },
+        {
+          "id": "public", "name": "Public", "kind": "public", "stageType": "public_sale",
+          "startsAt": "2026-08-17T16:00:00.000Z", "endsAt": "2026-08-18T16:00:00.000Z",
+          "priceWei": "3000000000000000", "maxPerWallet": 7
+        }
+      ],
       "urlMatchers": [
         { "domain": "opensea.io", "path": "/collection/omrevo/overview" },
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x8761d975bc4eccaf48cb650fb0871e066058ea61" }
