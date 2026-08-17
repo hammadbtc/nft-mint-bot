@@ -144,6 +144,16 @@ test("XCOPUNKS and Cash Dogs are bound to their reviewed OpenSea public drops", 
   assert.ok(cashDogs?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x904a3f7e32d7259d9b520b5c0c158e5c3a60d860"));
 });
 
+test("OMR EVO pins only its reviewed OpenSea public stage", () => {
+  const omr = seeds.find((seed) => seed.slug === "omrevo");
+  assert.equal(omr?.adapterKey, "opensea-seadrop-v1");
+  assert.equal(omr?.contractAddress.toLowerCase(), "0x8761d975bc4eccaf48cb650fb0871e066058ea61");
+  assert.equal(omr?.mintPrice, "3000000000000000");
+  assert.equal(omr?.adapterConfig.publicPhaseName, "Public");
+  assert.equal(omr?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/omrevo/overview"), true);
+  assert.equal(omr?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x8761d975bc4eccaf48cb650fb0871e066058ea61"), true);
+});
+
 test("HoodBirds keeps GTD, FCFS, then public as distinct reviewed phases", () => {
   const hoodBirds = seeds.find((seed) => seed.slug === "hoodbirdss");
   assert.equal(hoodBirds?.adapterKey, "opensea-signed-seadrop-v1");

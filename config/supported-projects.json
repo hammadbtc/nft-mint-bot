@@ -165,6 +165,31 @@
     }
   },
   {
+    "id": "8cf73579-6635-4f17-8782-83b67eab01a8",
+    "name": "OMR EVO",
+    "slug": "omrevo",
+    "contractAddress": "0x8761d975bc4eccaf48cb650fb0871e066058ea61",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": ["function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"],
+    "mintPrice": "3000000000000000",
+    "maxPerWallet": 7,
+    "maxSupply": 3333,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": ["opensea.io", "robinhoodchain.blockscout.com"],
+    "siteUrl": "https://opensea.io/collection/omrevo/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/omrevo/image_type_logo/94708ce499cda108b0aa9db826ff41/f394708ce499cda108b0aa9db826ff41.gif",
+    "adapterConfig": {
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public",
+      "urlMatchers": [
+        { "domain": "opensea.io", "path": "/collection/omrevo/overview" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x8761d975bc4eccaf48cb650fb0871e066058ea61" }
+      ]
+    }
+  },
+  {
     "id": "446463e1-aedf-4aff-a3f0-53d74f409e79",
     "name": "XCOPUNKS",
     "slug": "xcopunks",
