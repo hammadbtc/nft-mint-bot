@@ -103,6 +103,7 @@ test("Terminal Assistants is bound to the official stealth-mint sources and revi
   assert.equal(terminal?.adapterConfig.expectedMaxPerWallet, 5);
   assert.equal(terminal?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "terminalrh.xyz" && matcher.path === "/"), true);
   assert.equal(terminal?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/terminalassist/status/2089039200888688652"), true);
+  assert.equal(terminal?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/terminalassist/status/2089378288410018080"), true);
 });
 
 test("Squiggle Wuiggle is bound to exact official, explorer, and collection URLs", () => {

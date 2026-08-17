@@ -349,7 +349,8 @@
       "urlMatchers": [
         { "domain": "terminalrh.xyz", "path": "/" },
         { "domain": "robinhoodchain.blockscout.com", "path": "/address/0xd27039734219816fef06244d5745fe73abef832d" },
-        { "domain": "x.com", "path": "/terminalassist/status/2089039200888688652" }
+        { "domain": "x.com", "path": "/terminalassist/status/2089039200888688652" },
+        { "domain": "x.com", "path": "/terminalassist/status/2089378288410018080" }
       ]
     }
   },
