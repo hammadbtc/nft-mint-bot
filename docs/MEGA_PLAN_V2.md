@@ -32,7 +32,7 @@ release audit.
       launch replay and p50/p95 analysis.
 - [x] Dashboard health detects dead workers, stale watchers, absent launch
       timers, stuck jobs, and degraded broadcast routes.
-- [ ] Historical launch replay and deterministic integration tests cover timed,
+- [x] Historical launch replay and deterministic integration tests cover timed,
       signed, stealth, nonce-ladder, restart, RPC inconsistency, and sellout.
 - [ ] Production migration, seed, test, lint, build, dependency audit, health,
       and dead-code/config audit all pass.

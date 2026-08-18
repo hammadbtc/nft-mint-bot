@@ -1,0 +1,13 @@
+{
+  "name": "Terminal Assistants 2026-08-17",
+  "opensAtMs": 1786982625000,
+  "sellsOutAtMs": 1786982692000,
+  "signalDelayMs": 80,
+  "stages": [
+    { "name": "pinned-state", "durationMs": 80, "beforeOpenAllowed": false },
+    { "name": "fee-read", "durationMs": 60, "beforeOpenAllowed": false },
+    { "name": "simulation", "durationMs": 70, "beforeOpenAllowed": false },
+    { "name": "nonce-ladder-signing", "durationMs": 25, "beforeOpenAllowed": false },
+    { "name": "sequencer-submit", "durationMs": 70, "beforeOpenAllowed": false }
+  ]
+}
