@@ -6,7 +6,7 @@ import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 import { processDisperseOperations, recoverDisperseOperation } from "@/lib/disperse";
 import { armLeadMs, revalidateLeadMs, schedulePrecisely } from "@/lib/launch-timing";
 import { firstTaskPerWallet } from "@/lib/task-management";
-import { schedulerHeartbeatFresh } from "./health";
+import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "./health";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
@@ -19,6 +19,7 @@ interface SchedulerRuntimeState {
   disperseInterval: ReturnType<typeof setInterval> | null;
   recoveryInterval: ReturnType<typeof setInterval> | null;
   confirmationInterval: ReturnType<typeof setInterval> | null;
+  workerHeartbeatInterval: ReturnType<typeof setInterval> | null;
   launchTimers: Map<string, ReturnType<typeof setTimeout>>;
   revalidationTimers: Map<string, ReturnType<typeof setTimeout>>;
   activeConcurrency: number;
@@ -42,6 +43,7 @@ const state = schedulerHost.__mintbotSchedulerRuntime ??= {
   disperseInterval: null,
   recoveryInterval: null,
   confirmationInterval: null,
+  workerHeartbeatInterval: null,
   launchTimers: new Map(),
   revalidationTimers: new Map(),
   activeConcurrency: DEFAULT_MAX_CONCURRENT,
@@ -54,6 +56,7 @@ const state = schedulerHost.__mintbotSchedulerRuntime ??= {
   signalHandlersRegistered: false,
 };
 state.confirmationInterval ??= null;
+state.workerHeartbeatInterval ??= null;
 state.disperseInterval ??= null;
 state.disperseTickRunning ??= false;
 state.disperseLastTickAt ??= null;
@@ -185,6 +188,12 @@ async function tick(): Promise<void> {
   }
 }
 
+async function persistWorkerHeartbeat(): Promise<void> {
+  const now = new Date().toISOString();
+  await db.insert(schema.settings).values({ key: WORKER_HEARTBEAT_KEY, value: now })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: now, updatedAt: now } });
+}
+
 /** Funding and sweep work has its own scheduling lane. A slow receipt, RPC,
  * or wallet in Disperse must never prevent the 250ms mint detector from
  * ticking, and a launch storm must never make a queued funding operation
@@ -204,7 +213,7 @@ async function disperseTick(): Promise<void> {
 }
 
 export function startScheduler(): void {
-  if (state.schedulerInterval && state.disperseInterval) return;
+  if (state.schedulerInterval && state.disperseInterval && state.workerHeartbeatInterval) return;
   if (state.schedulerInterval) clearInterval(state.schedulerInterval);
   if (state.disperseInterval) clearInterval(state.disperseInterval);
   void recoverStaleWork()
@@ -217,6 +226,10 @@ export function startScheduler(): void {
   state.disperseInterval = setInterval(() => void disperseTick(), DISPERSE_INTERVAL_MS);
   state.recoveryInterval = setInterval(() => void recoverStaleWork(), RECOVERY_INTERVAL_MS);
   state.confirmationInterval = setInterval(() => void reconcileConfirmingWork(), CONFIRMATION_INTERVAL_MS);
+  void persistWorkerHeartbeat().catch((error) => { state.lastError = safeErrorMessage(error, "Worker heartbeat failed"); });
+  state.workerHeartbeatInterval = setInterval(() => {
+    void persistWorkerHeartbeat().catch((error) => { state.lastError = safeErrorMessage(error, "Worker heartbeat failed"); });
+  }, 5_000);
   if (!state.signalHandlersRegistered) {
     state.signalHandlersRegistered = true;
     process.once("SIGTERM", stopScheduler);
@@ -229,6 +242,7 @@ export function stopScheduler(): void {
   if (state.disperseInterval) clearInterval(state.disperseInterval);
   if (state.recoveryInterval) clearInterval(state.recoveryInterval);
   if (state.confirmationInterval) clearInterval(state.confirmationInterval);
+  if (state.workerHeartbeatInterval) clearInterval(state.workerHeartbeatInterval);
   for (const timer of state.launchTimers.values()) clearTimeout(timer);
   for (const timer of state.revalidationTimers.values()) clearTimeout(timer);
   state.launchTimers.clear();
@@ -237,6 +251,7 @@ export function stopScheduler(): void {
   state.disperseInterval = null;
   state.recoveryInterval = null;
   state.confirmationInterval = null;
+  state.workerHeartbeatInterval = null;
   state.tickRunning = false;
   state.disperseTickRunning = false;
 }
@@ -249,7 +264,8 @@ export function setSchedulerConcurrency(value: number): void {
 export function ensureSchedulerRunning(): { restarted: boolean } {
   const mintRunning = Boolean(state.schedulerInterval);
   const disperseRunning = Boolean(state.disperseInterval);
-  if (!mintRunning || !disperseRunning) {
+  const heartbeatRunning = Boolean(state.workerHeartbeatInterval);
+  if (!mintRunning || !disperseRunning || !heartbeatRunning) {
     startScheduler();
     return { restarted: true };
   }

@@ -3,12 +3,15 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { checkRpcHealth, getChain } from "@/lib/chains";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
+import { executionRole, runsExecutionWorker } from "@/lib/execution-role";
+import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 import { deploymentVersion } from "@/lib/deployment";
 
 export async function GET() {
   try {
-    ensureSchedulerRunning();
+    const role = executionRole();
+    if (runsExecutionWorker(role)) ensureSchedulerRunning();
     const collections = await db.selectDistinct({ chainId: schema.collections.chainId })
       .from(schema.collections)
       .where(and(eq(schema.collections.active, true), eq(schema.collections.verified, true)));
@@ -46,12 +49,21 @@ export async function GET() {
       order by p50_ms asc
     `);
     const scheduler = schedulerStatus();
-    const ready = scheduler.healthy && rpc.every((chain) => chain.healthy);
+    const [heartbeat] = await db.select({ value: schema.settings.value }).from(schema.settings)
+      .where(eq(schema.settings.key, WORKER_HEARTBEAT_KEY)).limit(1);
+    const executionHealthy = runsExecutionWorker(role) ? scheduler.healthy : schedulerHeartbeatFresh(true, heartbeat?.value || null);
+    const ready = executionHealthy && rpc.every((chain) => chain.healthy);
     return NextResponse.json({
       ready,
       version: deploymentVersion(),
       liveTransactionsEnabled: liveTransactionsEnabled(),
-      scheduler,
+      scheduler: {
+        ...scheduler,
+        role,
+        running: runsExecutionWorker(role) ? scheduler.running : executionHealthy,
+        healthy: executionHealthy,
+        lastTickAt: runsExecutionWorker(role) ? scheduler.lastTickAt : heartbeat?.value || null,
+      },
       rpc,
       jobs: Object.fromEntries(counts.map((item) => [item.status, item.count])),
       broadcastPerformance: Array.from(performanceRows),

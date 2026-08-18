@@ -1,6 +1,12 @@
 const required = ["DATABASE_URL", "VAULT_PASSPHRASE", "SUPPORT_ADMIN_TOKEN"];
 const missing = required.filter((name) => !process.env[name]?.trim());
 
+const executionRole = (process.env.MINTBOT_EXECUTION_ROLE || "combined").trim().toLowerCase();
+if (!["web", "worker", "combined"].includes(executionRole)) {
+  console.error("MINTBOT_EXECUTION_ROLE must be web, worker, or combined");
+  process.exit(1);
+}
+
 if (missing.length) {
   console.error(`Missing required environment variables: ${missing.join(", ")}`);
   process.exit(1);

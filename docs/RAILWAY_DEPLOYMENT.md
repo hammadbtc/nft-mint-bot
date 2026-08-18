@@ -2,12 +2,19 @@
 
 ## Railway project layout
 
-Create two services in one Railway project:
+The V2 layout uses three services in one Railway project:
 
 1. A PostgreSQL database named `Postgres`.
-2. The MintBot application connected to this GitHub repository.
+2. A MintBot web service connected to this GitHub repository, with
+   `MINTBOT_EXECUTION_ROLE=web` and the normal `npm start` command.
+3. A MintBot execution worker connected to the same commit and database, with
+   `MINTBOT_EXECUTION_ROLE=worker` and `npm run worker` as its start command.
 
-Keep the MintBot service at exactly **one replica**. Database claims and nonce reservations are concurrency-safe, but one embedded scheduler keeps operations and observability simple.
+Keep the execution worker at exactly **one replica**. The web service never
+starts a scheduler in `web` mode; it reads the worker's durable database
+heartbeat. This prevents web deploys, page traffic, and health probes from
+competing with launch execution. `combined` remains the compatibility default
+for a one-service migration, but it is not the final V2 production layout.
 
 `railway.json` configures Railpack, one replica, the production build, pre-deploy environment validation/schema sync, `/api/health`, and restart-on-failure behavior. Generate a public domain for the MintBot service after the first successful deployment.
 
@@ -17,6 +24,7 @@ Add these to the MintBot service:
 
 ```env
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+MINTBOT_EXECUTION_ROLE=web # use worker on the execution service
 VAULT_PASSPHRASE=<64 random hex characters or stronger>
 APP_ACCESS_USER=mintbot
 APP_ACCESS_PASSWORD=<strong password, at least 16 characters>

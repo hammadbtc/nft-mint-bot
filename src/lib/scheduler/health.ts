@@ -1,5 +1,7 @@
 const DEFAULT_STALE_AFTER_MS = 30_000;
 
+export const WORKER_HEARTBEAT_KEY = "execution_worker_heartbeat";
+
 export function schedulerHeartbeatFresh(
   running: boolean,
   lastTickAt: string | null,

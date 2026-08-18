@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sequentialNonces } from "../src/lib/transactions.ts";
+import { sequentialNonces } from "../src/lib/transactions";
 
 test("nonce ladders are contiguous and preserve transaction order", () => {
   assert.deepEqual(sequentialNonces(20, 5), [20, 21, 22, 23, 24]);

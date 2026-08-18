@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import projects from "../config/supported-projects.json" with { type: "json" };
-import { executionEngineFor, executionEngineProfiles, executionManifestFor } from "../src/lib/engines/index.ts";
+import { executionEngineFor, executionEngineProfiles, executionManifestFor } from "../src/lib/engines/index";
 
 test("every supported project selects a validated reusable execution engine", () => {
   for (const project of projects) {

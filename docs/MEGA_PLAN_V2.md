@@ -9,6 +9,8 @@ release audit.
 
 - [x] Project manifests select a validated reusable execution engine.
 - [x] Existing projects migrate without changing reviewed transaction intent.
+- [x] Dashboard and transaction execution have explicit web/worker roles with
+      a durable cross-process heartbeat and a compatibility migration mode.
 - [ ] Scheduled public mints can be prepared before launch and fired by a
       precise timer without launch-time estimation or database discovery.
 - [ ] Signed/allowlist stages pre-authenticate and warm wallet-bound payloads as
