@@ -11,18 +11,23 @@ import { schedulerHeartbeatFresh } from "./health";
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
 const SCHEDULER_INTERVAL_MS = 250;
+const DISPERSE_INTERVAL_MS = 250;
 const CONFIRMATION_INTERVAL_MS = 1_000;
 
 interface SchedulerRuntimeState {
   schedulerInterval: ReturnType<typeof setInterval> | null;
+  disperseInterval: ReturnType<typeof setInterval> | null;
   recoveryInterval: ReturnType<typeof setInterval> | null;
   confirmationInterval: ReturnType<typeof setInterval> | null;
   launchTimers: Map<string, ReturnType<typeof setTimeout>>;
   revalidationTimers: Map<string, ReturnType<typeof setTimeout>>;
   activeConcurrency: number;
   tickRunning: boolean;
+  disperseTickRunning: boolean;
   lastTickAt: string | null;
   lastError: string | null;
+  disperseLastTickAt: string | null;
+  disperseLastError: string | null;
   signalHandlersRegistered: boolean;
 }
 
@@ -34,17 +39,25 @@ const schedulerHost = process as NodeJS.Process & {
 };
 const state = schedulerHost.__mintbotSchedulerRuntime ??= {
   schedulerInterval: null,
+  disperseInterval: null,
   recoveryInterval: null,
   confirmationInterval: null,
   launchTimers: new Map(),
   revalidationTimers: new Map(),
   activeConcurrency: DEFAULT_MAX_CONCURRENT,
   tickRunning: false,
+  disperseTickRunning: false,
   lastTickAt: null,
   lastError: null,
+  disperseLastTickAt: null,
+  disperseLastError: null,
   signalHandlersRegistered: false,
 };
 state.confirmationInterval ??= null;
+state.disperseInterval ??= null;
+state.disperseTickRunning ??= false;
+state.disperseLastTickAt ??= null;
+state.disperseLastError ??= null;
 state.launchTimers ??= new Map();
 state.revalidationTimers ??= new Map();
 
@@ -163,7 +176,7 @@ async function tick(): Promise<void> {
   state.tickRunning = true;
   state.lastTickAt = new Date().toISOString();
   try {
-    await Promise.all([processScheduledJobs(), processDisperseOperations(Math.max(1, Math.floor(state.activeConcurrency / 2)))]);
+    await processScheduledJobs();
     state.lastError = null;
   } catch (error) {
     state.lastError = safeErrorMessage(error, "Scheduler tick failed");
@@ -172,14 +185,36 @@ async function tick(): Promise<void> {
   }
 }
 
+/** Funding and sweep work has its own scheduling lane. A slow receipt, RPC,
+ * or wallet in Disperse must never prevent the 250ms mint detector from
+ * ticking, and a launch storm must never make a queued funding operation
+ * disappear behind mint concurrency. */
+async function disperseTick(): Promise<void> {
+  if (state.disperseTickRunning) return;
+  state.disperseTickRunning = true;
+  state.disperseLastTickAt = new Date().toISOString();
+  try {
+    await processDisperseOperations(Math.max(1, Math.floor(state.activeConcurrency / 2)));
+    state.disperseLastError = null;
+  } catch (error) {
+    state.disperseLastError = safeErrorMessage(error, "Disperse scheduler tick failed");
+  } finally {
+    state.disperseTickRunning = false;
+  }
+}
+
 export function startScheduler(): void {
-  if (state.schedulerInterval) return;
+  if (state.schedulerInterval && state.disperseInterval) return;
+  if (state.schedulerInterval) clearInterval(state.schedulerInterval);
+  if (state.disperseInterval) clearInterval(state.disperseInterval);
   void recoverStaleWork()
     .catch((error) => { state.lastError = safeErrorMessage(error, "Scheduler recovery failed"); })
     .then(() => restoreArmedTimers())
     .catch((error) => { state.lastError = safeErrorMessage(error, "Armed timer recovery failed"); });
   void tick();
+  void disperseTick();
   state.schedulerInterval = setInterval(() => void tick(), SCHEDULER_INTERVAL_MS);
+  state.disperseInterval = setInterval(() => void disperseTick(), DISPERSE_INTERVAL_MS);
   state.recoveryInterval = setInterval(() => void recoverStaleWork(), RECOVERY_INTERVAL_MS);
   state.confirmationInterval = setInterval(() => void reconcileConfirmingWork(), CONFIRMATION_INTERVAL_MS);
   if (!state.signalHandlersRegistered) {
@@ -191,6 +226,7 @@ export function startScheduler(): void {
 
 export function stopScheduler(): void {
   if (state.schedulerInterval) clearInterval(state.schedulerInterval);
+  if (state.disperseInterval) clearInterval(state.disperseInterval);
   if (state.recoveryInterval) clearInterval(state.recoveryInterval);
   if (state.confirmationInterval) clearInterval(state.confirmationInterval);
   for (const timer of state.launchTimers.values()) clearTimeout(timer);
@@ -198,9 +234,11 @@ export function stopScheduler(): void {
   state.launchTimers.clear();
   state.revalidationTimers.clear();
   state.schedulerInterval = null;
+  state.disperseInterval = null;
   state.recoveryInterval = null;
   state.confirmationInterval = null;
   state.tickRunning = false;
+  state.disperseTickRunning = false;
 }
 
 export function setSchedulerConcurrency(value: number): void {
@@ -209,12 +247,13 @@ export function setSchedulerConcurrency(value: number): void {
 
 /** Redundant bootstrap/watchdog for the Railway probe and authenticated UI. */
 export function ensureSchedulerRunning(): { restarted: boolean } {
-  const running = Boolean(state.schedulerInterval);
-  if (!running) {
+  const mintRunning = Boolean(state.schedulerInterval);
+  const disperseRunning = Boolean(state.disperseInterval);
+  if (!mintRunning || !disperseRunning) {
     startScheduler();
     return { restarted: true };
   }
-  if (!schedulerHeartbeatFresh(running, state.lastTickAt)) {
+  if (!schedulerHeartbeatFresh(mintRunning, state.lastTickAt) || !schedulerHeartbeatFresh(disperseRunning, state.disperseLastTickAt)) {
     stopScheduler();
     startScheduler();
     return { restarted: true };
@@ -224,14 +263,20 @@ export function ensureSchedulerRunning(): { restarted: boolean } {
 
 export function schedulerStatus() {
   const running = Boolean(state.schedulerInterval);
+  const disperseRunning = Boolean(state.disperseInterval);
   return {
     running,
-    healthy: schedulerHeartbeatFresh(running, state.lastTickAt),
+    healthy: schedulerHeartbeatFresh(running, state.lastTickAt) && schedulerHeartbeatFresh(disperseRunning, state.disperseLastTickAt),
     tickRunning: state.tickRunning,
+    disperseRunning,
+    disperseTickRunning: state.disperseTickRunning,
     concurrency: state.activeConcurrency,
     lastTickAt: state.lastTickAt,
     lastError: state.lastError,
+    disperseLastTickAt: state.disperseLastTickAt,
+    disperseLastError: state.disperseLastError,
     armedTimers: state.launchTimers.size,
     pollIntervalMs: SCHEDULER_INTERVAL_MS,
+    dispersePollIntervalMs: DISPERSE_INTERVAL_MS,
   };
 }

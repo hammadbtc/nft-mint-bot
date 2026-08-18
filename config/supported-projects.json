@@ -15,6 +15,7 @@
     "siteUrl": "https://opensea.io/collection/cash-rabbits",
     "imageUrl": "https://i2c.seadn.io/collection/cash-rabbits/image_type_logo/0d16a785f548e214e7f6fcef35dddd/730d16a785f548e214e7f6fcef35dddd.jpeg",
     "adapterConfig": {
+      "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "urlMatchers": [
@@ -39,6 +40,7 @@
     "siteUrl": "https://opensea.io/collection/chimps-hood/overview",
     "imageUrl": "https://i2c.seadn.io/collection/chimps-hood/image_type_logo/49913eac32e319d050a9c60b79b6d0/2049913eac32e319d050a9c60b79b6d0.gif",
     "adapterConfig": {
+      "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "publicPhaseName": "Public stage",
@@ -64,6 +66,7 @@
     "siteUrl": "https://opensea.io/collection/weaselsinstock/overview",
     "imageUrl": "https://i2c.seadn.io/collection/weasels-in-stock/image_type_logo/8a6bac3b93b9c3e960d2da14d05806/878a6bac3b93b9c3e960d2da14d05806.png",
     "adapterConfig": {
+      "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "publicPhaseName": "FCFS",
@@ -89,6 +92,7 @@
     "siteUrl": "https://opensea.io/collection/purr-cats-nft/overview",
     "imageUrl": "https://i2c.seadn.io/collection/purr-cat-670317237/image_type_logo/924f95ab3bc0a8a511d55e4a0bb92f/dc924f95ab3bc0a8a511d55e4a0bb92f.jpeg",
     "adapterConfig": {
+      "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "publicPhaseName": "Public Mint",
@@ -114,6 +118,7 @@
     "siteUrl": "https://opensea.io/collection/hoodbirdss/overview",
     "imageUrl": "https://i2c.seadn.io/collection/hoodbirds-596143559/image_type_logo/8392c5cdf564682142c6fdc6c59516/1f8392c5cdf564682142c6fdc6c59516.gif",
     "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "openSeaSlug": "hoodbirdss",
@@ -180,6 +185,7 @@
     "siteUrl": "https://opensea.io/collection/omrevo/overview",
     "imageUrl": "https://i2c.seadn.io/collection/omrevo/image_type_logo/94708ce499cda108b0aa9db826ff41/f394708ce499cda108b0aa9db826ff41.gif",
     "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "openSeaSlug": "omrevo",
@@ -230,6 +236,7 @@
     "siteUrl": "https://opensea.io/collection/xcopunks/overview",
     "imageUrl": "https://i2c.seadn.io/collection/xcopunks/image_type_logo/505d38e99df8d0f4f186c65ea2e68a/f1505d38e99df8d0f4f186c65ea2e68a.jpeg",
     "adapterConfig": {
+      "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "publicPhaseName": "Public Mint",
@@ -255,6 +262,7 @@
     "siteUrl": "https://opensea.io/collection/cash-dogs-/overview",
     "imageUrl": "https://i2c.seadn.io/collection/cash-dogs-511341423/image_type_logo/0d7e0e2c79215d0809aeecbea657bf/a50d7e0e2c79215d0809aeecbea657bf.jpeg",
     "adapterConfig": {
+      "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "publicPhaseName": "Public Mint",
@@ -280,6 +288,7 @@
     "siteUrl": "https://squiggle-wuiggle.xyz/",
     "imageUrl": "https://pbs.twimg.com/media/HPiQ0oIW4AAcpmN.jpg",
     "adapterConfig": {
+      "engine": "custom-reviewed-v1",
       "mintContract": "0x2897e59840e6e3Deb1dBf56dD7F32d20C26a69eB",
       "transferPolicy": "0x28b60Fbc4F730328e9AF28C49e400653AE31AB7c",
       "tokenContract": "0xE26DFaD41E606F0608C366Df21eE7E7809f459C1",
@@ -315,6 +324,9 @@
     "siteUrl": "https://bullsrunners.com/mint",
     "imageUrl": "https://bullsrunners.com/media/bull-run.gif",
     "adapterConfig": {
+      "engine": "stealth-owner-switch-v1",
+      "onePerTransaction": true,
+      "maxPreparedTransactions": 1,
       "expectedMerkleRoot": "0xfe59d1969f0924fe220298c4ce82e263f64ba1690f1a196192f06d9e8e227b9d",
       "expectedMaxSupply": 4200,
       "expectedReserveSupply": 420,
@@ -343,6 +355,9 @@
     "siteUrl": "https://terminalrh.xyz/",
     "imageUrl": "https://terminalrh.xyz/icon-512.png",
     "adapterConfig": {
+      "engine": "stealth-owner-switch-v1",
+      "onePerTransaction": true,
+      "maxPreparedTransactions": 5,
       "expectedMaxSupply": 6666,
       "expectedMintPriceWei": "1300000000000000",
       "expectedMaxPerWallet": 5,
@@ -370,6 +385,7 @@
     "siteUrl": "https://opensea.io/collection/retail-shrooms-423133943/overview",
     "imageUrl": "https://i2c.seadn.io/collection/retail-shrooms-423133943/image_type_logo/f3cd8884cc9a495189b66a34520a2e/58f3cd8884cc9a495189b66a34520a2e.gif",
     "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "openSeaSlug": "retail-shrooms-423133943",
@@ -436,6 +452,7 @@
     "siteUrl": "https://opensea.io/collection/hmm-cat-39998770/overview",
     "imageUrl": "https://i2c.seadn.io/collection/hmm-cat-39998770/image_type_logo/0f4c637f7862b7d917d6e5865ac062/390f4c637f7862b7d917d6e5865ac062.gif",
     "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "openSeaSlug": "hmm-cat-39998770",
@@ -502,6 +519,7 @@
     "siteUrl": "https://opensea.io/collection/888-society-605141138/overview",
     "imageUrl": "https://i2c.seadn.io/collection/888-society-605141138/image_type_logo/9d3a219b02e434c83fd9b45af2c393/8d9d3a219b02e434c83fd9b45af2c393.jpeg",
     "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
       "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
       "openSeaSlug": "888-society-605141138",

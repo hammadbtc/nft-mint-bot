@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
+import { executionEngineFor, executionManifestFor } from "@/lib/engines";
 import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
 import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
@@ -66,6 +67,11 @@ async function loadExecutionState(jobId: string) {
     db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1),
   ]);
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint support is disabled or no longer verified");
+  // Re-validate at execution time as well as discovery time. A stale queued
+  // task must not bypass a manifest edit or accidentally enter a different
+  // launch strategy after deployment.
+  executionManifestFor(collection);
+  executionEngineFor(collection);
   if (!wallet) throw new Error("Selected mint wallet was not found");
   const [parent] = wallet.role === "worker" && wallet.parentWalletId
     ? await db.select().from(schema.wallets).where(eq(schema.wallets.id, wallet.parentWalletId)).limit(1)

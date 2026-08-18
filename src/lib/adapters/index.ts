@@ -8,6 +8,7 @@ import { squiggleWuiggleV1 } from "./squiggle-wuiggle-v1";
 import { bullsRunnersV1 } from "./bulls-runners-v1";
 import { terminalAssistantsV1 } from "./terminal-assistants-v1";
 import type { MintAdapter, ResolvedMint, SupportedCollection } from "./types";
+import { executionManifestFor } from "@/lib/engines";
 
 const registry = new Map<string, MintAdapter>([
   [evmContractV1.key, evmContractV1],
@@ -140,6 +141,10 @@ export async function resolveMintInput(rawInput: string): Promise<ResolvedMint |
   if (!match) return { supported:false, reason:"This mint is not supported yet" };
   const adapter = registry.get(match.adapterKey);
   if (!adapter) return { supported:false, reason:"This mint adapter is unavailable" };
+  // Fail closed before any project reaches eligibility, preparation, or the
+  // scheduler unless its reusable V2 execution engine is explicit and agrees
+  // with the reviewed transaction adapter.
+  executionManifestFor(match);
   return adapter.resolve(match, source);
 }
 
