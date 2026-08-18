@@ -30,7 +30,7 @@ release audit.
       silently falls back to an unreviewed contract.
 - [x] Every hot-path stage records monotonic and wall-clock timing suitable for
       launch replay and p50/p95 analysis.
-- [ ] Dashboard health detects dead workers, stale watchers, absent launch
+- [x] Dashboard health detects dead workers, stale watchers, absent launch
       timers, stuck jobs, and degraded broadcast routes.
 - [ ] Historical launch replay and deterministic integration tests cover timed,
       signed, stealth, nonce-ladder, restart, RPC inconsistency, and sellout.

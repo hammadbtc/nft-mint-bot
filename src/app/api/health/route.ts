@@ -3,7 +3,7 @@ import { db, schema } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
 import { executionRole, runsExecutionWorker } from "@/lib/execution-role";
-import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
+import { parseWorkerRuntimeHeartbeat, schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
 import { liveTransactionsEnabled } from "@/lib/safety";
 import { deploymentVersion } from "@/lib/deployment";
 
@@ -17,10 +17,15 @@ export async function GET() {
     const scheduler = schedulerStatus();
     const [heartbeat] = await db.select({ value: schema.settings.value }).from(schema.settings)
       .where(eq(schema.settings.key, WORKER_HEARTBEAT_KEY)).limit(1);
-    const executionHealthy = runsExecutionWorker(role) ? scheduler.healthy : schedulerHeartbeatFresh(true, heartbeat?.value || null);
+    const runtime = parseWorkerRuntimeHeartbeat(heartbeat?.value);
+    const executionHealthy = runsExecutionWorker(role) ? scheduler.healthy : schedulerHeartbeatFresh(true, heartbeat?.value || null) && runtime?.blockWatcherHealthy !== false;
+    const [armed] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.mintJobs).where(eq(schema.mintJobs.status, "armed"));
+    const armedTimers = runsExecutionWorker(role) ? scheduler.armedTimers : runtime?.armedTimers || 0;
+    const missingLaunchTimers = Math.max(0, (armed?.count || 0) - armedTimers);
+    const healthy = executionHealthy && missingLaunchTimers === 0;
     return NextResponse.json(
       {
-        status: executionHealthy ? "ok" : "error",
+        status: healthy ? "ok" : "error",
         db: "connected",
         service: "mintbot",
         version: deploymentVersion(),
@@ -28,13 +33,17 @@ export async function GET() {
         scheduler: {
           role,
           running: runsExecutionWorker(role) ? scheduler.running : executionHealthy,
-          healthy: executionHealthy,
-          lastTickAt: runsExecutionWorker(role) ? scheduler.lastTickAt : heartbeat?.value || null,
+          healthy,
+          lastTickAt: runsExecutionWorker(role) ? scheduler.lastTickAt : runtime?.at || null,
           lastError: scheduler.lastError,
           restartedByWatchdog: watchdog.restarted,
+          armedJobs: armed?.count || 0,
+          armedTimers,
+          missingLaunchTimers,
+          blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false },
         },
       },
-      { status: executionHealthy ? 200 : 503, headers: { "Cache-Control": "no-store" } },
+      { status: healthy ? 200 : 503, headers: { "Cache-Control": "no-store" } },
     );
   } catch {
     return NextResponse.json({ status: "error", db: "disconnected", service: "mintbot", version: deploymentVersion() }, { status: 503 });

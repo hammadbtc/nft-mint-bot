@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { schedulerHeartbeatFresh } from "../src/lib/scheduler/health";
+import { parseWorkerRuntimeHeartbeat, schedulerHeartbeatFresh } from "../src/lib/scheduler/health";
 
 test("scheduler health requires a running worker with a recent valid tick", () => {
   const now = Date.parse("2026-08-13T16:00:00.000Z");
@@ -10,4 +10,10 @@ test("scheduler health requires a running worker with a recent valid tick", () =
   assert.equal(schedulerHeartbeatFresh(true, null, now), false);
   assert.equal(schedulerHeartbeatFresh(true, "not-a-time", now), false);
   assert.equal(schedulerHeartbeatFresh(true, "2026-08-13T16:00:01.000Z", now), false);
+});
+
+test("worker runtime heartbeat preserves timer and watcher health", () => {
+  const value = JSON.stringify({ at: "2026-08-18T03:00:00.000Z", armedTimers: 2, revalidationTimers: 2, blockWatcherHealthy: false });
+  assert.deepEqual(parseWorkerRuntimeHeartbeat(value), { at: "2026-08-18T03:00:00.000Z", armedTimers: 2, revalidationTimers: 2, blockWatcherHealthy: false });
+  assert.equal(schedulerHeartbeatFresh(true, value, Date.parse("2026-08-18T03:00:10.000Z")), true);
 });

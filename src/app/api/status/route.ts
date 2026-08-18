@@ -4,7 +4,7 @@ import { db, schema } from "@/lib/db";
 import { checkRpcHealth, getChain } from "@/lib/chains";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
 import { executionRole, runsExecutionWorker } from "@/lib/execution-role";
-import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
+import { parseWorkerRuntimeHeartbeat, schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 import { deploymentVersion } from "@/lib/deployment";
 
@@ -51,8 +51,20 @@ export async function GET() {
     const scheduler = schedulerStatus();
     const [heartbeat] = await db.select({ value: schema.settings.value }).from(schema.settings)
       .where(eq(schema.settings.key, WORKER_HEARTBEAT_KEY)).limit(1);
-    const executionHealthy = runsExecutionWorker(role) ? scheduler.healthy : schedulerHeartbeatFresh(true, heartbeat?.value || null);
-    const ready = executionHealthy && rpc.every((chain) => chain.healthy);
+    const runtime = parseWorkerRuntimeHeartbeat(heartbeat?.value);
+    const executionHealthy = runsExecutionWorker(role) ? scheduler.healthy : schedulerHeartbeatFresh(true, heartbeat?.value || null) && runtime?.blockWatcherHealthy !== false;
+    const armedJobs = counts.find((item) => item.status === "armed")?.count || 0;
+    const armedTimers = runsExecutionWorker(role) ? scheduler.armedTimers : runtime?.armedTimers || 0;
+    const missingLaunchTimers = Math.max(0, armedJobs - armedTimers);
+    const stuck = await db.execute(sql<{ kind: string; count: number }>`
+      select 'mint'::text as kind, count(*)::int as count from mint_jobs
+      where status in ('running','confirming') and (lease_expires_at is null or lease_expires_at::timestamptz < now())
+      union all
+      select 'disperse'::text as kind, count(*)::int as count from disperse_operations
+      where status in ('running','confirming') and (lease_expires_at is null or lease_expires_at::timestamptz < now())
+    `);
+    const stuckWork = Object.fromEntries(Array.from(stuck).map((item) => [item.kind, item.count]));
+    const ready = executionHealthy && missingLaunchTimers === 0 && Object.values(stuckWork).every((count) => Number(count) === 0) && rpc.every((chain) => chain.healthy);
     return NextResponse.json({
       ready,
       version: deploymentVersion(),
@@ -62,11 +74,16 @@ export async function GET() {
         role,
         running: runsExecutionWorker(role) ? scheduler.running : executionHealthy,
         healthy: executionHealthy,
-        lastTickAt: runsExecutionWorker(role) ? scheduler.lastTickAt : heartbeat?.value || null,
+        lastTickAt: runsExecutionWorker(role) ? scheduler.lastTickAt : runtime?.at || null,
+        armedJobs,
+        armedTimers,
+        missingLaunchTimers,
+        blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false },
       },
       rpc,
       jobs: Object.fromEntries(counts.map((item) => [item.status, item.count])),
       broadcastPerformance: Array.from(performanceRows),
+      stuckWork,
     }, { status: ready ? 200 : 503, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ ready: false, version: deploymentVersion(), error: safeErrorMessage(error, "Status check failed") }, { status: 503, headers: { "Cache-Control": "no-store" } });

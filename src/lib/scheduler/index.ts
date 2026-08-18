@@ -194,8 +194,15 @@ async function tick(): Promise<void> {
 
 async function persistWorkerHeartbeat(): Promise<void> {
   const now = new Date().toISOString();
-  await db.insert(schema.settings).values({ key: WORKER_HEARTBEAT_KEY, value: now })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: now, updatedAt: now } });
+  const watcher = state.blockWatcher?.status() || { configured: false, connected: false, lastBlockAt: null };
+  const value = JSON.stringify({
+    at: now,
+    armedTimers: state.launchTimers.size,
+    revalidationTimers: state.revalidationTimers.size,
+    blockWatcherHealthy: blockWatcherFresh(watcher),
+  });
+  await db.insert(schema.settings).values({ key: WORKER_HEARTBEAT_KEY, value })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: now } });
 }
 
 /** Funding and sweep work has its own scheduling lane. A slow receipt, RPC,
@@ -300,6 +307,7 @@ export function schedulerStatus() {
     disperseLastTickAt: state.disperseLastTickAt,
     disperseLastError: state.disperseLastError,
     armedTimers: state.launchTimers.size,
+    revalidationTimers: state.revalidationTimers.size,
     pollIntervalMs: SCHEDULER_INTERVAL_MS,
     dispersePollIntervalMs: DISPERSE_INTERVAL_MS,
     blockWatcher: { ...watcher, healthy: blockWatcherFresh(watcher) },
