@@ -58,6 +58,15 @@ for (const value of robinhoodRpcUrls) {
   }
 }
 
+if (process.env.ROBINHOOD_WS_URL?.trim()) {
+  try {
+    if (new URL(process.env.ROBINHOOD_WS_URL).protocol !== "wss:") throw new Error();
+  } catch {
+    console.error("ROBINHOOD_WS_URL must be a valid wss:// provider endpoint");
+    process.exit(1);
+  }
+}
+
 if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && !process.env.ALCHEMY_API_KEY?.trim() && robinhoodRpcUrls.length === 0) {
   console.error("Live Robinhood operation requires ALCHEMY_API_KEY or a second HTTPS endpoint in ROBINHOOD_RPC_URLS");
   process.exit(1);

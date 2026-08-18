@@ -44,7 +44,7 @@ export async function GET() {
         (percentile_cont(0.99) within group (order by latency_ms))::int as p99_ms,
         count(*) filter (where status in ('accepted', 'known'))::int as accepted
       from mint_broadcasts
-      where latency_ms is not null
+      where latency_ms is not null and started_at::timestamptz > now() - interval '24 hours'
       group by route_label
       order by p50_ms asc
     `);
@@ -65,6 +65,13 @@ export async function GET() {
     `);
     const stuckWork = Object.fromEntries(Array.from(stuck).map((item) => [item.kind, item.count]));
     const ready = executionHealthy && missingLaunchTimers === 0 && Object.values(stuckWork).every((count) => Number(count) === 0) && rpc.every((chain) => chain.healthy);
+    const broadcastRows = Array.from(performanceRows) as unknown as Array<{
+      route_label: string; samples: number; p50_ms: number | null; p95_ms: number | null; p99_ms: number | null; accepted: number;
+    }>;
+    const broadcastPerformance = broadcastRows.map((route) => ({
+      ...route,
+      healthy: Number(route.accepted) > 0 && Number(route.accepted) / Number(route.samples) >= 0.5,
+    }));
     return NextResponse.json({
       ready,
       version: deploymentVersion(),
@@ -82,7 +89,8 @@ export async function GET() {
       },
       rpc,
       jobs: Object.fromEntries(counts.map((item) => [item.status, item.count])),
-      broadcastPerformance: Array.from(performanceRows),
+      broadcastPerformance,
+      degradedBroadcastRoutes: broadcastPerformance.filter((route) => !route.healthy).map((route) => route.route_label),
       stuckWork,
     }, { status: ready ? 200 : 503, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
