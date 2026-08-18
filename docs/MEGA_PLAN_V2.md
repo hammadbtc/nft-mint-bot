@@ -36,7 +36,7 @@ release audit.
       signed, stealth, nonce-ladder, restart, RPC inconsistency, and sellout.
 - [x] Production migration, seed, test, lint, build, dependency audit, health,
       and dead-code/config audit all pass.
-- [ ] Before/after PDF report is generated from verified release evidence and
+- [x] Before/after PDF report is generated from verified release evidence and
       sent to the operator on Discord.
 
 ## Release rule
