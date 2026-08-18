@@ -34,7 +34,7 @@ release audit.
       timers, stuck jobs, and degraded broadcast routes.
 - [x] Historical launch replay and deterministic integration tests cover timed,
       signed, stealth, nonce-ladder, restart, RPC inconsistency, and sellout.
-- [ ] Production migration, seed, test, lint, build, dependency audit, health,
+- [x] Production migration, seed, test, lint, build, dependency audit, health,
       and dead-code/config audit all pass.
 - [ ] Before/after PDF report is generated from verified release evidence and
       sent to the operator on Discord.
