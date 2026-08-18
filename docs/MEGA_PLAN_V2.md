@@ -11,9 +11,9 @@ release audit.
 - [x] Existing projects migrate without changing reviewed transaction intent.
 - [x] Dashboard and transaction execution have explicit web/worker roles with
       a durable cross-process heartbeat and a compatibility migration mode.
-- [ ] Scheduled public mints can be prepared before launch and fired by a
+- [x] Scheduled public mints can be prepared before launch and fired by a
       precise timer without launch-time estimation or database discovery.
-- [ ] Signed/allowlist stages pre-authenticate and warm wallet-bound payloads as
+- [x] Signed/allowlist stages pre-authenticate and warm wallet-bound payloads as
       early as their provider permits.
 - [ ] Stealth stages use an event/WebSocket-capable watcher with a bounded HTTP
       fallback and one pinned-block final safety snapshot.

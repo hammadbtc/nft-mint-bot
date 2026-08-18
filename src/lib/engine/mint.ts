@@ -479,6 +479,17 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   }
   if (phase.status === "upcoming" && phase.startsAt) {
     if (job.dryRun) throw new MintNotOpenError(phase.startsAt);
+    if (adapter.warmTransaction && (!adapter.supportsArming || (adapter.canArmPhase && !adapter.canArmPhase(phase.id)))) {
+      const address = await signer.getAddress();
+      try {
+        await traceMintStage(job.id, "payload-acquisition", () => adapter.warmTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
+      } catch (error) {
+        // Some launchpads deliberately refuse payload construction before the
+        // phase. Keep the task scheduled and retry acquisition at launch.
+        recordMintSuppression(job.id, "payload-acquisition", `Provider did not permit early payload warming: ${safeErrorMessage(error)}`);
+      }
+      throw new MintNotOpenError(phase.startsAt);
+    }
     return armMint(job, collection, phase);
   }
   const manualRetryAt = manualOpenRetryAt(phase);

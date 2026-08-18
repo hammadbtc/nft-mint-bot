@@ -65,6 +65,16 @@ export interface MintAdapter {
     provider: ethers.Provider,
     options?: { allowBeforeStart?: boolean; phaseId?: string },
   ) => Promise<ethers.TransactionRequest>;
+  /** Acquire and fully validate a wallet-bound provider payload before the
+   * stage opens. Implementations must fail closed when the provider does not
+   * permit early construction; callers will retry at launch. */
+  warmTransaction?: (
+    collection: SupportedCollection,
+    signerAddress: string,
+    quantity: number,
+    provider: ethers.Provider,
+    options: { phaseId: string },
+  ) => Promise<void>;
   revalidateBeforeSigning?: (
     collection: SupportedCollection,
     signerAddress: string,

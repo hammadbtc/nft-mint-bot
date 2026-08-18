@@ -95,6 +95,7 @@ export function mapSignedStageEligibility(
 type TimedPromise<T> = { expiresAt: number; value: Promise<T> };
 const dropCache = new Map<string, TimedPromise<unknown>>();
 const eligibilityCache = new Map<string, TimedPromise<MintPhaseEligibility[]>>();
+const signedPayloadCache = new Map<string, { expiresAt: number; request: ethers.TransactionRequest }>();
 
 function cachedPromise<T>(cache: Map<string, TimedPromise<T>>, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const current = cache.get(key);
@@ -104,6 +105,26 @@ function cachedPromise<T>(cache: Map<string, TimedPromise<T>>, key: string, ttlM
   cache.set(key, entry);
   void value.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
   return value;
+}
+
+function payloadCacheKey(collection: SupportedCollection, signerAddress: string, quantity: number, phaseId: string): string {
+  return `${collection.id}:${signerAddress.toLowerCase()}:${quantity}:${phaseId}`;
+}
+
+async function acquireSignedPayload(
+  collection: SupportedCollection,
+  config: SignedSeaDropConfig,
+  stage: ReviewedOpenSeaStage,
+  signerAddress: string,
+  quantity: number,
+): Promise<ethers.TransactionRequest> {
+  const response = await withOpenSeaApi((api) => api.buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity }));
+  const request = validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, response);
+  signedPayloadCache.set(payloadCacheKey(collection, signerAddress, quantity, stage.id), {
+    expiresAt: Date.parse(stage.endsAt),
+    request,
+  });
+  return request;
 }
 
 function configFor(collection: SupportedCollection): SignedSeaDropConfig {
@@ -289,6 +310,15 @@ export const openseaSignedSeaDropV1: MintAdapter = {
   canArmPhase: (phaseId) => phaseId === "public",
   recommendedGasLimit: 500_000n,
 
+  async warmTransaction(collection, signerAddress, quantity, _provider, options) {
+    const config = configFor(collection);
+    const stage = config.stages.find((item) => item.id === options.phaseId);
+    if (!stage || stage.kind !== "signed") throw new Error("Only reviewed signed OpenSea stages can warm a wallet payload");
+    const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
+    if ((signedPayloadCache.get(key)?.expiresAt || 0) > Date.now()) return;
+    await acquireSignedPayload(collection, config, stage, signerAddress, quantity);
+  },
+
   async resolve(collection, source): Promise<ResolvedMint> {
     const config = configFor(collection);
     const publicResolved = await openseaSeaDropV1.resolve(collection, source);
@@ -355,8 +385,18 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const now = Number(latest.timestamp) * 1000;
     if (now < Date.parse(stage.startsAt)) throw new Error(`${stage.name} has not started`);
     if (now >= Date.parse(stage.endsAt)) throw new Error(`${stage.name} has ended`);
-    const response = await withOpenSeaApi((api) => api.buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity }));
-    return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, response);
+    const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
+    const warmed = signedPayloadCache.get(key);
+    if (warmed && warmed.expiresAt > Date.now()) {
+      // Validate again on every use so a future cache refactor cannot weaken
+      // target, recipient, price, stage, or signature binding.
+      return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, {
+        ...warmed.request,
+        chain: openSeaChainForChainId(collection.chainId),
+        value: BigInt(warmed.request.value || 0).toString(),
+      });
+    }
+    return acquireSignedPayload(collection, config, stage, signerAddress, quantity);
   },
 };
 
