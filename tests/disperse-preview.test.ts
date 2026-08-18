@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateDisperseRefresh, type DisperseInput, type DispersePreview } from "../src/lib/disperse";
+import { safeToRetryDisperseTransfer, validateDisperseRefresh, type DisperseInput, type DispersePreview } from "../src/lib/disperse";
 import { stableHash } from "../src/lib/safety";
 
 const main = "11111111-1111-4111-8111-111111111111";
@@ -44,4 +44,11 @@ test("Disperse sweep accepts fee movement when the reviewed sweep remains funded
   const expected = makeSweep(balance - 25200n * 300n, 300n);
   const current = makeSweep(balance - 25200n * 360n, 360n);
   assert.doesNotThrow(() => validateDisperseRefresh(sweepInput, expected, current));
+});
+
+test("Disperse retries only failed transfers that never reserved or broadcast", () => {
+  assert.equal(safeToRetryDisperseTransfer({ status: "failed", txHash: null, rawTx: null, nonce: null }), true);
+  assert.equal(safeToRetryDisperseTransfer({ status: "failed", txHash: "0xabc", rawTx: null, nonce: 1 }), false);
+  assert.equal(safeToRetryDisperseTransfer({ status: "prepared", txHash: "0xabc", rawTx: "0xdef", nonce: 1 }), false);
+  assert.equal(safeToRetryDisperseTransfer({ status: "pending", txHash: null, rawTx: null, nonce: null }), false);
 });

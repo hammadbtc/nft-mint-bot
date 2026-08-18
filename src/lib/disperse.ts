@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getProvider } from "@/lib/chains";
@@ -41,6 +41,10 @@ export type DispersePreview = {
   expiresAt: string;
   fingerprint: string;
 };
+
+export function safeToRetryDisperseTransfer(transfer: { status: string; txHash: string | null; rawTx: string | null; nonce: number | null }): boolean {
+  return transfer.status === "failed" && transfer.txHash == null && transfer.rawTx == null && transfer.nonce == null;
+}
 
 async function walletSet(input: DisperseInput) {
   const [main] = await db.select().from(schema.wallets).where(eq(schema.wallets.id, input.mainWalletId)).limit(1);
@@ -398,4 +402,30 @@ export async function processDisperseOperations(limit = 2): Promise<number> {
 
 export async function recoverDisperseOperation(operationId: string): Promise<void> {
   await runDisperseOperation(operationId);
+}
+
+/** Explicitly requeue only transfers that provably never acquired a nonce or
+ * signed payload. Submitted/prepared work is immutable and handled solely by
+ * hash reconciliation, preventing duplicate payments. */
+export async function retryNeverBroadcastDisperse(operationId: string): Promise<{ retried: number }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`disperse-retry:${operationId}`}))`);
+    const [operation] = await tx.select().from(schema.disperseOperations).where(eq(schema.disperseOperations.id, operationId)).limit(1);
+    if (!operation) throw new Error("Disperse operation was not found");
+    if (["running", "confirming"].includes(operation.status)) throw new Error("Disperse is still reconciling; wait before retrying");
+    const rows = await tx.update(schema.disperseTransfers).set({ status: "pending", error: null })
+      .where(and(
+        eq(schema.disperseTransfers.operationId, operationId),
+        eq(schema.disperseTransfers.status, "failed"),
+        isNull(schema.disperseTransfers.txHash),
+        isNull(schema.disperseTransfers.rawTx),
+        isNull(schema.disperseTransfers.nonce),
+      )).returning({ id: schema.disperseTransfers.id });
+    if (!rows.length) throw new Error("No never-broadcast transfers are safe to retry");
+    await tx.update(schema.disperseOperations).set({
+      status: "pending", error: null, completedAt: null, claimToken: null,
+      claimedAt: null, leaseExpiresAt: null, updatedAt: new Date().toISOString(),
+    }).where(eq(schema.disperseOperations.id, operationId));
+    return { retried: rows.length };
+  });
 }

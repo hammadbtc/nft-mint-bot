@@ -24,7 +24,7 @@ release audit.
 - [x] Supply-aware policy suppresses transactions that are no longer safe and
       records why each transaction was not sent.
 - [x] Mint, Disperse, and sweep have independent execution capacity.
-- [ ] Disperse/sweep expose operation and transfer states, exact errors,
+- [x] Disperse/sweep expose operation and transfer states, exact errors,
       transaction hashes, recovery, and safe retry of never-broadcast work.
 - [ ] Bulk funding has an audited/verified-contract requirement and never
       silently falls back to an unreviewed contract.

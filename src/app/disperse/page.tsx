@@ -108,6 +108,17 @@ export default function DispersePage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not execute"); }
     finally { setBusy(false); }
   };
+  const retryOperation = async (operationId:string) => {
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch("/api/disperse", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action:"retry", operationId}) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setMessage(`${data.retried} never-broadcast transfer${data.retried === 1 ? "" : "s"} safely requeued.`);
+      await loadOperations();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not retry operation"); }
+    finally { setBusy(false); }
+  };
 
   const selectedChain = chains.find((chain)=>chain.id === chainId);
   const displayBalance = mainBalanceWei == null ? "—" : `${Number(ethers.formatEther(mainBalanceWei)).toLocaleString(undefined, { maximumFractionDigits:6 })} ${selectedChain?.symbol || "native"}`;
@@ -137,6 +148,7 @@ export default function DispersePage() {
         const chain = chainById.get(operation.chainId);
         const confirmed = operation.transfers.filter((transfer) => transfer.status === "confirmed").length;
         const failed = operation.transfers.filter((transfer) => transfer.status === "failed").length;
+        const retryable = operation.transfers.filter((transfer) => transfer.status === "failed" && !transfer.txHash && transfer.nonce == null).length;
         return <div className="panel job" key={operation.id} style={{marginBottom:12}}>
           <div className="job-summary" style={{cursor:"default"}}><div className="job-art"/><div className="job-main"><b>{operation.type === "fund" ? "Fund workers" : "Sweep to main"} · {chain?.name || `Chain ${operation.chainId}`}</b><span>{operation.transfers.length} transfers · {confirmed} confirmed{failed ? ` · ${failed} failed` : ""} · {new Date(operation.createdAt).toLocaleString()}</span></div><span className="status">{operation.status}</span></div>
           <div className="result-panel"><table className="result-table"><thead><tr><th>Status</th><th>Route</th><th>Amount</th><th>Result</th></tr></thead><tbody>{operation.transfers.map((transfer) => {
@@ -145,7 +157,7 @@ export default function DispersePage() {
             const href = transfer.txHash && chain?.explorerUrl ? `${chain.explorerUrl}/tx/${transfer.txHash}` : null;
             const result = transfer.error || (transfer.txHash ? `Tx ${short(transfer.txHash)}${transfer.blockNumber ? ` · block ${transfer.blockNumber}` : ""}` : transfer.status === "pending" ? "Waiting for worker" : "No broadcast");
             return <tr key={transfer.id}><td className={transfer.status === "failed" ? "failed" : transfer.status === "confirmed" ? "ok" : ""}>{transfer.status}</td><td>{from?.label || short(transfer.fromWalletId)} → {to?.label || short(transfer.toWalletId)}</td><td>{ethers.formatEther(transfer.amount)} {chain?.symbol || "native"}</td><td>{href ? <a href={href} target="_blank" rel="noreferrer">{result}</a> : result}</td></tr>;
-          })}</tbody></table>{operation.error && <div className="alert" style={{margin:12,color:"var(--danger)"}}>{operation.error}</div>}</div>
+          })}</tbody></table>{operation.error && <div className="alert" style={{margin:12,color:"var(--danger)"}}>{operation.error}</div>}{retryable>0&&<div className="toolbar" style={{margin:12}}><button className="secondary-btn" disabled={busy} onClick={()=>void retryOperation(operation.id)}>Retry {retryable} never-broadcast transfer{retryable===1?"":"s"}</button></div>}</div>
         </div>;
       })}
     </section>

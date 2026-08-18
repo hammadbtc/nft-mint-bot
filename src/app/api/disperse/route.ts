@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { previewDisperse, queueDisperse, type DispersePreview } from "@/lib/disperse";
+import { previewDisperse, queueDisperse, retryNeverBroadcastDisperse, type DispersePreview } from "@/lib/disperse";
 import { safeErrorMessage } from "@/lib/safety";
 import { db, schema } from "@/lib/db";
 import { desc, inArray } from "drizzle-orm";
@@ -35,6 +35,7 @@ const input = z.object({
   amountPerWallet: z.string().optional(),
   expected: previewSchema.optional(),
 });
+const retryInput = z.object({ action: z.literal("retry"), operationId: z.string().uuid() });
 
 export async function GET(req: NextRequest) {
   const requested = Number(req.nextUrl.searchParams.get("limit") || 50);
@@ -52,7 +53,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = input.parse(await req.json());
+    const raw: unknown = await req.json();
+    const retry = retryInput.safeParse(raw);
+    if (retry.success) return NextResponse.json(await retryNeverBroadcastDisperse(retry.data.operationId), { status: 202, headers: { "Cache-Control": "no-store" } });
+    const body = input.parse(raw);
     const operation = { type: body.type, mainWalletId: body.mainWalletId, workerWalletIds: body.workerWalletIds, chainId: body.chainId, amountPerWallet: body.amountPerWallet };
     if (body.action === "preview") return NextResponse.json(await previewDisperse(operation), { headers: { "Cache-Control": "no-store" } });
     if (!body.expected) throw new Error("An exact reviewed preview is required");
