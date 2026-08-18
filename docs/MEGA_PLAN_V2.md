@@ -15,7 +15,7 @@ release audit.
       precise timer without launch-time estimation or database discovery.
 - [x] Signed/allowlist stages pre-authenticate and warm wallet-bound payloads as
       early as their provider permits.
-- [ ] Stealth stages use an event/WebSocket-capable watcher with a bounded HTTP
+- [x] Stealth stages use an event/WebSocket-capable watcher with a bounded HTTP
       fallback and one pinned-block final safety snapshot.
 - [ ] One-per-transaction wallet allowances can use a pre-signed nonce ladder
       and broadcast entries without waiting for prior receipts.

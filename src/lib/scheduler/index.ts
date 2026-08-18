@@ -7,6 +7,7 @@ import { processDisperseOperations, recoverDisperseOperation } from "@/lib/dispe
 import { armLeadMs, revalidateLeadMs, schedulePrecisely } from "@/lib/launch-timing";
 import { firstTaskPerWallet } from "@/lib/task-management";
 import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "./health";
+import { BlockWatcher, blockWatcherFresh, robinhoodWebSocketUrl } from "@/lib/chains/block-watcher";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
@@ -30,6 +31,7 @@ interface SchedulerRuntimeState {
   disperseLastTickAt: string | null;
   disperseLastError: string | null;
   signalHandlersRegistered: boolean;
+  blockWatcher: BlockWatcher | null;
 }
 
 // Next.js can bundle instrumentation and route handlers as separate module
@@ -54,6 +56,7 @@ const state = schedulerHost.__mintbotSchedulerRuntime ??= {
   disperseLastTickAt: null,
   disperseLastError: null,
   signalHandlersRegistered: false,
+  blockWatcher: null,
 };
 state.confirmationInterval ??= null;
 state.workerHeartbeatInterval ??= null;
@@ -63,6 +66,7 @@ state.disperseLastTickAt ??= null;
 state.disperseLastError ??= null;
 state.launchTimers ??= new Map();
 state.revalidationTimers ??= new Map();
+state.blockWatcher ??= null;
 
 function clearArmedTimers(jobId: string): void {
   const launch = state.launchTimers.get(jobId);
@@ -224,6 +228,8 @@ export function startScheduler(): void {
   void disperseTick();
   state.schedulerInterval = setInterval(() => void tick(), SCHEDULER_INTERVAL_MS);
   state.disperseInterval = setInterval(() => void disperseTick(), DISPERSE_INTERVAL_MS);
+  state.blockWatcher ||= new BlockWatcher(robinhoodWebSocketUrl(), () => { void tick(); });
+  state.blockWatcher.start();
   state.recoveryInterval = setInterval(() => void recoverStaleWork(), RECOVERY_INTERVAL_MS);
   state.confirmationInterval = setInterval(() => void reconcileConfirmingWork(), CONFIRMATION_INTERVAL_MS);
   void persistWorkerHeartbeat().catch((error) => { state.lastError = safeErrorMessage(error, "Worker heartbeat failed"); });
@@ -243,6 +249,7 @@ export function stopScheduler(): void {
   if (state.recoveryInterval) clearInterval(state.recoveryInterval);
   if (state.confirmationInterval) clearInterval(state.confirmationInterval);
   if (state.workerHeartbeatInterval) clearInterval(state.workerHeartbeatInterval);
+  state.blockWatcher?.stop();
   for (const timer of state.launchTimers.values()) clearTimeout(timer);
   for (const timer of state.revalidationTimers.values()) clearTimeout(timer);
   state.launchTimers.clear();
@@ -280,9 +287,10 @@ export function ensureSchedulerRunning(): { restarted: boolean } {
 export function schedulerStatus() {
   const running = Boolean(state.schedulerInterval);
   const disperseRunning = Boolean(state.disperseInterval);
+  const watcher = state.blockWatcher?.status() || { configured: false, connected: false, lastBlockAt: null, lastBlockNumber: null, lastError: null, reconnects: 0 };
   return {
     running,
-    healthy: schedulerHeartbeatFresh(running, state.lastTickAt) && schedulerHeartbeatFresh(disperseRunning, state.disperseLastTickAt),
+    healthy: schedulerHeartbeatFresh(running, state.lastTickAt) && schedulerHeartbeatFresh(disperseRunning, state.disperseLastTickAt) && blockWatcherFresh(watcher),
     tickRunning: state.tickRunning,
     disperseRunning,
     disperseTickRunning: state.disperseTickRunning,
@@ -294,5 +302,6 @@ export function schedulerStatus() {
     armedTimers: state.launchTimers.size,
     pollIntervalMs: SCHEDULER_INTERVAL_MS,
     dispersePollIntervalMs: DISPERSE_INTERVAL_MS,
+    blockWatcher: { ...watcher, healthy: blockWatcherFresh(watcher) },
   };
 }
