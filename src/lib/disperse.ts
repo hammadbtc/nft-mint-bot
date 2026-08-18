@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
-import { broadcastPreparedTransaction, prepareSignedTransaction, waitForReceipt } from "@/lib/transactions";
+import { broadcastPreparedTransaction, prepareSignedTransaction, prepareSignedTransactionBatch, waitForReceipt } from "@/lib/transactions";
 import { liveTransactionsEnabled, requireLiveTransactions, safeErrorMessage, stableHash, stableJson } from "@/lib/safety";
 
 const PREVIEW_TTL_MS = 60_000;
@@ -329,30 +329,111 @@ async function runTransfer(transferId: string, chainId: number): Promise<"confir
   return confirmed ? "confirmed" : "failed";
 }
 
+async function submitFundingNonceLadder(
+  operation: typeof schema.disperseOperations.$inferSelect,
+  transfers: Array<typeof schema.disperseTransfers.$inferSelect>,
+): Promise<number> {
+  const pending = transfers.filter((transfer) => transfer.status === "pending" && !transfer.txHash && !transfer.rawTx && transfer.nonce == null);
+  if (pending.length < 2) return 0;
+  const sourceIds = [...new Set(pending.map((transfer) => transfer.fromWalletId))];
+  if (sourceIds.length !== 1 || sourceIds[0] !== operation.mainWalletId) throw new Error("Funding ladder must use exactly one reviewed main wallet");
+  const walletIds = [...new Set(pending.flatMap((transfer) => [transfer.fromWalletId, transfer.toWalletId]))];
+  const wallets = await db.select().from(schema.wallets).where(inArray(schema.wallets.id, walletIds));
+  const byId = new Map(wallets.map((wallet) => [wallet.id, wallet]));
+  const from = byId.get(operation.mainWalletId);
+  if (!from?.active || from.role !== "main") throw new Error("Reviewed funding main wallet is unavailable");
+  const provider = getProvider(operation.chainId);
+  const signer = await getSigner(from.id, provider);
+  const fees = await provider.getFeeData();
+  const currentFee = fees.maxFeePerGas ?? fees.gasPrice;
+  const requests = pending.map((transfer): ethers.TransactionRequest => {
+    const to = byId.get(transfer.toWalletId);
+    if (!to?.active || to.role !== "worker" || to.parentWalletId !== from.id) throw new Error("Reviewed funding worker state changed");
+    if (currentFee == null || currentFee > BigInt(transfer.maxFeePerGas || "0")) throw new Error("Network fee exceeded the reviewed cap; create a fresh Disperse preview");
+    return {
+      to: to.address, value: BigInt(transfer.amount), chainId: operation.chainId,
+      gasLimit: BigInt(transfer.gasLimit || "0"),
+      ...(transfer.maxPriorityFeePerGas
+        ? { maxFeePerGas: BigInt(transfer.maxFeePerGas || "0"), maxPriorityFeePerGas: BigInt(transfer.maxPriorityFeePerGas) }
+        : { gasPrice: BigInt(transfer.maxFeePerGas || "0") }),
+    };
+  });
+  const maximum = pending.reduce((sum, transfer) => sum + BigInt(transfer.amount) + BigInt(transfer.gasLimit || "0") * BigInt(transfer.maxFeePerGas || "0"), 0n);
+  if (await provider.getBalance(from.address) < maximum) throw new Error("Main wallet no longer has the reviewed funding total plus gas reserve");
+  await Promise.all(requests.map((request) => provider.call({ ...request, from: from.address })));
+  const prepared = await prepareSignedTransactionBatch(from.id, operation.chainId, signer, provider, requests, async (items, tx) => {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index]!;
+      const updated = await tx.update(schema.disperseTransfers).set({
+        status: "prepared", nonce: item.nonce, rawTx: item.rawTx, txHash: item.txHash,
+        preparedAt: new Date().toISOString(), error: null,
+      }).where(and(eq(schema.disperseTransfers.id, pending[index]!.id), eq(schema.disperseTransfers.status, "pending"), isNull(schema.disperseTransfers.nonce)))
+        .returning({ id: schema.disperseTransfers.id });
+      if (!updated.length) throw new Error("Funding transfer changed while its nonce ladder was being prepared");
+    }
+  });
+  requireLiveTransactions();
+  const submissions = await Promise.allSettled(prepared.map((item) => broadcastPreparedTransaction(provider, item.rawTx, item.txHash)));
+  const now = new Date().toISOString();
+  for (let index = 0; index < submissions.length; index += 1) {
+    const result = submissions[index]!;
+    await db.update(schema.disperseTransfers).set({
+      status: result.status === "fulfilled" ? "submitted" : "prepared",
+      broadcastAt: result.status === "fulfilled" ? now : null,
+      error: result.status === "fulfilled" ? null : safeErrorMessage(result.reason, "Broadcast failed; signed funding transfer retained for recovery"),
+    }).where(eq(schema.disperseTransfers.id, pending[index]!.id));
+  }
+  return prepared.length;
+}
+
 export async function runDisperseOperation(operationId: string): Promise<void> {
   const [operation] = await db.select().from(schema.disperseOperations).where(eq(schema.disperseOperations.id, operationId)).limit(1);
   if (!operation || ["completed", "failed", "partial", "cancelled"].includes(operation.status)) return;
   const transfers = await db.select().from(schema.disperseTransfers)
     .where(eq(schema.disperseTransfers.operationId, operationId)).orderBy(asc(schema.disperseTransfers.createdAt));
+  if (operation.type === "fund" && transfers.filter((item) => item.status === "pending").length > 1) {
+    try {
+      const submitted = await submitFundingNonceLadder(operation, transfers);
+      if (submitted) {
+        await db.update(schema.disperseOperations).set({
+          status: "confirming", error: null, leaseExpiresAt: new Date(Date.now() + OPERATION_LEASE_MS).toISOString(), updatedAt: new Date().toISOString(),
+        }).where(eq(schema.disperseOperations.id, operationId));
+        return;
+      }
+    } catch (error) {
+      await db.update(schema.disperseOperations).set({ error: safeErrorMessage(error, "Funding ladder preparation failed"), updatedAt: new Date().toISOString() })
+        .where(eq(schema.disperseOperations.id, operationId));
+      // Continue through the normal per-transfer recovery path. Any signed
+      // entries are immutable and will be reconciled, never recreated.
+    }
+  }
   let confirming = false;
   let failed = false;
-  for (const transfer of transfers) {
+  const processTransfer = async (transfer: typeof transfers[number]) => {
     try {
       const result = await runTransfer(transfer.id, operation.chainId);
-      confirming ||= result === "confirming";
-      failed ||= result === "failed";
-      if (confirming) break;
+      return { confirming: result === "confirming", failed: result === "failed" };
     } catch (error) {
-      failed = true;
       const [current] = await db.select({ txHash: schema.disperseTransfers.txHash, rawTx: schema.disperseTransfers.rawTx })
         .from(schema.disperseTransfers).where(eq(schema.disperseTransfers.id, transfer.id)).limit(1);
       const recoverable = Boolean(current?.txHash && current?.rawTx);
       await db.update(schema.disperseTransfers).set({ status: recoverable ? "prepared" : "failed", error: safeErrorMessage(error) })
         .where(eq(schema.disperseTransfers.id, transfer.id));
-      if (recoverable) {
-        confirming = true;
-        break;
-      }
+      return { confirming: recoverable, failed: true };
+    }
+  };
+  if (operation.type === "sweep") {
+    // Every sweep has a different source wallet/nonce domain, so receipt waits
+    // and provider calls are independent and safe to run concurrently.
+    const results = await Promise.all(transfers.map(processTransfer));
+    confirming = results.some((result) => result.confirming);
+    failed = results.some((result) => result.failed);
+  } else {
+    for (const transfer of transfers) {
+      const result = await processTransfer(transfer);
+      confirming ||= result.confirming;
+      failed ||= result.failed;
+      if (confirming) break;
     }
   }
   const refreshed = await db.select({ status: schema.disperseTransfers.status }).from(schema.disperseTransfers)

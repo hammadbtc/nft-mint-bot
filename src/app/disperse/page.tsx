@@ -34,7 +34,7 @@ export default function DispersePage() {
       const response = await fetch("/api/disperse?limit=50", { cache:"no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load Disperse operations");
-      setOperations(Array.isArray(data) ? data : []);
+      setOperations(Array.isArray(data) ? data : Array.isArray(data.operations) ? data.operations : []);
       setHistoryError("");
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : "Could not load Disperse operations");

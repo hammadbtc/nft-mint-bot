@@ -4,6 +4,7 @@ import { previewDisperse, queueDisperse, retryNeverBroadcastDisperse, type Dispe
 import { safeErrorMessage } from "@/lib/safety";
 import { db, schema } from "@/lib/db";
 import { desc, inArray } from "drizzle-orm";
+import { approvedBulkDisperseChains } from "@/lib/bulk-disperse";
 
 const transferPlan = z.object({
   fromWalletId: z.string().uuid(),
@@ -44,11 +45,11 @@ export async function GET(req: NextRequest) {
   const transfers = operations.length
     ? await db.select().from(schema.disperseTransfers).where(inArray(schema.disperseTransfers.operationId, operations.map((item) => item.id)))
     : [];
-  return NextResponse.json(operations.map((operation) => ({
+  return NextResponse.json({ bulkFundingApprovedChains: approvedBulkDisperseChains(), operations: operations.map((operation) => ({
     ...operation,
     previewJson: null,
     transfers: transfers.filter((transfer) => transfer.operationId === operation.id).map((transfer) => ({ ...transfer, rawTx: null })),
-  })), { headers: { "Cache-Control": "no-store" } });
+  })) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(req: NextRequest) {

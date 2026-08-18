@@ -26,7 +26,7 @@ release audit.
 - [x] Mint, Disperse, and sweep have independent execution capacity.
 - [x] Disperse/sweep expose operation and transfer states, exact errors,
       transaction hashes, recovery, and safe retry of never-broadcast work.
-- [ ] Bulk funding has an audited/verified-contract requirement and never
+- [x] Bulk funding has an audited/verified-contract requirement and never
       silently falls back to an unreviewed contract.
 - [x] Every hot-path stage records monotonic and wall-clock timing suitable for
       launch replay and p50/p95 analysis.
