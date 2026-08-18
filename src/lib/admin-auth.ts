@@ -13,3 +13,13 @@ export function adminPasswordAccepted(supplied: string): boolean {
     || "";
   return Boolean(expected) && safeSecretEqual(supplied, expected);
 }
+
+export function requireAppAccessPassword(request: NextRequest): void {
+  const supplied = request.headers.get("x-app-password") || "";
+  if (!appAccessPasswordAccepted(supplied)) throw new Error("App login password is incorrect");
+}
+
+export function appAccessPasswordAccepted(supplied: string): boolean {
+  const expected = process.env.APP_ACCESS_PASSWORD?.trim() || "";
+  return Boolean(expected) && safeSecretEqual(supplied, expected);
+}

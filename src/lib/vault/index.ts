@@ -110,6 +110,14 @@ export async function getSigner(walletId: string, provider: ethers.Provider): Pr
   return wallet.connect(provider) as ethers.Wallet;
 }
 
+/** Return a wallet's raw imported secret after the caller has performed authorization. */
+export async function getWalletSecret(walletId: string) {
+  const [record] = await db.select({ encryptedKey: schema.wallets.encryptedKey, keyFormat: schema.wallets.keyFormat })
+    .from(schema.wallets).where(eq(schema.wallets.id, walletId)).limit(1);
+  if (!record) return null;
+  return { secret: decryptPrivateKey(record.encryptedKey), keyFormat: record.keyFormat };
+}
+
 /**
  * List wallets (without keys).
  */

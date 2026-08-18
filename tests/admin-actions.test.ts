@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { adminPasswordAccepted } from "../src/lib/admin-auth";
+import { adminPasswordAccepted, appAccessPasswordAccepted } from "../src/lib/admin-auth";
 import { prepareWalletKeyReplacement } from "../src/lib/vault";
 import { firstTaskPerWallet, mintTaskMutationError } from "../src/lib/task-management";
 
@@ -21,6 +21,21 @@ test("destructive actions require the configured admin password with access-pass
     if (previousAdmin === undefined) delete process.env.ADMIN_ACTION_PASSWORD; else process.env.ADMIN_ACTION_PASSWORD = previousAdmin;
     if (previousAccess === undefined) delete process.env.APP_ACCESS_PASSWORD; else process.env.APP_ACCESS_PASSWORD = previousAccess;
     if (previousSupport === undefined) delete process.env.SUPPORT_ADMIN_TOKEN; else process.env.SUPPORT_ADMIN_TOKEN = previousSupport;
+  }
+});
+
+test("wallet secret reveal accepts only the app login password", () => {
+  const previousAdmin = process.env.ADMIN_ACTION_PASSWORD;
+  const previousAccess = process.env.APP_ACCESS_PASSWORD;
+  try {
+    process.env.ADMIN_ACTION_PASSWORD = "separate-admin-password";
+    process.env.APP_ACCESS_PASSWORD = "browser-access-password";
+    assert.equal(appAccessPasswordAccepted("browser-access-password"), true);
+    assert.equal(appAccessPasswordAccepted("separate-admin-password"), false);
+    assert.equal(appAccessPasswordAccepted("wrong"), false);
+  } finally {
+    if (previousAdmin === undefined) delete process.env.ADMIN_ACTION_PASSWORD; else process.env.ADMIN_ACTION_PASSWORD = previousAdmin;
+    if (previousAccess === undefined) delete process.env.APP_ACCESS_PASSWORD; else process.env.APP_ACCESS_PASSWORD = previousAccess;
   }
 });
 
