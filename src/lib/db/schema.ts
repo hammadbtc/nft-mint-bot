@@ -188,6 +188,24 @@ export const mintBroadcasts = pgTable("mint_broadcasts", {
   index("mint_broadcasts_route_idx").on(table.routeKey, table.startedAt),
 ]);
 
+// Fine-grained launch telemetry. Durations are measured with the monotonic
+// clock while timestamps retain wall-clock correlation for incident replay.
+// Writes are queued off the transaction hot path by launch-telemetry.ts.
+export const mintStageEvents = pgTable("mint_stage_events", {
+  id: varchar("id").primaryKey(),
+  jobId: varchar("job_id").notNull().references(() => mintJobs.id),
+  attemptId: varchar("attempt_id").references(() => mintAttempts.id),
+  stage: varchar("stage").notNull(),
+  outcome: varchar("outcome").notNull(), // success | error | suppressed
+  durationMs: integer("duration_ms").notNull(),
+  error: text("error"),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at").notNull(),
+}, (table) => [
+  index("mint_stage_events_job_idx").on(table.jobId, table.startedAt),
+  index("mint_stage_events_stage_idx").on(table.stage, table.startedAt),
+]);
+
 // ─── RPC Health ────────────────────────────────────────────────────────
 export const rpcHealth = pgTable("rpc_health", {
   id: serial("id").primaryKey(),

@@ -28,7 +28,7 @@ release audit.
       transaction hashes, recovery, and safe retry of never-broadcast work.
 - [ ] Bulk funding has an audited/verified-contract requirement and never
       silently falls back to an unreviewed contract.
-- [ ] Every hot-path stage records monotonic and wall-clock timing suitable for
+- [x] Every hot-path stage records monotonic and wall-clock timing suitable for
       launch replay and p50/p95 analysis.
 - [ ] Dashboard health detects dead workers, stale watchers, absent launch
       timers, stuck jobs, and degraded broadcast routes.
