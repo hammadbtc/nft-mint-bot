@@ -36,6 +36,10 @@ export type ResolvedMint = {
   currentSupply?: number;
   phases: MintPhase[];
   source: "url" | "contract" | "name";
+  execution?: {
+    onePerTransaction: boolean;
+    maxPreparedTransactions?: number;
+  };
 };
 
 export interface MintAdapter {
@@ -49,6 +53,13 @@ export interface MintAdapter {
     phaseId: string,
     provider: ethers.Provider,
   ) => Promise<boolean>;
+  /** Pinned/current authoritative capacity for one-per-transaction ladders. */
+  remainingTransactions?: (
+    collection: SupportedCollection,
+    phaseId: string,
+    signerAddress: string,
+    provider: ethers.Provider,
+  ) => Promise<number>;
   resolve(collection: SupportedCollection, source: ResolvedMint["source"]): Promise<ResolvedMint>;
   checkEligibility?: (
     collection: SupportedCollection,

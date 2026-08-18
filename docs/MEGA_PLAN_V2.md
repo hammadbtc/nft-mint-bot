@@ -17,11 +17,11 @@ release audit.
       early as their provider permits.
 - [x] Stealth stages use an event/WebSocket-capable watcher with a bounded HTTP
       fallback and one pinned-block final safety snapshot.
-- [ ] One-per-transaction wallet allowances can use a pre-signed nonce ladder
+- [x] One-per-transaction wallet allowances can use a pre-signed nonce ladder
       and broadcast entries without waiting for prior receipts.
-- [ ] Robinhood submission is sequencer-first with concurrent identical-hash
+- [x] Robinhood submission is sequencer-first with concurrent identical-hash
       fallbacks and route latency telemetry.
-- [ ] Supply-aware policy suppresses transactions that are no longer safe and
+- [x] Supply-aware policy suppresses transactions that are no longer safe and
       records why each transaction was not sent.
 - [x] Mint, Disperse, and sweep have independent execution capacity.
 - [ ] Disperse/sweep expose operation and transfer states, exact errors,

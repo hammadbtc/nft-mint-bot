@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
@@ -16,6 +16,7 @@ import { sendAlert } from "@/lib/alerting";
 import { getSigner } from "@/lib/vault";
 import {
   exactSimulationRequest,
+  prepareSignedTransactionBatch,
   prepareSignedTransaction,
 } from "@/lib/transactions";
 import {
@@ -88,12 +89,14 @@ async function applyGas(
   from: string,
   overrides?: Pick<JobRow, "gasLimit" | "maxFeePerGas" | "maxPriorityFeePerGas">,
   fallbackGasLimit?: bigint,
+  estimate = true,
 ): Promise<ethers.TransactionRequest> {
   const exact = exactSimulationRequest(request, from);
   const [estimatedResult, fees] = await Promise.all([
-    provider.estimateGas(exact)
+    estimate ? provider.estimateGas(exact)
       .then((value): { ok: true; value: bigint } => ({ ok: true, value }))
-      .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error })),
+      .catch((error: unknown): { ok: false; error: unknown } => ({ ok: false, error }))
+      : Promise.resolve(fallbackGasLimit != null ? { ok: true as const, value: fallbackGasLimit } : { ok: false as const, error: new Error("A reviewed gas limit is required when launch-time estimation is disabled") }),
     provider.getFeeData(),
   ]);
   const estimated = estimatedResult.ok ? estimatedResult.value : fallbackGasLimit;
@@ -276,6 +279,95 @@ async function sendDurableAttempt(args: {
     if (!existing) throw error;
   }
   return { status: "confirming", txHash: attempt.txHash! };
+}
+
+async function executeOnePerTransactionLadder(args: {
+  job: JobRow;
+  collection: SupportedCollection;
+  wallet: typeof schema.wallets.$inferSelect;
+  phase: MintPhase;
+  signer: ethers.Signer;
+  provider: ethers.Provider;
+}): Promise<ExecutionResult | null> {
+  const { job, collection, wallet, phase, signer, provider } = args;
+  const manifest = executionManifestFor(collection);
+  const engine = executionEngineFor(collection);
+  if (!manifest.onePerTransaction || !job.batchId || !job.phaseId) return null;
+  const siblings = await db.select().from(schema.mintJobs).where(and(
+    eq(schema.mintJobs.batchId, job.batchId), eq(schema.mintJobs.walletId, job.walletId),
+    eq(schema.mintJobs.collectionId, job.collectionId), eq(schema.mintJobs.phaseId, job.phaseId),
+    inArray(schema.mintJobs.status, ["pending", "running"]),
+  )).orderBy(asc(schema.mintJobs.createdAt), asc(schema.mintJobs.id)).limit(manifest.maxPreparedTransactions || 1);
+  if (siblings.length <= 1) return null;
+  if (engine.requiresDedicatedWalletForLadder && wallet.role !== "worker") {
+    throw new Error("Multi-transaction launch mode requires a dedicated worker wallet");
+  }
+  const adapter = getMintAdapter(collection.adapterKey);
+  if (!adapter?.buildTransaction || !adapter.remainingTransactions) throw new Error("This one-per-transaction adapter cannot prove ladder capacity");
+  const address = await signer.getAddress();
+  const capacity = await traceMintStage(job.id, "final-revalidation", () => adapter.remainingTransactions!(collection, phase.id, address, provider));
+  const selected = siblings.slice(0, Math.max(0, capacity));
+  const suppressed = siblings.slice(selected.length);
+  if (suppressed.length) {
+    const reason = `Suppressed before signing: authoritative wallet/supply capacity is ${capacity}`;
+    const now = new Date().toISOString();
+    await db.update(schema.mintJobs).set({ status: "failed", error: reason, completedAt: now, updatedAt: now })
+      .where(inArray(schema.mintJobs.id, suppressed.map((item) => item.id)));
+    for (const item of suppressed) recordMintSuppression(item.id, "final-revalidation", reason);
+  }
+  if (!selected.length) throw new Error("No safe mint capacity remains for this wallet");
+
+  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, 1, provider, { phaseId: phase.id }));
+  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
+  await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
+  if (adapter.revalidateBeforeSigning) {
+    await traceMintStage(job.id, "final-revalidation", () => adapter.revalidateBeforeSigning!(collection, address, 1, provider, request, { phaseId: phase.id }));
+  }
+  const aggregate = {
+    ...request,
+    value: BigInt(request.value ?? 0) * BigInt(selected.length),
+    gasLimit: BigInt(request.gasLimit ?? 0) * BigInt(selected.length),
+  };
+  await assertBalanceAndSpendLimit(job.walletId, address, aggregate, provider);
+  const attemptIds = selected.map(() => randomUUID());
+  const requests = selected.map(() => ({ ...request }));
+  const prepared = await traceMintStage(job.id, "signing", () => prepareSignedTransactionBatch(
+    job.walletId, collection.chainId, signer, provider, requests,
+    async (items, tx) => {
+      await tx.insert(schema.mintAttempts).values(items.map((item, index) => ({
+        id: attemptIds[index], jobId: selected[index]!.id, kind: "mint", status: "prepared",
+        nonce: item.nonce, txHash: item.txHash, rawTx: item.rawTx,
+        toAddress: String(item.request.to || ""), value: BigInt(item.request.value ?? 0).toString(),
+        dataHash: stableHash(String(item.request.data || "0x")), preflightHash: transactionIntentHash(item.request),
+        gasLimit: item.request.gasLimit?.toString() || null,
+        maxFeePerGas: item.request.maxFeePerGas?.toString() || item.request.gasPrice?.toString() || null,
+        maxPriorityFeePerGas: item.request.maxPriorityFeePerGas?.toString() || null,
+        preparedAt: new Date().toISOString(),
+      })));
+    },
+  ));
+  requireLiveTransactions();
+  const results = await Promise.all(prepared.map((item, index) => traceMintStage(selected[index]!.id, "broadcast", () => broadcastSameHash({
+    attemptId: attemptIds[index]!, chainId: collection.chainId, rawTx: item.rawTx, expectedHash: item.txHash,
+  }), attemptIds[index])));
+  const now = new Date().toISOString();
+  await db.transaction(async (tx) => {
+    for (let index = 0; index < selected.length; index += 1) {
+      const outcome = results[index]!;
+      const ambiguous = outcome.results.some((result) => result.status === "timeout" || result.status === "error");
+      const accepted = outcome.accepted || ambiguous;
+      await tx.update(schema.mintAttempts).set({
+        status: accepted ? "submitted" : "failed", broadcastAt: now,
+        error: outcome.accepted ? null : ambiguous ? "Broadcast acknowledgement was ambiguous; reconciling by hash" : outcome.results.map((item) => item.error).filter(Boolean).join("; "),
+      }).where(eq(schema.mintAttempts.id, attemptIds[index]!));
+      await tx.update(schema.mintJobs).set({
+        status: accepted ? "confirming" : "failed", updatedAt: now,
+        completedAt: accepted ? null : now, leaseExpiresAt: accepted ? leaseExpiry() : null,
+        error: outcome.accepted ? null : ambiguous ? "Broadcast acknowledgement was ambiguous; reconciling by hash" : "Every route rejected the prepared transaction",
+      }).where(eq(schema.mintJobs.id, selected[index]!.id));
+    }
+  });
+  return { status: "confirming", txHash: prepared[0]!.txHash };
 }
 
 async function finalizeAttempt(attemptId: string, receipt: ethers.TransactionReceipt): Promise<ExecutionResult> {
@@ -501,8 +593,12 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   const address = await signer.getAddress();
   if (!adapter?.buildTransaction) throw new Error("Mint adapter cannot build a reviewed transaction");
 
+  const ladderResult = await executeOnePerTransactionLadder({ job, collection, wallet, phase, signer, provider });
+  if (ladderResult) return ladderResult;
+
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
-  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit));
+  const engine = executionEngineFor(collection);
+  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
   await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
@@ -617,11 +713,19 @@ export async function batchMint(
   const [collection] = await db.select().from(schema.collections).where(eq(schema.collections.id, collectionId)).limit(1);
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
   if (quantity < 1) throw new Error("Mint quantity must be positive");
-
+  const manifest = executionManifestFor(collection);
+  const transactionsPerPlan = manifest.onePerTransaction ? quantity : 1;
+  const transactionQuantity = manifest.onePerTransaction ? 1 : quantity;
+  if (manifest.onePerTransaction && transactionsPerPlan > (manifest.maxPreparedTransactions || 1)) {
+    throw new Error(`This mint supports at most ${manifest.maxPreparedTransactions || 1} sequential transactions per wallet`);
+  }
   const wallets = uniqueWalletIds.length
     ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, uniqueWalletIds))
     : [];
   if (wallets.length !== uniqueWalletIds.length) throw new Error("One or more selected wallets were not found");
+  if (manifest.onePerTransaction && transactionsPerPlan > 1 && wallets.some((wallet) => wallet.role !== "worker")) {
+    throw new Error("Sequential nonce-ladder mode requires dedicated worker wallets; main wallets may schedule one transaction only");
+  }
   const parentIds = [...new Set(wallets.flatMap((wallet) => wallet.role === "worker" && wallet.parentWalletId ? [wallet.parentWalletId] : []))];
   const parents = parentIds.length
     ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, parentIds))
@@ -646,10 +750,10 @@ export async function batchMint(
     const wallet = walletById.get(walletId)!;
     const signer = adapter.requiresSignerForEligibility ? await getSigner(wallet.id, provider) : undefined;
     const plan = phaseId
-      ? await resolveWalletSelectedPhase(collection, wallet.address, quantity, phaseId, phases, { signer })
-      : await resolveWalletPhasePlan(collection, wallet.address, quantity, phases, { signer });
+      ? await resolveWalletSelectedPhase(collection, wallet.address, transactionQuantity, phaseId, phases, { signer })
+      : await resolveWalletPhasePlan(collection, wallet.address, transactionQuantity, phases, { signer });
     const phase = plan.selectedPhase;
-    if (quantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
+    if (transactionQuantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
       throw new Error(`${wallet.label} exceeds the ${phase.name} wallet limit`);
     }
     return {
@@ -659,21 +763,12 @@ export async function batchMint(
     };
   }));
   const batchId = randomUUID();
-  const values = plans.map(({ walletId, phase, scheduledAt }) => ({
-    id: randomUUID(),
-    batchId,
-    walletId,
-    collectionId,
-    quantity,
-    useFlashbots,
-    dryRun,
-    scheduledAt,
-    phaseId: phase.id,
-    phaseStartsAt: phase.startsAt || null,
-    phaseEndsAt: phase.endsAt || null,
-    status: "pending",
-    idempotencyKey: `${idempotencyBase}:${walletId}:${collectionId}:${phase.id}`,
-  }));
+  const values = plans.flatMap(({ walletId, phase, scheduledAt }) => Array.from({ length: transactionsPerPlan }, (_, sequence) => ({
+    id: randomUUID(), batchId, walletId, collectionId, quantity: transactionQuantity,
+    useFlashbots, dryRun, scheduledAt, phaseId: phase.id,
+    phaseStartsAt: phase.startsAt || null, phaseEndsAt: phase.endsAt || null,
+    status: "pending", idempotencyKey: `${idempotencyBase}:${walletId}:${collectionId}:${phase.id}:${sequence}`,
+  })));
   const sharedSchedule = plans.every((plan) => plan.scheduledAt === plans[0]?.scheduledAt) ? plans[0]?.scheduledAt || null : null;
   const sharedPhaseId = plans.every((plan) => plan.phase.id === plans[0]?.phase.id) ? plans[0]?.phase.id || null : null;
   const waitingForOpen = plans.some((plan) => plan.phase.status === "upcoming" && plan.phase.manualOpen);

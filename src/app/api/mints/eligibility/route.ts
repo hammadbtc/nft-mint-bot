@@ -10,6 +10,7 @@ import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
 import { isOpenSeaRateLimitError } from "@/lib/opensea-auth";
 import { OperationTimeoutError, withTimeout } from "@/lib/async-timeout";
+import { executionManifestFor } from "@/lib/engines";
 
 // A cold deployment may need to establish narrowly-scoped OpenSea sessions
 // for many vault wallets. OpenSea deliberately rate-limits SIWE nonces, so let
@@ -35,6 +36,11 @@ export async function POST(req: NextRequest) {
     const adapter = getMintAdapter(collection.adapterKey);
     if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
     const phases = (await adapter.resolve(collection, "name")).phases;
+    const manifest = executionManifestFor(collection);
+    const transactionQuantity = manifest.onePerTransaction ? 1 : input.quantity;
+    if (manifest.onePerTransaction && input.quantity > (manifest.maxPreparedTransactions || 1)) {
+      throw new Error(`This mint supports at most ${manifest.maxPreparedTransactions || 1} sequential transactions per wallet`);
+    }
     // Preserve the caller's order (the UI puts main wallets first). PostgreSQL
     // does not guarantee IN(...) result order, and cold OpenSea enrollment is
     // intentionally paced.
@@ -48,7 +54,7 @@ export async function POST(req: NextRequest) {
           ? await getSigner(wallet.id, getProvider(collection.chainId))
           : undefined;
         const plan = await withTimeout(
-          inspectWalletPhases(collection, wallet.address, input.quantity, phases, { signer }),
+          inspectWalletPhases(collection, wallet.address, transactionQuantity, phases, { signer }),
           WALLET_ELIGIBILITY_TIMEOUT_MS,
           "OpenSea eligibility check timed out",
         );

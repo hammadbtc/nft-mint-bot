@@ -144,8 +144,15 @@ export async function resolveMintInput(rawInput: string): Promise<ResolvedMint |
   // Fail closed before any project reaches eligibility, preparation, or the
   // scheduler unless its reusable V2 execution engine is explicit and agrees
   // with the reviewed transaction adapter.
-  executionManifestFor(match);
-  return adapter.resolve(match, source);
+  const manifest = executionManifestFor(match);
+  const resolved = await adapter.resolve(match, source);
+  return {
+    ...resolved,
+    execution: {
+      onePerTransaction: manifest.onePerTransaction === true,
+      maxPreparedTransactions: manifest.maxPreparedTransactions,
+    },
+  };
 }
 
 export function supportedAdapterKeys() { return [...registry.keys()]; }

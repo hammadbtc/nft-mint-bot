@@ -69,3 +69,9 @@ test("Terminal Assistants eligibility stays positive before the stealth switch",
   assert.equal(result.status, "eligible");
   assert.equal(result.phaseId, "open");
 });
+
+test("Terminal Assistants ladder capacity is bounded by wallet room and remaining supply", async () => {
+  assert.equal(await terminalAssistantsV1.remainingTransactions!(collection, "open", signer, fakeProvider({ mintedBy: 2n, totalMinted: 100n, supply: 6666n })), 3);
+  assert.equal(await terminalAssistantsV1.remainingTransactions!(collection, "open", signer, fakeProvider({ mintedBy: 0n, totalMinted: 6664n, supply: 6666n })), 2);
+  assert.equal(await terminalAssistantsV1.remainingTransactions!(collection, "open", signer, fakeProvider({ mintOpen: false })), 0);
+});

@@ -136,6 +136,16 @@ function eligibility(status: MintPhaseEligibility["status"], reason?: string): M
 export const terminalAssistantsV1: MintAdapter = {
   key: "terminal-assistants-v1",
   supportsArming: false,
+  recommendedGasLimit: 200_000n,
+
+  async remainingTransactions(collection, phaseId, signerAddress, provider) {
+    if (phaseId !== "open") return 0;
+    const state = await readState(collection, provider, signerAddress);
+    if (!state.mintOpen) return 0;
+    const walletRoom = BigInt(state.config.expectedMaxPerWallet) - state.mintedBy;
+    const supplyRoom = state.supply - state.totalMinted;
+    return Number(walletRoom < supplyRoom ? walletRoom : supplyRoom);
+  },
 
   async pollPhaseReady(collection, phaseId, provider) {
     if (phaseId !== "open") return true;
