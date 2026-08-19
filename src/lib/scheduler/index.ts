@@ -7,7 +7,7 @@ import { processDisperseOperations, recoverDisperseOperation } from "@/lib/dispe
 import { armLeadMs, revalidateLeadMs, schedulePrecisely } from "@/lib/launch-timing";
 import { firstTaskPerWallet } from "@/lib/task-management";
 import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "./health";
-import { BlockWatcher, blockWatcherFresh, robinhoodWebSocketUrl } from "@/lib/chains/block-watcher";
+import { BlockWatcher, blockWatcherFresh, robinhoodWebSocketUrls } from "@/lib/chains/block-watcher";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
@@ -235,7 +235,7 @@ export function startScheduler(): void {
   void disperseTick();
   state.schedulerInterval = setInterval(() => void tick(), SCHEDULER_INTERVAL_MS);
   state.disperseInterval = setInterval(() => void disperseTick(), DISPERSE_INTERVAL_MS);
-  state.blockWatcher ||= new BlockWatcher(robinhoodWebSocketUrl(), () => { void tick(); });
+  state.blockWatcher ||= new BlockWatcher(robinhoodWebSocketUrls(), () => { void tick(); });
   state.blockWatcher.start();
   state.recoveryInterval = setInterval(() => void recoverStaleWork(), RECOVERY_INTERVAL_MS);
   state.confirmationInterval = setInterval(() => void reconcileConfirmingWork(), CONFIRMATION_INTERVAL_MS);
@@ -294,7 +294,10 @@ export function ensureSchedulerRunning(): { restarted: boolean } {
 export function schedulerStatus() {
   const running = Boolean(state.schedulerInterval);
   const disperseRunning = Boolean(state.disperseInterval);
-  const watcher = state.blockWatcher?.status() || { configured: false, connected: false, lastBlockAt: null, lastBlockNumber: null, lastError: null, reconnects: 0 };
+  const watcher = state.blockWatcher?.status() || {
+    configured: false, configuredProviders: 0, activeProvider: null,
+    connected: false, lastBlockAt: null, lastBlockNumber: null, lastError: null, reconnects: 0,
+  };
   return {
     running,
     healthy: schedulerHeartbeatFresh(running, state.lastTickAt) && schedulerHeartbeatFresh(disperseRunning, state.disperseLastTickAt) && blockWatcherFresh(watcher),

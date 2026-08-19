@@ -22,7 +22,7 @@ export async function GET() {
         chainId,
         name: getChain(chainId).name,
         healthy: checks.some((item) => item.status === "up"),
-        endpoints: checks.map((item) => ({ status: item.status, latencyMs: item.latencyMs })),
+        endpoints: checks,
       };
     }));
     const counts = await db.select({ status: schema.mintJobs.status, count: sql<number>`count(*)::int` })

@@ -60,9 +60,15 @@ ROBINHOOD_DRPC_URL=<full private Robinhood mainnet HTTPS endpoint>
 ROBINHOOD_QUICKNODE_URL=<full private Robinhood mainnet HTTPS endpoint>
 ROBINHOOD_CHAINSTACK_URL=<full private Robinhood mainnet HTTPS endpoint when available>
 ROBINHOOD_RPC_URLS=<optional comma-separated independent HTTPS providers>
+ROBINHOOD_WS_URLS=<comma-separated WebSocket providers; put a non-Alchemy route first>
+ROBINHOOD_DRPC_WS_URL=<optional independent dRPC WebSocket endpoint>
+ROBINHOOD_QUICKNODE_WS_URL=<optional independent QuickNode WebSocket endpoint>
+ROBINHOOD_CHAINSTACK_WS_URL=<optional independent Chainstack WebSocket endpoint>
 ```
 
-Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Never commit their URLs: provider credentials are commonly embedded in the URL path or query string. The app also has a public fallback, but private providers are strongly recommended for live FCFS minting.
+Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. The WebSocket watcher rotates through all configured WSS routes and uses the Alchemy-derived route last. Quota and rate-limit responses temporarily quarantine only the affected HTTPS route. Never commit provider URLs: credentials are commonly embedded in the path or query string. The app also has a public fallback, but private providers are strongly recommended for live FCFS minting.
+
+Use the per-chain `<CHAIN>_RPC_URLS` variables from `.env.example` for independent HTTPS routes on Ethereum, Polygon, Arbitrum, Optimism, Base, BNB Chain, and Avalanche. Before launch, run `npm run rpc:check`; it performs only `eth_chainId` and `eth_blockNumber` reads and never signs or broadcasts a transaction.
 
 `OPENSEA_API_KEY` is strongly recommended when a reviewed collection uses `opensea-signed-seadrop-v1`. The server authenticates selected vault wallets, encrypts reusable OpenSea wallet credentials in PostgreSQL using the vault encryption boundary, and reads stage eligibility without constructing a mint transaction. Wallet-bound signed mint data is requested only when preparing execution. If the permanent key is absent, the server may use OpenSea's official instant-key flow as a launch fallback; it is not a durable substitute for the permanent key.
 

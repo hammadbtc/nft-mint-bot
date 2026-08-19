@@ -13,7 +13,8 @@
     "db:seed": "node scripts/seed-supported-projects.mjs",
     "railway:predeploy": "npm run env:check && node scripts/allow-multiple-main-wallets.mjs && npm run db:push && npm run db:seed",
     "lint": "eslint",
-    "test": "node --import tsx --test tests/**/*.test.ts"
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "rpc:check": "node scripts/rpc-readiness.mjs"
   },
   "dependencies": {
     "@opensea/sdk": "^11.8.0",

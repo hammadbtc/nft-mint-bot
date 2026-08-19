@@ -6,6 +6,7 @@ import { executionRole, runsExecutionWorker } from "@/lib/execution-role";
 import { parseWorkerRuntimeHeartbeat, schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
 import { liveTransactionsEnabled } from "@/lib/safety";
 import { deploymentVersion } from "@/lib/deployment";
+import { checkRpcHealth } from "@/lib/chains";
 
 export async function GET() {
   try {
@@ -22,7 +23,9 @@ export async function GET() {
     const [armed] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.mintJobs).where(eq(schema.mintJobs.status, "armed"));
     const armedTimers = runsExecutionWorker(role) ? scheduler.armedTimers : runtime?.armedTimers || 0;
     const missingLaunchTimers = Math.max(0, (armed?.count || 0) - armedTimers);
-    const healthy = executionHealthy && missingLaunchTimers === 0;
+    const rpcEndpoints = await checkRpcHealth(4663);
+    const rpcHealthy = rpcEndpoints.some((endpoint) => endpoint.status === "up");
+    const healthy = executionHealthy && missingLaunchTimers === 0 && rpcHealthy;
     return NextResponse.json(
       {
         status: healthy ? "ok" : "error",
@@ -30,6 +33,7 @@ export async function GET() {
         service: "mintbot",
         version: deploymentVersion(),
         liveTransactionsEnabled: liveTransactionsEnabled(),
+        rpc: { chainId: 4663, healthy: rpcHealthy, endpoints: rpcEndpoints },
         scheduler: {
           role,
           running: runsExecutionWorker(role) ? scheduler.running : executionHealthy,

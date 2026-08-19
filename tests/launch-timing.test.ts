@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { ethers } from "ethers";
-import { getBroadcastRoutes, identifyRpcProvider } from "../src/lib/chains";
+import { clearRpcQuarantine, getBroadcastRoutes, identifyRpcProvider, rpcQuotaError, rpcUrlQuarantined } from "../src/lib/chains";
 import { millisecondsUntil, schedulePrecisely, timingDriftMs } from "../src/lib/launch-timing";
-import { rawTransactionFingerprint, submitRawTransactionRoute } from "../src/lib/chains/broadcast";
+import { rawTransactionFingerprint, submitRawTransactionRoute, submitRawTransactionRoutes } from "../src/lib/chains/broadcast";
 
 test("launch timing calculations never report negative drift", () => {
   const target = "2030-01-01T00:00:00.000Z";
@@ -64,4 +64,44 @@ test("raw broadcast route submits the exact signed bytes and verifies the return
   const result = await submitRawTransactionRoute({ key: "test", label: "Test route", url: `http://127.0.0.1:${address.port}` }, raw, hash);
   assert.equal(receivedRaw, raw);
   assert.equal(result.status, "accepted");
+});
+
+test("quota failures quarantine only the exhausted route while another route accepts", async (context) => {
+  clearRpcQuarantine();
+  context.after(() => clearRpcQuarantine());
+  const wallet = ethers.Wallet.createRandom();
+  const raw = await wallet.signTransaction({ chainId: 4663, nonce: 0, to: ethers.ZeroAddress, value: 0, gasLimit: 21_000, gasPrice: 1 });
+  const hash = ethers.keccak256(raw);
+  let exhaustedCalls = 0;
+  const exhausted = createServer((_request, response) => {
+    exhaustedCalls += 1;
+    response.writeHead(429, { "content-type": "application/json" });
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { message: "monthly compute unit quota exceeded" } }));
+  });
+  const healthy = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: hash }));
+  });
+  await Promise.all([
+    new Promise<void>((resolve) => exhausted.listen(0, "127.0.0.1", resolve)),
+    new Promise<void>((resolve) => healthy.listen(0, "127.0.0.1", resolve)),
+  ]);
+  context.after(() => { exhausted.close(); healthy.close(); });
+  const exhaustedAddress = exhausted.address();
+  const healthyAddress = healthy.address();
+  if (!exhaustedAddress || typeof exhaustedAddress === "string" || !healthyAddress || typeof healthyAddress === "string") throw new Error("Test servers did not bind");
+  const exhaustedUrl = `http://127.0.0.1:${exhaustedAddress.port}`;
+  const outcome = await submitRawTransactionRoutes([
+    { key: "exhausted", label: "Exhausted", url: exhaustedUrl },
+    { key: "healthy", label: "Healthy", url: `http://127.0.0.1:${healthyAddress.port}` },
+  ], raw, hash);
+  assert.equal(outcome.accepted, true);
+  assert.equal(outcome.results.find((item) => item.routeKey === "exhausted")?.status, "rejected");
+  assert.equal(outcome.results.find((item) => item.routeKey === "healthy")?.status, "accepted");
+  assert.equal(rpcUrlQuarantined(exhaustedUrl), true);
+  const skipped = await submitRawTransactionRoute({ key: "exhausted", label: "Exhausted", url: exhaustedUrl }, raw, hash);
+  assert.equal(skipped.status, "error");
+  assert.equal(exhaustedCalls, 1);
+  assert.equal(rpcQuotaError("execution reverted"), false);
+  assert.equal(rpcQuotaError("HTTP 429 too many requests"), true);
 });

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
-import { getBroadcastRoutes, type BroadcastRoute } from "@/lib/chains";
+import { getBroadcastRoutes, quarantineRpcUrl, rpcQuotaError, rpcUrlQuarantined, type BroadcastRoute } from "@/lib/chains";
 import { safeErrorMessage } from "@/lib/safety";
 
 const ROUTE_TIMEOUT_MS = 4_000;
@@ -20,6 +20,9 @@ function alreadyKnown(message: string): boolean {
 
 export async function submitRawTransactionRoute(route: BroadcastRoute, rawTx: string, expectedHash: string): Promise<RouteBroadcastResult> {
   const started = performance.now();
+  if (rpcUrlQuarantined(route.url)) {
+    return { routeKey: route.key, routeLabel: route.label, status: "error", latencyMs: 0, error: "Route temporarily quarantined after a quota or rate-limit response" };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ROUTE_TIMEOUT_MS);
   try {
@@ -37,11 +40,13 @@ export async function submitRawTransactionRoute(route: BroadcastRoute, rawTx: st
       return { routeKey: route.key, routeLabel: route.label, status: "accepted", latencyMs };
     }
     const message = safeErrorMessage(body.error?.message || `HTTP ${response.status}`, "Route rejected transaction");
+    if (response.status === 429 || rpcQuotaError(message)) quarantineRpcUrl(route.url);
     if (alreadyKnown(message)) return { routeKey: route.key, routeLabel: route.label, status: "known", latencyMs };
     return { routeKey: route.key, routeLabel: route.label, status: "rejected", latencyMs, error: message };
   } catch (error) {
     const latencyMs = Math.max(0, Math.round(performance.now() - started));
     const timeoutError = error instanceof Error && error.name === "AbortError";
+    if (rpcQuotaError(error)) quarantineRpcUrl(route.url);
     return {
       routeKey: route.key,
       routeLabel: route.label,
@@ -52,6 +57,13 @@ export async function submitRawTransactionRoute(route: BroadcastRoute, rawTx: st
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function submitRawTransactionRoutes(
+  routes: BroadcastRoute[], rawTx: string, expectedHash: string,
+): Promise<{ accepted: boolean; results: RouteBroadcastResult[] }> {
+  const results = await Promise.all(routes.map((route) => submitRawTransactionRoute(route, rawTx, expectedHash)));
+  return { accepted: results.some((result) => result.status === "accepted" || result.status === "known"), results };
 }
 
 async function persistTelemetry(attemptId: string, startedAt: string, results: RouteBroadcastResult[]): Promise<void> {
@@ -80,9 +92,10 @@ export async function broadcastSameHash(args: {
   const routes = getBroadcastRoutes(args.chainId);
   if (!routes.length) throw new Error("No transaction broadcast routes are configured");
   const startedAt = new Date().toISOString();
-  const results = await Promise.all(routes.map((route) => submitRawTransactionRoute(route, args.rawTx, args.expectedHash)));
+  const outcome = await submitRawTransactionRoutes(routes, args.rawTx, args.expectedHash);
+  const results = outcome.results;
   await persistTelemetry(args.attemptId, startedAt, results).catch(() => undefined);
-  return { accepted: results.some((result) => result.status === "accepted" || result.status === "known"), results };
+  return outcome;
 }
 
 /** Warm DNS/TLS/provider connections before the launch window. */
