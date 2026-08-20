@@ -569,5 +569,86 @@
         { "domain": "etherscan.io", "path": "/address/0x632b4a985c12b990f4ea22ffa479c7c715e973a7" }
       ]
     }
+  },
+  {
+    "id": "3d8e67d5-4721-4c8c-ad99-e646627cc918",
+    "name": "Rekt Tradooor",
+    "slug": "rekt-tradooor",
+    "contractAddress": "0x7b3EcFA33657De415Ff269dC97dfa82954cEe706",
+    "chainId": 4663,
+    "mintMethod": "mintSigned",
+    "mintAbi": [
+      "function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"
+    ],
+    "mintPrice": "20000000000000000",
+    "maxPerWallet": 1,
+    "maxSupply": 10000,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": [
+      "opensea.io",
+      "robinhoodchain.blockscout.com"
+    ],
+    "siteUrl": "https://opensea.io/collection/rekt-tradooor/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/rekt-tradooors/image_type_logo/0a5ffadcb8a27634b216fcbb0af6d1/9b0a5ffadcb8a27634b216fcbb0af6d1.gif",
+    "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "rekt-tradooor",
+      "stages": [
+        {
+          "id": "phase-1",
+          "name": "Phase 1",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-21T16:00:00.000Z",
+          "endsAt": "2026-08-21T17:00:00.000Z",
+          "priceWei": "20000000000000000",
+          "maxPerWallet": 1,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 10000,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "phase-2",
+          "name": "Phase 2",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-21T17:00:00.000Z",
+          "endsAt": "2026-08-21T18:00:00.000Z",
+          "priceWei": "20000000000000000",
+          "maxPerWallet": 1,
+          "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 10000,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-21T18:00:00.000Z",
+          "endsAt": "2026-08-22T18:00:00.000Z",
+          "priceWei": "20000000000000000",
+          "maxPerWallet": 1
+        }
+      ],
+      "urlMatchers": [
+        {
+          "domain": "opensea.io",
+          "path": "/collection/rekt-tradooor"
+        },
+        {
+          "domain": "opensea.io",
+          "path": "/collection/rekt-tradooor/overview"
+        },
+        {
+          "domain": "robinhoodchain.blockscout.com",
+          "path": "/address/0x7b3ecfa33657de415ff269dc97dfa82954cee706"
+        }
+      ]
+    }
   }
 ]

@@ -239,3 +239,28 @@ test("888 society pins its signed and public Ethereum SeaDrop stages", () => {
   assert.ok(society?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/888-society-605141138/overview"));
   assert.ok(society?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "etherscan.io" && matcher.path === "/address/0x632b4a985c12b990f4ea22ffa479c7c715e973a7"));
 });
+
+test("Rekt Tradooor pins both signed tiers and the public Robinhood sale", () => {
+  const rekt = seeds.find((seed) => seed.slug === "rekt-tradooor");
+  assert.equal(rekt?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(rekt?.contractAddress.toLowerCase(), "0x7b3ecfa33657de415ff269dc97dfa82954cee706");
+  assert.equal(rekt?.adapterConfig.openSeaSlug, "rekt-tradooor");
+  assert.deepEqual(rekt?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["phase-1", "signed", "20000000000000000", 1],
+    ["phase-2", "signed", "20000000000000000", 1],
+    ["public", "public", "20000000000000000", 1],
+  ]);
+  assert.deepEqual(rekt?.adapterConfig.stages?.map((stage) => [stage.startsAt, stage.endsAt]), [
+    ["2026-08-21T16:00:00.000Z", "2026-08-21T17:00:00.000Z"],
+    ["2026-08-21T17:00:00.000Z", "2026-08-21T18:00:00.000Z"],
+    ["2026-08-21T18:00:00.000Z", "2026-08-22T18:00:00.000Z"],
+  ]);
+  assert.deepEqual(rekt?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, undefined]);
+  assert.deepEqual(rekt?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [10000, 1000, true],
+    [10000, 1000, true],
+  ]);
+  assert.ok(rekt?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/rekt-tradooor"));
+  assert.ok(rekt?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/rekt-tradooor/overview"));
+  assert.ok(rekt?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x7b3ecfa33657de415ff269dc97dfa82954cee706"));
+});
