@@ -246,7 +246,7 @@ test("Rekt Tradooor pins honoraries, both signed tiers, and the public Robinhood
   assert.equal(rekt?.contractAddress.toLowerCase(), "0x7b3ecfa33657de415ff269dc97dfa82954cee706");
   assert.equal(rekt?.adapterConfig.openSeaSlug, "rekt-tradooor");
   assert.deepEqual(rekt?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
-    ["honoraries", "signed", "0", 100],
+    ["honoraries", "signed", "0", 101],
     ["phase-1", "signed", "20000000000000000", 1],
     ["phase-2", "signed", "20000000000000000", 1],
     ["public", "public", "20000000000000000", 1],
