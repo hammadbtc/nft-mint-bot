@@ -27,7 +27,7 @@ function rejectCrossSiteMutation(req: NextRequest): NextResponse | null {
 }
 
 export default function proxy(req: NextRequest) {
-  if (req.nextUrl.pathname === "/api/health") return NextResponse.next();
+  if (["/api/health", "/api/live"].includes(req.nextUrl.pathname)) return NextResponse.next();
   const crossSite = rejectCrossSiteMutation(req);
   if (crossSite) return crossSite;
   const allowedIps = (
