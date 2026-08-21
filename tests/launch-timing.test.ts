@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { ethers } from "ethers";
 import { clearRpcQuarantine, getBroadcastRoutes, identifyRpcProvider, rpcQuotaError, rpcUrlQuarantined } from "../src/lib/chains";
-import { millisecondsUntil, schedulePrecisely, timingDriftMs } from "../src/lib/launch-timing";
+import { armLeadMs, millisecondsUntil, schedulePrecisely, timingDriftMs } from "../src/lib/launch-timing";
 import { rawTransactionFingerprint, submitRawTransactionRoute, submitRawTransactionRoutes } from "../src/lib/chains/broadcast";
 
 test("launch timing calculations never report negative drift", () => {
@@ -12,6 +12,16 @@ test("launch timing calculations never report negative drift", () => {
   assert.equal(millisecondsUntil(target, parsed - 250), 250);
   assert.equal(timingDriftMs(target, parsed - 1), 0);
   assert.equal(timingDriftMs(target, parsed + 7), 7);
+});
+
+test("a stale short override cannot shrink the five-minute arming window", () => {
+  const previous = process.env.MINT_ARM_LEAD_MS;
+  process.env.MINT_ARM_LEAD_MS = "60000";
+  try { assert.equal(armLeadMs(), 300_000); }
+  finally {
+    if (previous == null) delete process.env.MINT_ARM_LEAD_MS;
+    else process.env.MINT_ARM_LEAD_MS = previous;
+  }
 });
 
 test("precise launch timer never fires before its target", async () => {
