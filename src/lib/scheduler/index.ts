@@ -8,12 +8,14 @@ import { armLeadMs, revalidateLeadMs, schedulePrecisely } from "@/lib/launch-tim
 import { firstTaskPerWallet } from "@/lib/task-management";
 import { schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "./health";
 import { BlockWatcher, blockWatcherFresh, robinhoodWebSocketUrls } from "@/lib/chains/block-watcher";
+import { webSocketDemandForJobs } from "./websocket-demand";
 
 const DEFAULT_MAX_CONCURRENT = 5;
 const RECOVERY_INTERVAL_MS = 15_000;
 const SCHEDULER_INTERVAL_MS = 250;
 const DISPERSE_INTERVAL_MS = 250;
 const CONFIRMATION_INTERVAL_MS = 1_000;
+const WEBSOCKET_DEMAND_INTERVAL_MS = 30_000;
 
 interface SchedulerRuntimeState {
   schedulerInterval: ReturnType<typeof setInterval> | null;
@@ -21,6 +23,7 @@ interface SchedulerRuntimeState {
   recoveryInterval: ReturnType<typeof setInterval> | null;
   confirmationInterval: ReturnType<typeof setInterval> | null;
   workerHeartbeatInterval: ReturnType<typeof setInterval> | null;
+  webSocketDemandInterval: ReturnType<typeof setInterval> | null;
   launchTimers: Map<string, ReturnType<typeof setTimeout>>;
   revalidationTimers: Map<string, ReturnType<typeof setTimeout>>;
   activeConcurrency: number;
@@ -32,6 +35,7 @@ interface SchedulerRuntimeState {
   disperseLastError: string | null;
   signalHandlersRegistered: boolean;
   blockWatcher: BlockWatcher | null;
+  blockWatcherDemand: boolean;
 }
 
 // Next.js can bundle instrumentation and route handlers as separate module
@@ -46,6 +50,7 @@ const state = schedulerHost.__mintbotSchedulerRuntime ??= {
   recoveryInterval: null,
   confirmationInterval: null,
   workerHeartbeatInterval: null,
+  webSocketDemandInterval: null,
   launchTimers: new Map(),
   revalidationTimers: new Map(),
   activeConcurrency: DEFAULT_MAX_CONCURRENT,
@@ -57,6 +62,7 @@ const state = schedulerHost.__mintbotSchedulerRuntime ??= {
   disperseLastError: null,
   signalHandlersRegistered: false,
   blockWatcher: null,
+  blockWatcherDemand: false,
 };
 state.confirmationInterval ??= null;
 state.workerHeartbeatInterval ??= null;
@@ -67,6 +73,31 @@ state.disperseLastError ??= null;
 state.launchTimers ??= new Map();
 state.revalidationTimers ??= new Map();
 state.blockWatcher ??= null;
+state.webSocketDemandInterval ??= null;
+state.blockWatcherDemand ??= false;
+
+async function reconcileBlockWatcherDemand(): Promise<void> {
+  state.blockWatcher ||= new BlockWatcher(robinhoodWebSocketUrls(), () => { void tick(); });
+  try {
+    const jobs = await db.select({
+      dryRun: schema.mintJobs.dryRun,
+      status: schema.mintJobs.status,
+      scheduledAt: schema.mintJobs.scheduledAt,
+    }).from(schema.mintJobs).where(and(
+      eq(schema.mintJobs.dryRun, false),
+      inArray(schema.mintJobs.status, ["pending", "armed", "running", "confirming"]),
+    )).limit(1_000);
+    const required = webSocketDemandForJobs(jobs);
+    state.blockWatcherDemand = required;
+    state.blockWatcher.setDemand(required);
+  } catch (error) {
+    // Unknown persisted demand must fail toward launch safety, not quota
+    // savings. Keep or establish the subscription until PostgreSQL recovers.
+    state.blockWatcherDemand = true;
+    state.blockWatcher.setDemand(true);
+    throw error;
+  }
+}
 
 function clearArmedTimers(jobId: string): void {
   const launch = state.launchTimers.get(jobId);
@@ -194,12 +225,23 @@ async function tick(): Promise<void> {
 
 async function persistWorkerHeartbeat(): Promise<void> {
   const now = new Date().toISOString();
-  const watcher = state.blockWatcher?.status() || { configured: false, connected: false, lastBlockAt: null };
+  const watcher = state.blockWatcher?.status() || {
+    configured: false,
+    configuredProviders: 0,
+    activeProvider: null,
+    connected: false,
+    lastBlockAt: null,
+    lastBlockNumber: null,
+    lastError: null,
+    reconnects: 0,
+    intentionalIdle: true,
+  };
   const value = JSON.stringify({
     at: now,
     armedTimers: state.launchTimers.size,
     revalidationTimers: state.revalidationTimers.size,
     blockWatcherHealthy: blockWatcherFresh(watcher),
+    blockWatcherIntentionalIdle: watcher.intentionalIdle === true,
   });
   await db.insert(schema.settings).values({ key: WORKER_HEARTBEAT_KEY, value })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: now } });
@@ -224,7 +266,7 @@ async function disperseTick(): Promise<void> {
 }
 
 export function startScheduler(): void {
-  if (state.schedulerInterval && state.disperseInterval && state.workerHeartbeatInterval) return;
+  if (state.schedulerInterval && state.disperseInterval && state.workerHeartbeatInterval && state.webSocketDemandInterval) return;
   if (state.schedulerInterval) clearInterval(state.schedulerInterval);
   if (state.disperseInterval) clearInterval(state.disperseInterval);
   void recoverStaleWork()
@@ -235,8 +277,10 @@ export function startScheduler(): void {
   void disperseTick();
   state.schedulerInterval = setInterval(() => void tick(), SCHEDULER_INTERVAL_MS);
   state.disperseInterval = setInterval(() => void disperseTick(), DISPERSE_INTERVAL_MS);
-  state.blockWatcher ||= new BlockWatcher(robinhoodWebSocketUrls(), () => { void tick(); });
-  state.blockWatcher.start();
+  void reconcileBlockWatcherDemand().catch((error) => { state.lastError = safeErrorMessage(error, "WebSocket demand check failed"); });
+  state.webSocketDemandInterval = setInterval(() => {
+    void reconcileBlockWatcherDemand().catch((error) => { state.lastError = safeErrorMessage(error, "WebSocket demand check failed"); });
+  }, WEBSOCKET_DEMAND_INTERVAL_MS);
   state.recoveryInterval = setInterval(() => void recoverStaleWork(), RECOVERY_INTERVAL_MS);
   state.confirmationInterval = setInterval(() => void reconcileConfirmingWork(), CONFIRMATION_INTERVAL_MS);
   void persistWorkerHeartbeat().catch((error) => { state.lastError = safeErrorMessage(error, "Worker heartbeat failed"); });
@@ -256,7 +300,9 @@ export function stopScheduler(): void {
   if (state.recoveryInterval) clearInterval(state.recoveryInterval);
   if (state.confirmationInterval) clearInterval(state.confirmationInterval);
   if (state.workerHeartbeatInterval) clearInterval(state.workerHeartbeatInterval);
+  if (state.webSocketDemandInterval) clearInterval(state.webSocketDemandInterval);
   state.blockWatcher?.stop();
+  state.blockWatcherDemand = false;
   for (const timer of state.launchTimers.values()) clearTimeout(timer);
   for (const timer of state.revalidationTimers.values()) clearTimeout(timer);
   state.launchTimers.clear();
@@ -266,6 +312,7 @@ export function stopScheduler(): void {
   state.recoveryInterval = null;
   state.confirmationInterval = null;
   state.workerHeartbeatInterval = null;
+  state.webSocketDemandInterval = null;
   state.tickRunning = false;
   state.disperseTickRunning = false;
 }
@@ -279,7 +326,8 @@ export function ensureSchedulerRunning(): { restarted: boolean } {
   const mintRunning = Boolean(state.schedulerInterval);
   const disperseRunning = Boolean(state.disperseInterval);
   const heartbeatRunning = Boolean(state.workerHeartbeatInterval);
-  if (!mintRunning || !disperseRunning || !heartbeatRunning) {
+  const demandRunning = Boolean(state.webSocketDemandInterval);
+  if (!mintRunning || !disperseRunning || !heartbeatRunning || !demandRunning) {
     startScheduler();
     return { restarted: true };
   }
@@ -296,7 +344,7 @@ export function schedulerStatus() {
   const disperseRunning = Boolean(state.disperseInterval);
   const watcher = state.blockWatcher?.status() || {
     configured: false, configuredProviders: 0, activeProvider: null,
-    connected: false, lastBlockAt: null, lastBlockNumber: null, lastError: null, reconnects: 0,
+    connected: false, lastBlockAt: null, lastBlockNumber: null, lastError: null, reconnects: 0, intentionalIdle: true,
   };
   return {
     running,
@@ -314,5 +362,6 @@ export function schedulerStatus() {
     pollIntervalMs: SCHEDULER_INTERVAL_MS,
     dispersePollIntervalMs: DISPERSE_INTERVAL_MS,
     blockWatcher: { ...watcher, healthy: blockWatcherFresh(watcher) },
+    blockWatcherDemand: state.blockWatcherDemand,
   };
 }

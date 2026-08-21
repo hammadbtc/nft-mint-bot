@@ -1,13 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blockWatcherFresh, robinhoodWebSocketUrls, webSocketProviderLabel } from "../src/lib/chains/block-watcher";
+import { BlockWatcher, blockWatcherFresh, robinhoodWebSocketUrls, webSocketProviderLabel } from "../src/lib/chains/block-watcher";
 
 test("WebSocket watcher health fails closed when configured but stale", () => {
   const now = Date.parse("2026-08-18T03:00:00.000Z");
   assert.equal(blockWatcherFresh({ configured: false, connected: false, lastBlockAt: null }, now), true);
   assert.equal(blockWatcherFresh({ configured: true, connected: false, lastBlockAt: null }, now), false);
+  assert.equal(blockWatcherFresh({ configured: true, connected: false, lastBlockAt: null, intentionalIdle: true }, now), true);
   assert.equal(blockWatcherFresh({ configured: true, connected: true, lastBlockAt: "2026-08-18T02:59:50.000Z" }, now), true);
   assert.equal(blockWatcherFresh({ configured: true, connected: true, lastBlockAt: "2026-08-18T02:59:20.000Z" }, now), false);
+});
+
+test("WebSocket watcher distinguishes intentional idle from worker shutdown", () => {
+  const watcher = new BlockWatcher(null, () => {});
+  watcher.setDemand(false);
+  assert.equal(watcher.status().intentionalIdle, true);
+  assert.equal(blockWatcherFresh(watcher.status()), true);
+
+  watcher.setDemand(true);
+  assert.equal(watcher.status().intentionalIdle, false);
+
+  watcher.stop();
+  assert.equal(watcher.status().intentionalIdle, false);
 });
 
 test("Alchemy WebSocket is primary, QuickNode is first fallback, and labels never expose credentials", () => {

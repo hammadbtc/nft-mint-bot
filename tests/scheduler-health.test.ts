@@ -13,7 +13,7 @@ test("scheduler health requires a running worker with a recent valid tick", () =
 });
 
 test("worker runtime heartbeat preserves timer and watcher health", () => {
-  const value = JSON.stringify({ at: "2026-08-18T03:00:00.000Z", armedTimers: 2, revalidationTimers: 2, blockWatcherHealthy: false });
-  assert.deepEqual(parseWorkerRuntimeHeartbeat(value), { at: "2026-08-18T03:00:00.000Z", armedTimers: 2, revalidationTimers: 2, blockWatcherHealthy: false });
+  const value = JSON.stringify({ at: "2026-08-18T03:00:00.000Z", armedTimers: 2, revalidationTimers: 2, blockWatcherHealthy: true, blockWatcherIntentionalIdle: true });
+  assert.deepEqual(parseWorkerRuntimeHeartbeat(value), { at: "2026-08-18T03:00:00.000Z", armedTimers: 2, revalidationTimers: 2, blockWatcherHealthy: true, blockWatcherIntentionalIdle: true });
   assert.equal(schedulerHeartbeatFresh(true, value, Date.parse("2026-08-18T03:00:10.000Z")), true);
 });

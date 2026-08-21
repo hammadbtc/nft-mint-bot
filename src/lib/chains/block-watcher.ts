@@ -13,10 +13,12 @@ export type BlockWatcherStatus = {
   lastBlockNumber: number | null;
   lastError: string | null;
   reconnects: number;
+  intentionalIdle: boolean;
 };
 
-export function blockWatcherFresh(status: Pick<BlockWatcherStatus, "configured" | "connected" | "lastBlockAt">, now = Date.now()): boolean {
+export function blockWatcherFresh(status: Pick<BlockWatcherStatus, "configured" | "connected" | "lastBlockAt"> & { intentionalIdle?: boolean }, now = Date.now()): boolean {
   if (!status.configured) return true; // bounded HTTP scheduler is the fallback
+  if (status.intentionalIdle) return true;
   if (!status.connected || !status.lastBlockAt) return false;
   const age = now - Date.parse(status.lastBlockAt);
   return Number.isFinite(age) && age >= 0 && age <= STALE_AFTER_MS;
@@ -70,7 +72,7 @@ export class BlockWatcher {
   private statusValue: BlockWatcherStatus = {
     configured: false, configuredProviders: 0, activeProvider: null,
     connected: false, lastBlockAt: null,
-    lastBlockNumber: null, lastError: null, reconnects: 0,
+    lastBlockNumber: null, lastError: null, reconnects: 0, intentionalIdle: true,
   };
 
   constructor(urls: string | string[] | null, private readonly onBlock: (blockNumber: number) => void) {
@@ -82,11 +84,27 @@ export class BlockWatcher {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
+    this.statusValue.intentionalIdle = false;
+    this.statusValue.lastError = null;
     this.staleTimer ||= setInterval(() => this.disconnectIfStale(), 10_000);
     if (this.urls.length) this.connect();
   }
 
   stop(): void {
+    this.disconnect(false, "worker stopping");
+  }
+
+  setDemand(required: boolean): void {
+    if (required) this.start();
+    else this.pause();
+  }
+
+  private pause(): void {
+    if (this.stopped && this.statusValue.intentionalIdle) return;
+    this.disconnect(true, "intentionally idle");
+  }
+
+  private disconnect(intentionalIdle: boolean, reason: string): void {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.staleTimer) clearInterval(this.staleTimer);
@@ -96,8 +114,10 @@ export class BlockWatcher {
     this.socket = null;
     this.statusValue.connected = false;
     this.statusValue.activeProvider = null;
+    this.statusValue.intentionalIdle = intentionalIdle;
+    this.statusValue.lastError = null;
     this.connectedAt = null;
-    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, "worker stopping");
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, reason);
   }
 
   status(): BlockWatcherStatus { return { ...this.statusValue }; }
@@ -116,19 +136,23 @@ export class BlockWatcher {
       this.connectedAt = Date.now();
       this.statusValue.lastBlockAt = null;
       this.statusValue.lastError = null;
-      this.reconnectDelay = RECONNECT_MIN_MS;
       socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_subscribe", params: ["newHeads"] }));
     };
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data)) as { method?: string; params?: { result?: { number?: string } }; error?: { message?: string } };
-        if (payload.error) throw new Error(payload.error.message || "WebSocket subscription failed");
+        if (payload.error) {
+          this.statusValue.lastError = safeErrorMessage(payload.error.message || "WebSocket subscription failed");
+          socket.close(4001, "subscription rejected");
+          return;
+        }
         const raw = payload.method === "eth_subscription" ? payload.params?.result?.number : undefined;
         if (!raw || !/^0x[0-9a-f]+$/i.test(raw)) return;
         const blockNumber = Number(BigInt(raw));
         if (!Number.isSafeInteger(blockNumber)) return;
         this.statusValue.lastBlockAt = new Date().toISOString();
         this.statusValue.lastBlockNumber = blockNumber;
+        this.reconnectDelay = RECONNECT_MIN_MS;
         this.onBlock(blockNumber);
       } catch (error) {
         this.statusValue.lastError = safeErrorMessage(error, "WebSocket message was invalid");
@@ -136,7 +160,8 @@ export class BlockWatcher {
     };
     socket.onerror = () => { this.statusValue.lastError = "Provider WebSocket connection failed"; };
     socket.onclose = () => {
-      if (this.socket === socket) this.socket = null;
+      if (this.socket !== socket) return;
+      this.socket = null;
       this.statusValue.connected = false;
       this.connectedAt = null;
       if (!this.stopped) this.scheduleReconnect(this.statusValue.lastError || "Provider WebSocket closed");

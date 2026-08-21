@@ -91,7 +91,7 @@ export async function GET() {
         armedTimers,
         missingLaunchTimers,
         unarmedImminentJobs,
-        blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false },
+        blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false, intentionalIdle: runtime?.blockWatcherIntentionalIdle ?? false },
       },
       rpc,
       jobs: Object.fromEntries(counts.map((item) => [item.status, item.count])),

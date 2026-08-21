@@ -50,7 +50,7 @@ export async function GET() {
           armedTimers,
           missingLaunchTimers,
           unarmedImminentJobs,
-          blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false },
+          blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false, intentionalIdle: runtime?.blockWatcherIntentionalIdle ?? false },
         },
       },
       { status: healthy ? 200 : 503, headers: { "Cache-Control": "no-store" } },

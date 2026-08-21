@@ -56,17 +56,28 @@ Never change `VAULT_PASSPHRASE` after wallets have been imported or generated; c
 ```env
 ALCHEMY_API_KEY=<Alchemy key>
 OPENSEA_API_KEY=<permanent OpenSea server API key for signed drops>
-ROBINHOOD_DRPC_URL=<full private Robinhood mainnet HTTPS endpoint>
 ROBINHOOD_QUICKNODE_URL=<full private Robinhood mainnet HTTPS endpoint>
 ROBINHOOD_CHAINSTACK_URL=<full private Robinhood mainnet HTTPS endpoint when available>
 ROBINHOOD_RPC_URLS=<optional comma-separated independent HTTPS providers>
-ROBINHOOD_WS_URLS=<comma-separated WebSocket providers; put a non-Alchemy route first>
+ROBINHOOD_WS_URLS=<optional comma-separated additional WebSocket providers>
 ROBINHOOD_DRPC_WS_URL=<optional independent dRPC WebSocket endpoint>
 ROBINHOOD_QUICKNODE_WS_URL=<optional independent QuickNode WebSocket endpoint>
 ROBINHOOD_CHAINSTACK_WS_URL=<optional independent Chainstack WebSocket endpoint>
 ```
 
-Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. The WebSocket watcher rotates through all configured WSS routes and uses the Alchemy-derived route last. Quota and rate-limit responses temporarily quarantine only the affected HTTPS route. Never commit provider URLs: credentials are commonly embedded in the path or query string. The app also has a public fallback, but private providers are strongly recommended for live FCFS minting.
+Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Robinhood provider order is Alchemy first, QuickNode second, additional configured routes next, and the official public HTTPS RPC last. The public endpoint does not provide the launch WebSocket subscription. Quota and rate-limit responses temporarily quarantine only the affected HTTPS route. Never commit provider URLs: credentials are commonly embedded in the path or query string. Only configure a dRPC URL when the account has an actual Robinhood endpoint; an account balance without Robinhood network access is not usable.
+
+## Demand-aware WebSocket usage
+
+The scheduler remains online continuously, but the paid `newHeads` WebSocket subscription does not. Every 30 seconds the worker reconciles persisted mint jobs:
+
+- no live launch-critical jobs: disconnect intentionally and remain healthy;
+- a non-dry-run pending job reaches T-60 minutes: connect;
+- a pending job has no authoritative launch time: connect as a fail-safe;
+- an `armed`, `running`, or `confirming` job: stay connected until terminal;
+- several jobs: disconnect only after all launch-critical work is terminal.
+
+This state is derived from PostgreSQL, so a worker restart inside the one-hour window reconnects automatically. A database error also fails toward launch safety by connecting. Intentional idle is reported separately from a provider outage in `/api/health`; it must not make Railway reject a healthy deployment.
 
 Use the per-chain `<CHAIN>_RPC_URLS` variables from `.env.example` for independent HTTPS routes on Ethereum, Polygon, Arbitrum, Optimism, Base, BNB Chain, and Avalanche. Before launch, run `npm run rpc:check`; it performs only `eth_chainId` and `eth_blockNumber` reads and never signs or broadcasts a transaction.
 
