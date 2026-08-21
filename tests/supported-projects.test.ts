@@ -253,7 +253,7 @@ test("Rekt Tradooor pins both signed tiers and the public Robinhood sale", () =>
   assert.deepEqual(rekt?.adapterConfig.stages?.map((stage) => [stage.startsAt, stage.endsAt]), [
     ["2026-08-21T16:00:00.000Z", "2026-08-21T17:00:00.000Z"],
     ["2026-08-21T17:00:00.000Z", "2026-08-21T18:00:00.000Z"],
-    ["2026-08-21T18:00:00.000Z", "2026-08-22T18:00:00.000Z"],
+    ["2026-08-21T19:15:00.000Z", "2026-08-22T19:15:00.000Z"],
   ]);
   assert.deepEqual(rekt?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, undefined]);
   assert.deepEqual(rekt?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
