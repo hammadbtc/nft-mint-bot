@@ -38,16 +38,16 @@ export function webSocketProviderLabel(rawUrl: string): string {
 }
 
 export function robinhoodWebSocketUrls(): string[] {
-  const independent = [
+  const key = process.env.ALCHEMY_API_KEY?.trim();
+  const alchemy = key && key.length > 10 ? `wss://robinhood-mainnet.g.alchemy.com/v2/${key}` : null;
+  const fallbacks = [
+    ...envUrls("ROBINHOOD_QUICKNODE_WS_URL"),
     ...envUrls("ROBINHOOD_WS_URLS"),
     ...envUrls("ROBINHOOD_WS_URL"),
     ...envUrls("ROBINHOOD_DRPC_WS_URL"),
-    ...envUrls("ROBINHOOD_QUICKNODE_WS_URL"),
     ...envUrls("ROBINHOOD_CHAINSTACK_WS_URL"),
   ];
-  const key = process.env.ALCHEMY_API_KEY?.trim();
-  const alchemy = key && key.length > 10 ? `wss://robinhood-mainnet.g.alchemy.com/v2/${key}` : null;
-  return [...new Set([...independent, ...(alchemy ? [alchemy] : [])])];
+  return [...new Set([...(alchemy ? [alchemy] : []), ...fallbacks])];
 }
 
 /** Legacy single-URL accessor retained for callers outside the scheduler. */
