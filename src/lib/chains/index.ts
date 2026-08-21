@@ -47,10 +47,10 @@ const CHAINS: Record<number, ChainConfig> = {
     symbol: "ETH",
     rpcUrls: uniqueRpc(
       al("robinhood-mainnet"),
-      envRpc("ROBINHOOD_DRPC_URL"),
       envRpc("ROBINHOOD_QUICKNODE_URL"),
       envRpc("ROBINHOOD_CHAINSTACK_URL"),
       ...envRpcList("ROBINHOOD_RPC_URLS"),
+      envRpc("ROBINHOOD_DRPC_URL"),
       "https://rpc.mainnet.chain.robinhood.com",
     ),
     explorerUrl: "https://robinhoodchain.blockscout.com",
@@ -267,7 +267,7 @@ export function identifyRpcProvider(rawUrl: string): { key: string; label: strin
   let hostname = "";
   try { hostname = new URL(rawUrl).hostname.toLowerCase(); } catch { return undefined; }
   if (hostname.endsWith("alchemy.com")) return { key: "alchemy", label: "Alchemy" };
-  if (hostname === "lb.drpc.org" || hostname.endsWith(".drpc.org")) return { key: "drpc", label: "dRPC" };
+  if (hostname === "lb.drpc.org" || hostname.endsWith(".drpc.org") || hostname === "lb.drpc.live" || hostname.endsWith(".drpc.live")) return { key: "drpc", label: "dRPC" };
   if (hostname.endsWith("quiknode.pro")) return { key: "quicknode", label: "QuickNode" };
   if (hostname.endsWith("chainstack.com")) return { key: "chainstack", label: "Chainstack" };
   if (hostname === "rpc.mainnet.chain.robinhood.com") return { key: "robinhood-public", label: "Robinhood public RPC" };

@@ -30,7 +30,7 @@ export function webSocketProviderLabel(rawUrl: string): string {
   try {
     const hostname = new URL(rawUrl).hostname.toLowerCase();
     if (hostname.endsWith("alchemy.com")) return "Alchemy";
-    if (hostname.endsWith("drpc.org")) return "dRPC";
+    if (hostname.endsWith("drpc.org") || hostname.endsWith("drpc.live")) return "dRPC";
     if (hostname.endsWith("quiknode.pro")) return "QuickNode";
     if (hostname.endsWith("chainstack.com")) return "Chainstack";
   } catch { /* sanitized fallback below */ }
@@ -42,10 +42,10 @@ export function robinhoodWebSocketUrls(): string[] {
   const alchemy = key && key.length > 10 ? `wss://robinhood-mainnet.g.alchemy.com/v2/${key}` : null;
   const fallbacks = [
     ...envUrls("ROBINHOOD_QUICKNODE_WS_URL"),
+    ...envUrls("ROBINHOOD_CHAINSTACK_WS_URL"),
     ...envUrls("ROBINHOOD_WS_URLS"),
     ...envUrls("ROBINHOOD_WS_URL"),
     ...envUrls("ROBINHOOD_DRPC_WS_URL"),
-    ...envUrls("ROBINHOOD_CHAINSTACK_WS_URL"),
   ];
   return [...new Set([...(alchemy ? [alchemy] : []), ...fallbacks])];
 }
