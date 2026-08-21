@@ -307,7 +307,8 @@ export const openseaSignedSeaDropV1: MintAdapter = {
   key: "opensea-signed-seadrop-v1",
   supportsArming: true,
   requiresSignerForEligibility: true,
-  canArmPhase: (phaseId) => phaseId === "public",
+  canArmPhase: () => true,
+  prearmedPayloadProvesEligibility: true,
   recommendedGasLimit: 500_000n,
 
   async warmTransaction(collection, signerAddress, quantity, _provider, options) {
@@ -379,13 +380,23 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const stage = config.stages.find((item) => item.id === phaseId);
     if (!stage) throw new Error("Unsupported OpenSea drop phase selected");
     if (stage.kind === "public") return openseaSeaDropV1.buildTransaction!(collection, signerAddress, quantity, provider, options);
-    if (options?.allowBeforeStart) throw new Error("Signed SeaDrop payloads are fetched just in time and cannot be armed early");
+    const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
+    if (options?.allowBeforeStart) {
+      const warmed = signedPayloadCache.get(key);
+      if (!warmed || warmed.expiresAt <= Date.now()) {
+        throw new Error("Signed SeaDrop payload was not warmed and cannot be armed safely");
+      }
+      return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, {
+        ...warmed.request,
+        chain: openSeaChainForChainId(collection.chainId),
+        value: BigInt(warmed.request.value || 0).toString(),
+      });
+    }
     const latest = await provider.getBlock("latest");
     if (!latest) throw new Error("RPC did not return the latest block for signed-stage execution");
     const now = Number(latest.timestamp) * 1000;
     if (now < Date.parse(stage.startsAt)) throw new Error(`${stage.name} has not started`);
     if (now >= Date.parse(stage.endsAt)) throw new Error(`${stage.name} has ended`);
-    const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
     const warmed = signedPayloadCache.get(key);
     if (warmed && warmed.expiresAt > Date.now()) {
       // Validate again on every use so a future cache refactor cannot weaken

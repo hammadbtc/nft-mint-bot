@@ -1,4 +1,6 @@
-const DEFAULT_ARM_LEAD_MS = 60_000;
+// Signed provider payloads may require remote authentication and validation for
+// several wallets. Finish that work well outside a competitive launch window.
+const DEFAULT_ARM_LEAD_MS = 300_000;
 const DEFAULT_REVALIDATE_LEAD_MS = 5_000;
 
 function boundedEnvMs(name: string, fallback: number, minimum: number, maximum: number): number {
@@ -7,7 +9,9 @@ function boundedEnvMs(name: string, fallback: number, minimum: number, maximum: 
 }
 
 export function armLeadMs(): number {
-  return boundedEnvMs("MINT_ARM_LEAD_MS", DEFAULT_ARM_LEAD_MS, 5_000, 300_000);
+  // Five minutes is a safety floor: a stale Railway override must not silently
+  // put multi-wallet OpenSea authentication back into the launch window.
+  return boundedEnvMs("MINT_ARM_LEAD_MS", DEFAULT_ARM_LEAD_MS, 300_000, 900_000);
 }
 
 export function revalidateLeadMs(): number {

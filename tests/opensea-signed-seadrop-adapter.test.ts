@@ -53,6 +53,12 @@ test("dashboard eligibility retains authenticated per-stage OpenSea checks", () 
   assert.equal(openseaSignedSeaDropV1.requiresSignerForEligibility, true);
 });
 
+test("reviewed OpenSea signed phases require true prearming", () => {
+  assert.equal(openseaSignedSeaDropV1.supportsArming, true);
+  assert.equal(openseaSignedSeaDropV1.canArmPhase?.("fcfs"), true);
+  assert.equal(openseaSignedSeaDropV1.prearmedPayloadProvesEligibility, true);
+});
+
 test("OpenSea invalid or expired API-key responses are recognized for automatic failover", () => {
   assert.equal(isOpenSeaInvalidApiKeyError(new Error("Server Error: Invalid API key")), true);
   assert.equal(isOpenSeaInvalidApiKeyError(new Error("API key expired")), true);

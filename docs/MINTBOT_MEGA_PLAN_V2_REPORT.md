@@ -22,7 +22,7 @@ Disperse had a separate failure mode: operations were accepted into PostgreSQL b
 |---|---|---|
 | Project onboarding | Project-specific adapter work and session knowledge | Validated engine manifest plus reviewed project configuration |
 | Timed public mint | Work performed near/at opening | Gas, intent, nonce and signed bytes prepared durably before opening; precise timer submits at contract time |
-| Signed tier | OpenSea auth and payload fetch on critical path | Wallet pre-authentication and early validated payload warming with safe JIT fallback |
+| Signed tier | OpenSea auth and payload fetch on critical path | Wallet-bound payload validated, nonce reserved, and exact raw transaction signed/persisted before launch; no remote auth at launch |
 | Stealth detection | 2.5-second retry and HTTP-only reads | Provider WebSocket block wakeups plus 250ms bounded HTTP fallback |
 | State safety | Reads could span provider block heights | Final wallet/open/supply reads pinned to one block |
 | Five one-per-tx mints | Five manual tasks, serial execution | One “5 sequential transactions” choice, atomic contiguous nonce ladder, concurrent submission |
@@ -40,7 +40,7 @@ Disperse had a separate failure mode: operations were accepted into PostgreSQL b
 ## Reusable execution engines
 
 1. `scheduled-public-v1`: static public calldata, pre-arm, precise timer, sequencer-first broadcast.
-2. `scheduled-server-signed-v1`: authenticated eligibility, wallet-bound payload warmup, validation, JIT fallback.
+2. `scheduled-server-signed-v1`: authenticated eligibility during preparation, wallet-bound payload validation, static prearm, and exact-timer raw-byte broadcast. Failure to prearm is a launch-blocking condition; there is no competitive JIT fallback.
 3. `stealth-owner-switch-v1`: WebSocket wakeup, on-chain switch probe, pinned snapshot, optional dedicated-worker nonce ladder.
 4. `custom-reviewed-v1`: explicit adapter fallback for contracts that cannot safely fit a standard engine.
 
@@ -51,13 +51,13 @@ Every project manifest is validated against its adapter. A mismatched or missing
 ### Before opening
 
 - Resolve and verify exact project/phase/contract intent.
-- Authenticate signed-stage wallets and warm OpenSea payloads when permitted.
+- Authenticate signed-stage wallets, obtain and validate their payloads, reserve nonces, sign, and durably store raw transactions. A warmed payload without stored signed bytes is not armed.
 - Estimate scheduled-public gas or apply a reviewed latency-engine gas limit.
 - Validate balance and spend limit.
 - Reserve wallet nonce(s) under a PostgreSQL advisory lock.
 - Sign and durably store exact bytes and precomputed hashes.
 - Warm broadcast DNS/TLS/provider connections.
-- Revalidate target, calldata, value, signer, nonce, eligibility and schedule.
+- Revalidate target, calldata, value, signer, nonce, funds and schedule without repeating remote signed-stage authentication or eligibility.
 
 ### At opening
 

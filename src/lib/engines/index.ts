@@ -15,7 +15,7 @@ const PROFILES: Record<ExecutionEngineKey, ExecutionEngineProfile> = {
   "scheduled-server-signed-v1": {
     key: "scheduled-server-signed-v1",
     detection: "provider-payload",
-    preparation: "payload-warm",
+    preparation: "static-prearm",
     broadcast: "sequencer-first",
     supportsNonceLadder: false,
     requiresDedicatedWalletForLadder: false,

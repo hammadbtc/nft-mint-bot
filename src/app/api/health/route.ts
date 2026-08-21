@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
 import { executionRole, runsExecutionWorker } from "@/lib/execution-role";
 import { parseWorkerRuntimeHeartbeat, schedulerHeartbeatFresh, WORKER_HEARTBEAT_KEY } from "@/lib/scheduler/health";
@@ -21,11 +21,16 @@ export async function GET() {
     const runtime = parseWorkerRuntimeHeartbeat(heartbeat?.value);
     const executionHealthy = runsExecutionWorker(role) ? scheduler.healthy : schedulerHeartbeatFresh(true, heartbeat?.value || null) && runtime?.blockWatcherHealthy !== false;
     const [armed] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.mintJobs).where(eq(schema.mintJobs.status, "armed"));
+    const imminentAt = new Date(Date.now() + 60_000).toISOString();
+    const [unarmed] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.mintJobs).where(and(
+      eq(schema.mintJobs.dryRun, false), inArray(schema.mintJobs.status, ["pending", "running"]), lte(schema.mintJobs.scheduledAt, imminentAt),
+    ));
     const armedTimers = runsExecutionWorker(role) ? scheduler.armedTimers : runtime?.armedTimers || 0;
     const missingLaunchTimers = Math.max(0, (armed?.count || 0) - armedTimers);
     const rpcEndpoints = await checkRpcHealth(4663);
     const rpcHealthy = rpcEndpoints.some((endpoint) => endpoint.status === "up");
-    const healthy = executionHealthy && missingLaunchTimers === 0 && rpcHealthy;
+    const unarmedImminentJobs = unarmed?.count || 0;
+    const healthy = executionHealthy && missingLaunchTimers === 0 && unarmedImminentJobs === 0 && rpcHealthy;
     return NextResponse.json(
       {
         status: healthy ? "ok" : "error",
@@ -44,6 +49,7 @@ export async function GET() {
           armedJobs: armed?.count || 0,
           armedTimers,
           missingLaunchTimers,
+          unarmedImminentJobs,
           blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false },
         },
       },

@@ -34,6 +34,35 @@ const ERC20_ABI = [
   "function decimals() view returns (uint8)",
 ];
 
+const SEADROP_ERRORS = new ethers.Interface([
+  "error MintQuantityExceedsMaxSupply(uint256 total,uint256 maxSupply)",
+  "error MintQuantityExceedsMaxTokenSupplyForStage(uint256 total,uint256 maxSupply)",
+  "error MintQuantityExceedsMaxMintedPerWallet(uint256 total,uint256 maxPerWallet)",
+]);
+
+function nestedRevertData(value: unknown, seen = new Set<unknown>()): string | undefined {
+  if (!value || typeof value !== "object" || seen.has(value)) return undefined;
+  seen.add(value);
+  const record = value as Record<string, unknown>;
+  if (typeof record.data === "string" && ethers.isHexString(record.data) && record.data.length >= 10) return record.data;
+  return nestedRevertData(record.error, seen) || nestedRevertData(record.info, seen) || nestedRevertData(record.cause, seen);
+}
+
+export function explainMintSimulationError(error: unknown): string | undefined {
+  const data = nestedRevertData(error);
+  if (!data) return undefined;
+  try {
+    const parsed = SEADROP_ERRORS.parseError(data);
+    if (!parsed) return undefined;
+    const total = parsed.args[0].toString();
+    const maximum = parsed.args[1].toString();
+    if (parsed.name === "MintQuantityExceedsMaxSupply") return `Collection sold out: requested supply ${total} exceeds maximum ${maximum}`;
+    if (parsed.name === "MintQuantityExceedsMaxTokenSupplyForStage") return `Mint stage sold out: requested supply ${total} exceeds stage maximum ${maximum}`;
+    if (parsed.name === "MintQuantityExceedsMaxMintedPerWallet") return `Wallet mint limit reached: requested total ${total} exceeds wallet maximum ${maximum}`;
+  } catch { return undefined; }
+  return undefined;
+}
+
 const JOB_LEASE_MS = 120_000;
 
 class MintNotOpenError extends Error {
@@ -115,7 +144,7 @@ async function simulateExact(request: ethers.TransactionRequest, provider: ether
   try {
     await provider.call(exactSimulationRequest(request, from));
   } catch (error) {
-    throw new Error(`Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`);
+    throw new Error(explainMintSimulationError(error) || `Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`);
   }
 }
 
@@ -432,10 +461,11 @@ async function armMint(
     throw new MintNotOpenError(phase.startsAt);
   }
   const provider = getProvider(collection.chainId);
+  const engine = executionEngineFor(collection);
   const signer = await getSigner(job.walletId, provider);
   const address = await signer.getAddress();
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: phase.id }));
-  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit));
+  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
   await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
@@ -466,14 +496,16 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
   if (!adapter?.buildTransaction || !adapter.supportsArming || !job.phaseId || (adapter.canArmPhase && !adapter.canArmPhase(job.phaseId))) throw new Error("Armed adapter is unavailable for this phase");
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(job.walletId, provider);
-  const plan = await traceMintStage(job.id, "final-revalidation", () => inspectWalletPhases(collection, wallet.address, job.quantity, undefined, { signer }));
-  const phase = plan.phases.find((item) => item.id === job.phaseId);
-  const eligibility = plan.eligibility.find((item) => item.phaseId === job.phaseId);
-  if (!phase || eligibility?.status !== "eligible") throw new Error("The armed wallet is no longer eligible for its reviewed phase");
-  if (phase.status === "ended") throw new Error("The reviewed mint phase ended before launch");
-  if (phase.startsAt !== job.launchTargetAt) throw new Error("The on-chain launch time changed after arming");
+  if (!adapter.prearmedPayloadProvesEligibility) {
+    const plan = await traceMintStage(job.id, "final-revalidation", () => inspectWalletPhases(collection, wallet.address, job.quantity, undefined, { signer }));
+    const phase = plan.phases.find((item) => item.id === job.phaseId);
+    const eligibility = plan.eligibility.find((item) => item.phaseId === job.phaseId);
+    if (!phase || eligibility?.status !== "eligible") throw new Error("The armed wallet is no longer eligible for its reviewed phase");
+    if (phase.status === "ended") throw new Error("The reviewed mint phase ended before launch");
+    if (phase.startsAt !== job.launchTargetAt) throw new Error("The on-chain launch time changed after arming");
+  }
   const address = await signer.getAddress();
-  const request = await adapter.buildTransaction(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: phase.id });
+  const request = await adapter.buildTransaction(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: job.phaseId });
   const attempt = await latestRecoverableAttempt(job.id, "mint");
   if (!attempt?.rawTx || !attempt.txHash || attempt.nonce == null) throw new Error("Armed transaction is missing");
   if (attempt.preflightHash !== transactionIntentHash(request)) throw new Error("Reviewed mint transaction changed after arming");
@@ -571,16 +603,18 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   }
   if (phase.status === "upcoming" && phase.startsAt) {
     if (job.dryRun) throw new MintNotOpenError(phase.startsAt);
-    if (adapter.warmTransaction && (!adapter.supportsArming || (adapter.canArmPhase && !adapter.canArmPhase(phase.id)))) {
+    if (adapter.warmTransaction) {
       const address = await signer.getAddress();
       try {
         await traceMintStage(job.id, "payload-acquisition", () => adapter.warmTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
       } catch (error) {
-        // Some launchpads deliberately refuse payload construction before the
-        // phase. Keep the task scheduled and retry acquisition at launch.
         recordMintSuppression(job.id, "payload-acquisition", `Provider did not permit early payload warming: ${safeErrorMessage(error)}`);
+        // Competitive signed stages must never silently degrade to JIT work at
+        // opening. A failed prearm is an explicit no-go while there is still
+        // time for the operator to investigate or reschedule.
+        throw new Error(`Signed mint could not be armed before launch: ${safeErrorMessage(error)}`);
       }
-      throw new MintNotOpenError(phase.startsAt);
+      if (!adapter.supportsArming || (adapter.canArmPhase && !adapter.canArmPhase(phase.id))) throw new MintNotOpenError(phase.startsAt);
     }
     return armMint(job, collection, phase);
   }

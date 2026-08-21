@@ -6,6 +6,7 @@ import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus, selectE
 import { mintWalletEligibilityError } from "../src/lib/mint-wallet-policy";
 import { broadcastPreparedTransaction, exactSimulationRequest } from "../src/lib/transactions";
 import { liveTransactionsEnabled, safeErrorMessage, safeSecretEqual, stableHash } from "../src/lib/safety";
+import { explainMintSimulationError } from "../src/lib/engine/mint";
 
 test("reviewed mint URL paths match exactly, not by dangerous prefix", () => {
   assert.equal(exactUrlPathMatches("/collection/cash-rabbits/overview", "/collection/cash-rabbits/overview"), true);
@@ -124,6 +125,12 @@ test("operator errors redact wallet keys, provider keys, credentials, and tokens
   assert.equal(message.includes("drpc-secret"), false);
   assert.equal(message.includes("quicknode-secret"), false);
   assert.equal(message.includes("chainstack-secret"), false);
+});
+
+test("SeaDrop sellout reverts become actionable operator errors", () => {
+  const data = new ethers.Interface(["error MintQuantityExceedsMaxSupply(uint256 total,uint256 maxSupply)"])
+    .encodeErrorResult("MintQuantityExceedsMaxSupply", [10_001n, 10_000n]);
+  assert.equal(explainMintSimulationError({ error: { data } }), "Collection sold out: requested supply 10001 exceeds maximum 10000");
 });
 
 test("stable request hashes ignore object key order and secret comparison is exact", () => {

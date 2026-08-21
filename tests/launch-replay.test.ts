@@ -22,15 +22,15 @@ test("scheduled public preparation occurs before open while broadcast does not",
   assert.ok(result.broadcastAtMs >= 10_000);
 });
 
-test("signed launch replay benefits from a warmed payload", () => {
+test("signed launch replay prearms the exact transaction and only broadcasts after opening", () => {
   const result = replayLaunch({
     name: "signed", opensAtMs: 50_000, sellsOutAtMs: 55_000, signalDelayMs: 0,
     stages: [
-      { name: "payload-warm", durationMs: 900, beforeOpenAllowed: true },
-      { name: "validate-sign-submit", durationMs: 120, beforeOpenAllowed: false },
+      { name: "payload-validate-sign-persist", durationMs: 900, beforeOpenAllowed: true },
+      { name: "raw-broadcast", durationMs: 70, beforeOpenAllowed: false },
     ],
   });
-  assert.equal(result.latencyFromOpenMs, 120);
+  assert.equal(result.latencyFromOpenMs, 70);
 });
 
 test("RPC inconsistency fails closed and sellout suppresses excess ladder entries", () => {

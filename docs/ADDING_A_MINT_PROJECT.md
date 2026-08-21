@@ -27,7 +27,7 @@ Use an existing adapter only when the project uses the same reviewed protocol ve
 Current adapters:
 
 - `opensea-seadrop-v1`: public SeaDrop only. It rereads price, start/end, wallet cap, fee-recipient permission, wallet mint stats, and supply on-chain at execution.
-- `opensea-signed-seadrop-v1`: reviewed OpenSea SeaDrop schedules containing signed presales plus public. It authenticates each vault signer, reads per-stage eligibility without constructing or simulating a mint, and fetches the signed transaction only when preparing execution. Reusable wallet sessions are encrypted at rest and survive deploys. Prefer a permanent server-only `OPENSEA_API_KEY`; an official instant key is only a launch fallback.
+- `opensea-signed-seadrop-v1`: reviewed OpenSea SeaDrop schedules containing signed presales plus public. Dashboard eligibility uses encrypted reusable wallet sessions. Before a scheduled launch, the engine must obtain and validate the wallet-bound signed payload, construct the transaction, reserve its nonce, sign it, persist its exact raw bytes/hash, and show the job as `armed`. OpenSea authentication and eligibility requests are forbidden from the launch-time path. Prefer a permanent server-only `OPENSEA_API_KEY`; an official instant key is only a preparation fallback.
 - `evm-contract-v1`: only a verified payable function with either no arguments or one integer quantity argument and a static reviewed price.
 - `squiggle-wuiggle-v1`: project-specific Robinhood adapter for the verified preminted-inventory contract. It supports deterministic arming but must not be reused for another collection merely because its ABI looks similar.
 
@@ -116,7 +116,10 @@ Never broadcast while investigating. Never copy a transaction from another colle
 - Identify the official payload endpoint and authorization method.
 - Decode the EIP-712/domain or personal-sign message and confirm chain, verifying contract, signer, wallet, quantity, price, deadline, and nonce.
 - Validate the recovered signer against an on-chain or otherwise authoritative signer address.
-- Obtain short-lived signatures inside `buildTransaction`, not when the project is registered or scheduled.
+- Determine experimentally how early the official endpoint issues a usable payload and its exact expiry/single-use semantics.
+- For a competitive scheduled stage, fetch and fully validate the wallet-bound payload during the arming window, then construct, nonce-reserve, sign, and durably persist the exact raw transaction before opening.
+- If the provider will not issue a payload early enough to arm every selected wallet, the phase is **not latency-qualified**. The UI and operator report must say so; do not describe payload warming or a JIT path as launch-ready.
+- Never repeat remote eligibility, SIWE authentication, drop discovery, or payload acquisition after the launch timer fires.
 - Store API credentials only in environment variables; never in `adapterConfig`, Git, logs, or client responses.
 
 #### Token/holder-gated mint
@@ -162,15 +165,15 @@ export interface MintAdapter {
 - Return price in integer base units, wallet cap, and supply when available.
 - Avoid wallet secrets and avoid returning API credentials/proofs to the browser.
 
-`buildTransaction` runs immediately before simulation/signing and must:
+`buildTransaction` runs during preparation/arming for scheduled deterministic phases and immediately before simulation/signing only for genuinely non-armable phases. It must:
 
 - Revalidate phase, pause state, price, limits, supply, and signer eligibility.
-- Fetch wallet-bound proof/signature/quote data just in time.
+- Fetch or reuse a validated wallet-bound proof/signature/quote according to its reviewed lifetime. Competitive signed stages must reuse the pre-open payload; they must not fetch it after opening.
 - Construct the exact reviewed `to`, `data`, `value`, and `chainId`.
 - Fail closed on API/schema/version/signature changes.
 - Never send, sign, allocate a nonce, or mutate external state itself. The engine owns simulation, durable signing, broadcasting, retries, receipts, and nonce locks.
 
-For multi-stage projects, `resolve` returns all reviewed phases in precedence order, including ended/current/upcoming stages. `checkEligibility` returns an explicit `eligible`, `ineligible`, `unknown`, or `unsupported` result per phase for the signing wallet. The engine chooses the first eligible live phase, otherwise the earliest eligible upcoming phase, persists its `phaseId`, passes that ID into `buildTransaction`, and rechecks eligibility before execution. A gated phase without a reviewed checker is `unsupported`, never optimistically eligible.
+For multi-stage projects, `resolve` returns all reviewed phases in precedence order, including ended/current/upcoming stages. `checkEligibility` returns an explicit `eligible`, `ineligible`, `unknown`, or `unsupported` result per phase for the signing wallet. The engine chooses the first eligible live phase, otherwise the earliest eligible upcoming phase, persists its `phaseId`, and passes that ID into `buildTransaction`. For a wallet-bound payload whose decoded signature proves the reviewed wallet/phase/quantity/price/times/supply/fee, final revalidation compares the cached transaction intent, signer, nonce and funds without repeating remote eligibility. A gated phase without a reviewed checker is `unsupported`, never optimistically eligible.
 
 ### Eligibility scan contract
 
@@ -188,11 +191,11 @@ Every eligibility adapter needs tests proving: eligible, authoritative ineligibl
 
 ### Qualifying an adapter for armed FCFS execution
 
-Set `supportsArming: true` only when the adapter can safely construct the exact future transaction before the phase is open. When `options.allowBeforeStart` is true, the adapter may bypass only the expected start-time rejection; it must still reread and validate router/drop addresses, fee recipients, pause/end state, price, cap, supply, and wallet eligibility.
+Set `supportsArming: true` only when the adapter can safely construct the exact future transaction before the phase is open. `Armed` has one strict meaning: nonce reserved, transaction signed, and exact raw bytes plus their precomputed hash durably stored. A cached API payload alone is never armed. When `options.allowBeforeStart` is true, the adapter may bypass only the expected start-time rejection; it must still validate router/drop addresses, fee recipients, end state, price, cap, supply, wallet binding and eligibility proof.
 
 An arming-capable adapter also needs a conservative `recommendedGasLimit` because pre-open `eth_estimateGas` commonly reverts. The engine uses it only when exact estimation fails, applies its fee ceiling, and records the signed transaction before launch. Final revalidation rebuilds and compares `chainId`, `to`, `data`, and `value`, then checks the signer, nonce, funds, and spend policy. A change fails closed rather than silently signing a different mint.
 
-Do not enable arming for generic timestamp-only configuration, short-lived server signatures obtained too early, unknown dynamic pricing, or a protocol whose payload cannot be deterministically rebuilt. Such adapters remain on the normal safe execution path until a protocol-specific arming design exists.
+Do not enable arming for generic timestamp-only configuration, a signature that expires before opening, unknown dynamic pricing, or a protocol whose payload cannot remain valid through launch. Such adapters are not competitive FCFS engines until a protocol-specific arming design exists. Never silently fall back from failed prearming to slow JIT execution for a launch advertised as armed.
 
 Register a new adapter explicitly in `src/lib/adapters/index.ts`. A database `adapterKey` that is not in this registry must remain unusable.
 

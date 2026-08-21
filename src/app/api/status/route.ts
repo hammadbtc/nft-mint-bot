@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { checkRpcHealth, getChain } from "@/lib/chains";
 import { ensureSchedulerRunning, schedulerStatus } from "@/lib/scheduler";
@@ -56,6 +56,11 @@ export async function GET() {
     const armedJobs = counts.find((item) => item.status === "armed")?.count || 0;
     const armedTimers = runsExecutionWorker(role) ? scheduler.armedTimers : runtime?.armedTimers || 0;
     const missingLaunchTimers = Math.max(0, armedJobs - armedTimers);
+    const imminentAt = new Date(Date.now() + 60_000).toISOString();
+    const [unarmed] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.mintJobs).where(and(
+      eq(schema.mintJobs.dryRun, false), inArray(schema.mintJobs.status, ["pending", "running"]), lte(schema.mintJobs.scheduledAt, imminentAt),
+    ));
+    const unarmedImminentJobs = unarmed?.count || 0;
     const stuck = await db.execute(sql<{ kind: string; count: number }>`
       select 'mint'::text as kind, count(*)::int as count from mint_jobs
       where status in ('running','confirming') and (lease_expires_at is null or lease_expires_at::timestamptz < now())
@@ -64,7 +69,7 @@ export async function GET() {
       where status in ('running','confirming') and (lease_expires_at is null or lease_expires_at::timestamptz < now())
     `);
     const stuckWork = Object.fromEntries(Array.from(stuck).map((item) => [item.kind, item.count]));
-    const ready = executionHealthy && missingLaunchTimers === 0 && Object.values(stuckWork).every((count) => Number(count) === 0) && rpc.every((chain) => chain.healthy);
+    const ready = executionHealthy && missingLaunchTimers === 0 && unarmedImminentJobs === 0 && Object.values(stuckWork).every((count) => Number(count) === 0) && rpc.every((chain) => chain.healthy);
     const broadcastRows = Array.from(performanceRows) as unknown as Array<{
       route_label: string; samples: number; p50_ms: number | null; p95_ms: number | null; p99_ms: number | null; accepted: number;
     }>;
@@ -85,6 +90,7 @@ export async function GET() {
         armedJobs,
         armedTimers,
         missingLaunchTimers,
+        unarmedImminentJobs,
         blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false },
       },
       rpc,
