@@ -571,6 +571,46 @@
     }
   },
   {
+    "id": "b8997e2c-7ae1-4155-b84b-e650ad09b961",
+    "name": "NitroCode",
+    "slug": "nitrocode",
+    "contractAddress": "0x2C15d479361CC5c07d24717efDe841caeBEE39c0",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": [
+      "function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"
+    ],
+    "mintPrice": "0",
+    "maxPerWallet": 25,
+    "maxSupply": 3000,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": [
+      "opensea.io",
+      "robinhoodchain.blockscout.com"
+    ],
+    "siteUrl": "https://opensea.io/collection/nitrocode/overview",
+    "adapterConfig": {
+      "engine": "scheduled-public-v1",
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public Mint",
+      "urlMatchers": [
+        {
+          "domain": "opensea.io",
+          "path": "/collection/nitrocode"
+        },
+        {
+          "domain": "opensea.io",
+          "path": "/collection/nitrocode/overview"
+        },
+        {
+          "domain": "robinhoodchain.blockscout.com",
+          "path": "/address/0x2c15d479361cc5c07d24717efde841caebee39c0"
+        }
+      ]
+    }
+  },
+  {
     "id": "3d8e67d5-4721-4c8c-ad99-e646627cc918",
     "name": "Rekt Tradooor",
     "slug": "rekt-tradooor",

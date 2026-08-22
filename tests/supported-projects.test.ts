@@ -145,6 +145,16 @@ test("XCOPUNKS and Cash Dogs are bound to their reviewed OpenSea public drops", 
   assert.ok(cashDogs?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x904a3f7e32d7259d9b520b5c0c158e5c3a60d860"));
 });
 
+test("NitroCode is bound to its reviewed free OpenSea public drop", () => {
+  const nitroCode = seeds.find((seed) => seed.slug === "nitrocode");
+  assert.equal(nitroCode?.adapterKey, "opensea-seadrop-v1");
+  assert.equal(nitroCode?.contractAddress.toLowerCase(), "0x2c15d479361cc5c07d24717efde841caebee39c0");
+  assert.equal(nitroCode?.mintPrice, "0");
+  assert.equal(nitroCode?.adapterConfig.publicPhaseName, "Public Mint");
+  assert.ok(nitroCode?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/nitrocode/overview"));
+  assert.ok(nitroCode?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x2c15d479361cc5c07d24717efde841caebee39c0"));
+});
+
 test("OMR EVO pins its signed stages and public sale", () => {
   const omr = seeds.find((seed) => seed.slug === "omrevo");
   assert.equal(omr?.adapterKey, "opensea-signed-seadrop-v1");
