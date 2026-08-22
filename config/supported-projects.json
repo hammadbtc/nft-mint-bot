@@ -589,6 +589,7 @@
       "robinhoodchain.blockscout.com"
     ],
     "siteUrl": "https://opensea.io/collection/nitrocode/overview",
+    "imageUrl": "https://i2c.seadn.io/base/6bd5d216f07f43cd94d6ff950031ea59/30a68a8743e550c12234c338ead498/b030a68a8743e550c12234c338ead498.png",
     "adapterConfig": {
       "engine": "scheduled-public-v1",
       "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",

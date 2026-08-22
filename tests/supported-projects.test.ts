@@ -9,6 +9,7 @@ type Seed = {
   slug: string;
   contractAddress: string;
   mintPrice: string;
+  imageUrl?: string;
   adapterKey: string;
   adapterConfig: {
     seaDropAddress?: string;
@@ -150,6 +151,7 @@ test("NitroCode is bound to its reviewed free OpenSea public drop", () => {
   assert.equal(nitroCode?.adapterKey, "opensea-seadrop-v1");
   assert.equal(nitroCode?.contractAddress.toLowerCase(), "0x2c15d479361cc5c07d24717efde841caebee39c0");
   assert.equal(nitroCode?.mintPrice, "0");
+  assert.match(nitroCode?.imageUrl || "", /^https:\/\/i2c\.seadn\.io\//);
   assert.equal(nitroCode?.adapterConfig.publicPhaseName, "Public Mint");
   assert.ok(nitroCode?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/nitrocode/overview"));
   assert.ok(nitroCode?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x2c15d479361cc5c07d24717efde841caebee39c0"));

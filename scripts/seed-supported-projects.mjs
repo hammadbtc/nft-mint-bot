@@ -21,7 +21,7 @@ try {
         ${project.id}, ${project.name}, ${project.slug}, ${project.contractAddress}, ${project.chainId},
         ${project.mintMethod}, ${JSON.stringify(project.mintAbi)}, ${project.mintPrice},
         ${project.maxPerWallet}, ${project.maxSupply}, ${project.adapterKey}, ${JSON.stringify(project.domains)},
-        ${project.siteUrl}, ${project.imageUrl}, ${JSON.stringify(project.adapterConfig)}, true, true
+        ${project.siteUrl ?? null}, ${project.imageUrl ?? null}, ${JSON.stringify(project.adapterConfig)}, true, true
       )
       on conflict (id) do update set
         name = excluded.name, slug = excluded.slug, contract_address = excluded.contract_address,
