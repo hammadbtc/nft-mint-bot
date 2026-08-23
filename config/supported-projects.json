@@ -705,5 +705,86 @@
         }
       ]
     }
+  },
+  {
+    "id": "5ecad6ec-a294-4b4f-9bd3-3ae204b0ad92",
+    "name": "BigD",
+    "slug": "bigd-6969",
+    "contractAddress": "0x691bb24e010a7889879c66a311b6e2dbdfaa27a1",
+    "chainId": 4663,
+    "mintMethod": "mintSigned",
+    "mintAbi": [
+      "function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"
+    ],
+    "mintPrice": "0",
+    "maxPerWallet": 69,
+    "maxSupply": 6969,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": [
+      "opensea.io",
+      "robinhoodchain.blockscout.com"
+    ],
+    "siteUrl": "https://opensea.io/collection/bigd-6969/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/bigd-275698187/image_type_logo/1cd29087367d9fecab46af16ac4f75/101cd29087367d9fecab46af16ac4f75.png",
+    "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "bigd-6969",
+      "stages": [
+        {
+          "id": "team",
+          "name": "Team",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-23T16:00:00.000Z",
+          "endsAt": "2026-08-23T16:30:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 69,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 6969,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "gtd",
+          "name": "GTD 🍆 ",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-23T16:30:00.000Z",
+          "endsAt": "2026-08-23T18:30:00.000Z",
+          "priceWei": "690000000000000",
+          "maxPerWallet": 1,
+          "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 6969,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public stage",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-23T18:30:00.000Z",
+          "endsAt": "2026-08-24T18:30:00.000Z",
+          "priceWei": "690000000000000",
+          "maxPerWallet": 5
+        }
+      ],
+      "urlMatchers": [
+        {
+          "domain": "opensea.io",
+          "path": "/collection/bigd-6969"
+        },
+        {
+          "domain": "opensea.io",
+          "path": "/collection/bigd-6969/overview"
+        },
+        {
+          "domain": "robinhoodchain.blockscout.com",
+          "path": "/address/0x691bb24e010a7889879c66a311b6e2dbdfaa27a1"
+        }
+      ]
+    }
   }
 ]

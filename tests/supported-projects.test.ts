@@ -279,3 +279,27 @@ test("Rekt Tradooor pins honoraries, both signed tiers, and the public Robinhood
   assert.ok(rekt?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/rekt-tradooor/overview"));
   assert.ok(rekt?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x7b3ecfa33657de415ff269dc97dfa82954cee706"));
 });
+
+test("BigD pins Team, GTD, and public to the reviewed OpenSea drop", () => {
+  const bigD = seeds.find((seed) => seed.slug === "bigd-6969");
+  assert.equal(bigD?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(bigD?.contractAddress.toLowerCase(), "0x691bb24e010a7889879c66a311b6e2dbdfaa27a1");
+  assert.equal(bigD?.adapterConfig.openSeaSlug, "bigd-6969");
+  assert.deepEqual(bigD?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["team", "signed", "0", 69],
+    ["gtd", "signed", "690000000000000", 1],
+    ["public", "public", "690000000000000", 5],
+  ]);
+  assert.deepEqual(bigD?.adapterConfig.stages?.map((stage) => [stage.startsAt, stage.endsAt]), [
+    ["2026-08-23T16:00:00.000Z", "2026-08-23T16:30:00.000Z"],
+    ["2026-08-23T16:30:00.000Z", "2026-08-23T18:30:00.000Z"],
+    ["2026-08-23T18:30:00.000Z", "2026-08-24T18:30:00.000Z"],
+  ]);
+  assert.deepEqual(bigD?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, undefined]);
+  assert.deepEqual(bigD?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [6969, 1000, true],
+    [6969, 1000, true],
+  ]);
+  assert.ok(bigD?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/bigd-6969/overview"));
+  assert.ok(bigD?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x691bb24e010a7889879c66a311b6e2dbdfaa27a1"));
+});
