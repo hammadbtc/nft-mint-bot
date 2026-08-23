@@ -59,6 +59,16 @@ test("reviewed OpenSea signed phases require true prearming", () => {
   assert.equal(openseaSignedSeaDropV1.prearmedPayloadProvesEligibility, true);
 });
 
+test("reviewed OpenSea public phases arm without requesting a signed payload", async () => {
+  await assert.doesNotReject(() => openseaSignedSeaDropV1.warmTransaction!(
+    collection,
+    signerAddress,
+    1,
+    {} as ethers.Provider,
+    { phaseId: "public" },
+  ));
+});
+
 test("OpenSea invalid or expired API-key responses are recognized for automatic failover", () => {
   assert.equal(isOpenSeaInvalidApiKeyError(new Error("Server Error: Invalid API key")), true);
   assert.equal(isOpenSeaInvalidApiKeyError(new Error("API key expired")), true);

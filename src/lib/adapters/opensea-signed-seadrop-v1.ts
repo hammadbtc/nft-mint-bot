@@ -314,7 +314,11 @@ export const openseaSignedSeaDropV1: MintAdapter = {
   async warmTransaction(collection, signerAddress, quantity, _provider, options) {
     const config = configFor(collection);
     const stage = config.stages.find((item) => item.id === options.phaseId);
-    if (!stage || stage.kind !== "signed") throw new Error("Only reviewed signed OpenSea stages can warm a wallet payload");
+    if (!stage) throw new Error("Only reviewed OpenSea stages can be armed");
+    // Public SeaDrop calldata is deterministic and constructed directly from
+    // on-chain state by buildTransaction. It has no wallet-bound OpenSea
+    // payload to acquire, so warming is intentionally a no-op for this phase.
+    if (stage.kind === "public") return;
     const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
     if ((signedPayloadCache.get(key)?.expiresAt || 0) > Date.now()) return;
     await acquireSignedPayload(collection, config, stage, signerAddress, quantity);

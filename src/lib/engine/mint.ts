@@ -603,7 +603,7 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   }
   if (phase.status === "upcoming" && phase.startsAt) {
     if (job.dryRun) throw new MintNotOpenError(phase.startsAt);
-    if (adapter.warmTransaction) {
+    if (adapter.warmTransaction && phase.kind === "signed") {
       const address = await signer.getAddress();
       try {
         await traceMintStage(job.id, "payload-acquisition", () => adapter.warmTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
