@@ -8,9 +8,26 @@ This is the durable operator playbook for future MintBot sessions. A user should
 2. Run `git status --short`, `git log -3 --oneline`, `npm test`, and `npm run lint` before changing support.
 3. Inspect `src/lib/adapters/index.ts` and existing adapters before building another one.
 4. Collect the official mint URL, chain, phase, opening time with timezone, contract, desired quantity, and the wallet addresses that must be eligible. Never request private keys.
-5. Keep the project unsupported until the exact transaction has been reproduced and simulated.
+5. Copy `docs/MINT_SUPPORT_CERTIFICATION_TEMPLATE.md` into the investigation notes and complete every applicable evidence field.
+6. Keep the project unsupported until every phase the UI can select has passed its exact execution-path certification.
 
 MintBot production may already have live broadcasting enabled. Adding a project is therefore a transaction-safety change, not a content edit. Registration must never automatically enqueue a job.
+
+## Definition of supported
+
+`Supported` is a release state, not a synonym for “the seed parses” or “the adapter worked for another project.” A project may be enabled only when all of these are true:
+
+- Every displayed phase is mapped to one exact adapter execution path.
+- The phase matrix explicitly records whether it is public, signed, allowlisted, token-gated, owner-switched, or unsupported.
+- Per-phase capabilities agree: arming, provider-payload warming, payload-as-eligibility-proof, gas preparation, final revalidation, and broadcast mode.
+- Exact calldata, target, value, signer/recipient binding, chain, fee recipient, phase index, time window, wallet cap, and supply rules have deterministic tests.
+- The same adapter/phase combination has a regression test. Testing the public adapter separately from a mixed signed/public adapter is not equivalent.
+- CI passes `npm run support:certify`; Railway predeploy runs the same gate before database seeding.
+- Production reports the deployed commit, healthy DB/scheduler, required HTTPS RPC routes, and required WebSocket routes.
+- A wallet-authenticated rehearsal has exercised the exact production job path. If dashboard/vault access is unavailable, report the project as **not production-certified**. Read-only RPC checks, mocked tests, and offline signing do not replace this gate.
+- For an upcoming competitive phase, every intended live job visibly reaches `armed` with a persisted raw transaction/hash and launch/revalidation timers. Zero armed jobs is a no-go.
+
+Never say “everything is ready,” “fully armed,” or “production-ready” when any required evidence is blocked or inferred.
 
 ## Non-negotiable rule
 
@@ -197,6 +214,8 @@ An arming-capable adapter also needs a conservative `recommendedGasLimit` becaus
 
 Do not enable arming for generic timestamp-only configuration, a signature that expires before opening, unknown dynamic pricing, or a protocol whose payload cannot remain valid through launch. Such adapters are not competitive FCFS engines until a protocol-specific arming design exists. Never silently fall back from failed prearming to slow JIT execution for a launch advertised as armed.
 
+Mixed adapters require explicit per-phase declarations. Method presence and adapter-wide booleans are not sufficient. In particular, an OpenSea drop containing signed presales and a public sale must declare provider-payload warming only for signed phases; its public phase must construct deterministic `mintPublic` calldata from current on-chain state. Add the mixed-adapter regression before registering the project.
+
 Register a new adapter explicitly in `src/lib/adapters/index.ts`. A database `adapterKey` that is not in this registry must remain unusable.
 
 ## Adding another chain
@@ -274,6 +293,7 @@ Then run:
 
 ```bash
 npm test
+npm run support:certify
 npm run lint
 npm run build
 npx drizzle-kit check

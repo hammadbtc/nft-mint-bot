@@ -58,17 +58,29 @@ for (const value of robinhoodRpcUrls) {
   }
 }
 
-if (process.env.ROBINHOOD_WS_URL?.trim()) {
+const robinhoodWebSocketUrls = [
+  "ROBINHOOD_QUICKNODE_WS_URL", "ROBINHOOD_CHAINSTACK_WS_URL", "ROBINHOOD_WS_URLS", "ROBINHOOD_WS_URL", "ROBINHOOD_DRPC_WS_URL",
+].flatMap((name) => (process.env[name] || "").split(",").map((value) => value.trim()).filter(Boolean));
+for (const value of robinhoodWebSocketUrls) {
   try {
-    if (new URL(process.env.ROBINHOOD_WS_URL).protocol !== "wss:") throw new Error();
+    if (new URL(value).protocol !== "wss:") throw new Error();
   } catch {
-    console.error("ROBINHOOD_WS_URL must be a valid wss:// provider endpoint");
+    console.error("Every Robinhood WebSocket endpoint must be a valid wss:// URL");
     process.exit(1);
   }
 }
 
 if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && !process.env.ALCHEMY_API_KEY?.trim() && robinhoodRpcUrls.length === 0) {
   console.error("Live Robinhood operation requires ALCHEMY_API_KEY or a second HTTPS endpoint in ROBINHOOD_RPC_URLS");
+  process.exit(1);
+}
+
+const liveWebSocketProviderCount = new Set([
+  ...(process.env.ALCHEMY_API_KEY?.trim() ? ["alchemy"] : []),
+  ...robinhoodWebSocketUrls,
+]).size;
+if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && liveWebSocketProviderCount < 2) {
+  console.error("Live Robinhood operation requires at least two independent WebSocket providers");
   process.exit(1);
 }
 

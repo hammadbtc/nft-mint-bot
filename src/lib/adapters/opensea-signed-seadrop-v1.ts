@@ -149,6 +149,12 @@ function configFor(collection: SupportedCollection): SignedSeaDropConfig {
   return config as SignedSeaDropConfig;
 }
 
+export function signedSeaDropStageFor(collection: SupportedCollection, phaseId: string): ReviewedOpenSeaStage {
+  const stage = configFor(collection).stages.find((item) => item.id === phaseId);
+  if (!stage) throw new Error("Only reviewed OpenSea stages can be used");
+  return stage;
+}
+
 function phaseStatus(startsAt: string, endsAt: string, nowMs: number): MintPhase["status"] {
   if (nowMs < Date.parse(startsAt)) return "upcoming";
   if (nowMs >= Date.parse(endsAt)) return "ended";
@@ -308,13 +314,13 @@ export const openseaSignedSeaDropV1: MintAdapter = {
   supportsArming: true,
   requiresSignerForEligibility: true,
   canArmPhase: () => true,
-  prearmedPayloadProvesEligibility: true,
+  requiresPayloadWarmup: (collection, phaseId) => signedSeaDropStageFor(collection, phaseId).kind === "signed",
+  prearmedPayloadProvesEligibility: (collection, phaseId) => signedSeaDropStageFor(collection, phaseId).kind === "signed",
   recommendedGasLimit: 500_000n,
 
   async warmTransaction(collection, signerAddress, quantity, _provider, options) {
     const config = configFor(collection);
-    const stage = config.stages.find((item) => item.id === options.phaseId);
-    if (!stage) throw new Error("Only reviewed OpenSea stages can be armed");
+    const stage = signedSeaDropStageFor(collection, options.phaseId);
     // Public SeaDrop calldata is deterministic and constructed directly from
     // on-chain state by buildTransaction. It has no wallet-bound OpenSea
     // payload to acquire, so warming is intentionally a no-op for this phase.

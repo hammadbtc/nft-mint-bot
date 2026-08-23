@@ -18,6 +18,8 @@ for a one-service migration, but it is not the final V2 production layout.
 
 `railway.json` configures Railpack, one replica, the production build, pre-deploy environment validation/schema sync, `/api/health`, and restart-on-failure behavior. Generate a public domain for the MintBot service after the first successful deployment.
 
+Predeploy runs `npm run support:certify` before any supported-project seed is written. A phase-capability contradiction, unregistered adapter, invalid execution manifest, malformed signed stage, or mixed signed/public classification error must fail deployment and leave the previous production release active.
+
 ## Required variables
 
 Add these to the MintBot service:
@@ -66,6 +68,8 @@ ROBINHOOD_CHAINSTACK_WS_URL=<optional independent Chainstack WebSocket endpoint>
 ```
 
 Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Robinhood provider order is Alchemy first, QuickNode second, additional configured routes next, and the official public HTTPS RPC last. The public endpoint does not provide the launch WebSocket subscription. Quota and rate-limit responses temporarily quarantine only the affected HTTPS route. Never commit provider URLs: credentials are commonly embedded in the path or query string. Only configure a dRPC URL when the account has an actual Robinhood endpoint; an account balance without Robinhood network access is not usable.
+
+When live transactions are enabled, environment validation and readiness require at least two independent WebSocket providers, and readiness requires at least two healthy Robinhood HTTPS routes. Intentional WebSocket idle remains healthy only outside launch demand; lack of configured redundancy does not.
 
 ## Demand-aware WebSocket usage
 
@@ -121,6 +125,8 @@ Scheduling and Disperse queueing remain available while this gate is locked. The
 7. Generate a Railway domain.
 8. Open the domain and sign in with `APP_ACCESS_USER` / `APP_ACCESS_PASSWORD`.
 9. Keep one replica and live transactions disabled until testnet validation.
+
+For every newly supported live mint, also verify the deployed commit in `/api/health`, complete `docs/MINT_SUPPORT_CERTIFICATION_TEMPLATE.md`, and inspect the intended jobs. A scheduled competitive launch is not ready until each intended job is `armed`, the raw transaction/hash is persisted, timers are present, the worker heartbeat is fresh, and WebSocket demand is active. Public health with zero armed jobs is evidence of infrastructure health only, not launch certification.
 
 ## Troubleshooting
 

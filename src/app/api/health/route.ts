@@ -28,9 +28,12 @@ export async function GET() {
     const armedTimers = runsExecutionWorker(role) ? scheduler.armedTimers : runtime?.armedTimers || 0;
     const missingLaunchTimers = Math.max(0, (armed?.count || 0) - armedTimers);
     const rpcEndpoints = await checkRpcHealth(4663);
-    const rpcHealthy = rpcEndpoints.some((endpoint) => endpoint.status === "up");
+    const healthyRpcRoutes = rpcEndpoints.filter((endpoint) => endpoint.status === "up").length;
+    const rpcHealthy = healthyRpcRoutes >= (liveTransactionsEnabled() ? 2 : 1);
     const unarmedImminentJobs = unarmed?.count || 0;
-    const healthy = executionHealthy && missingLaunchTimers === 0 && unarmedImminentJobs === 0 && rpcHealthy;
+    const configuredWebSockets = runsExecutionWorker(role) ? scheduler.blockWatcher.configuredProviders : runtime?.blockWatcherConfiguredProviders || 0;
+    const webSocketRedundancyHealthy = !liveTransactionsEnabled() || configuredWebSockets >= 2;
+    const healthy = executionHealthy && missingLaunchTimers === 0 && unarmedImminentJobs === 0 && rpcHealthy && webSocketRedundancyHealthy;
     return NextResponse.json(
       {
         status: healthy ? "ok" : "error",
@@ -38,7 +41,7 @@ export async function GET() {
         service: "mintbot",
         version: deploymentVersion(),
         liveTransactionsEnabled: liveTransactionsEnabled(),
-        rpc: { chainId: 4663, healthy: rpcHealthy, endpoints: rpcEndpoints },
+        rpc: { chainId: 4663, healthy: rpcHealthy, healthyRoutes: healthyRpcRoutes, requiredHealthyRoutes: liveTransactionsEnabled() ? 2 : 1, endpoints: rpcEndpoints },
         scheduler: {
           role,
           running: runsExecutionWorker(role) ? scheduler.running : executionHealthy,
@@ -51,6 +54,7 @@ export async function GET() {
           missingLaunchTimers,
           unarmedImminentJobs,
           blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false, intentionalIdle: runtime?.blockWatcherIntentionalIdle ?? false },
+          webSocketRedundancyHealthy,
         },
       },
       { status: healthy ? 200 : 503, headers: { "Cache-Control": "no-store" } },

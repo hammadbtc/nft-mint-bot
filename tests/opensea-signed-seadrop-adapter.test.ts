@@ -56,7 +56,10 @@ test("dashboard eligibility retains authenticated per-stage OpenSea checks", () 
 test("reviewed OpenSea signed phases require true prearming", () => {
   assert.equal(openseaSignedSeaDropV1.supportsArming, true);
   assert.equal(openseaSignedSeaDropV1.canArmPhase?.("fcfs"), true);
-  assert.equal(openseaSignedSeaDropV1.prearmedPayloadProvesEligibility, true);
+  assert.equal(openseaSignedSeaDropV1.requiresPayloadWarmup?.(collection, "fcfs"), true);
+  assert.equal(openseaSignedSeaDropV1.prearmedPayloadProvesEligibility?.(collection, "fcfs"), true);
+  assert.equal(openseaSignedSeaDropV1.requiresPayloadWarmup?.(collection, "public"), false);
+  assert.equal(openseaSignedSeaDropV1.prearmedPayloadProvesEligibility?.(collection, "public"), false);
 });
 
 test("reviewed OpenSea public phases arm without requesting a signed payload", async () => {

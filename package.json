@@ -13,10 +13,11 @@
     "db:ensure-multichain-nonces": "node scripts/ensure-multichain-wallet-nonces.mjs",
     "db:ensure-telemetry": "node scripts/ensure-launch-telemetry-table.mjs",
     "db:seed": "node scripts/seed-supported-projects.mjs",
-    "railway:predeploy": "npm run env:check && node scripts/allow-multiple-main-wallets.mjs && npm run db:ensure-multichain-nonces && npm run db:ensure-telemetry && npm run db:seed",
+    "railway:predeploy": "npm run env:check && npm run support:certify && node scripts/allow-multiple-main-wallets.mjs && npm run db:ensure-multichain-nonces && npm run db:ensure-telemetry && npm run db:seed",
     "lint": "eslint",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "rpc:check": "node scripts/rpc-readiness.mjs"
+    "rpc:check": "node scripts/rpc-readiness.mjs",
+    "support:certify": "node --import tsx --test tests/support-certification.test.ts"
   },
   "dependencies": {
     "@opensea/sdk": "^11.8.0",

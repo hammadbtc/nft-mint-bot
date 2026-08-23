@@ -47,10 +47,14 @@ export interface MintAdapter {
   supportsArming?: boolean;
   requiresSignerForEligibility?: boolean;
   canArmPhase?: (phaseId: string) => boolean;
+  /** True only when this exact phase needs a provider-issued wallet payload
+   * before deterministic transaction construction. Mixed adapters must make
+   * this decision per phase; method presence is not a capability signal. */
+  requiresPayloadWarmup?: (collection: SupportedCollection, phaseId: string) => boolean;
   /** A fully validated, wallet-bound payload is authoritative proof that this
    * wallet may use the phase. Armed-job revalidation must not repeat a remote
    * eligibility/authentication flow on the launch-critical path. */
-  prearmedPayloadProvesEligibility?: boolean;
+  prearmedPayloadProvesEligibility?: (collection: SupportedCollection, phaseId: string) => boolean;
   /** Cheap fail-closed readiness probe for phases controlled by an owner switch. */
   pollPhaseReady?: (
     collection: SupportedCollection,

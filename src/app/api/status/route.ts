@@ -21,7 +21,9 @@ export async function GET() {
       return {
         chainId,
         name: getChain(chainId).name,
-        healthy: checks.some((item) => item.status === "up"),
+        healthy: checks.filter((item) => item.status === "up").length >= (liveTransactionsEnabled() && chainId === 4663 ? 2 : 1),
+        healthyRoutes: checks.filter((item) => item.status === "up").length,
+        requiredHealthyRoutes: liveTransactionsEnabled() && chainId === 4663 ? 2 : 1,
         endpoints: checks,
       };
     }));
@@ -61,6 +63,8 @@ export async function GET() {
       eq(schema.mintJobs.dryRun, false), inArray(schema.mintJobs.status, ["pending", "running"]), lte(schema.mintJobs.scheduledAt, imminentAt),
     ));
     const unarmedImminentJobs = unarmed?.count || 0;
+    const configuredWebSockets = runsExecutionWorker(role) ? scheduler.blockWatcher.configuredProviders : runtime?.blockWatcherConfiguredProviders || 0;
+    const webSocketRedundancyHealthy = !liveTransactionsEnabled() || configuredWebSockets >= 2;
     const stuck = await db.execute(sql<{ kind: string; count: number }>`
       select 'mint'::text as kind, count(*)::int as count from mint_jobs
       where status in ('running','confirming') and (lease_expires_at is null or lease_expires_at::timestamptz < now())
@@ -69,7 +73,7 @@ export async function GET() {
       where status in ('running','confirming') and (lease_expires_at is null or lease_expires_at::timestamptz < now())
     `);
     const stuckWork = Object.fromEntries(Array.from(stuck).map((item) => [item.kind, item.count]));
-    const ready = executionHealthy && missingLaunchTimers === 0 && unarmedImminentJobs === 0 && Object.values(stuckWork).every((count) => Number(count) === 0) && rpc.every((chain) => chain.healthy);
+    const ready = executionHealthy && webSocketRedundancyHealthy && missingLaunchTimers === 0 && unarmedImminentJobs === 0 && Object.values(stuckWork).every((count) => Number(count) === 0) && rpc.every((chain) => chain.healthy);
     const broadcastRows = Array.from(performanceRows) as unknown as Array<{
       route_label: string; samples: number; p50_ms: number | null; p95_ms: number | null; p99_ms: number | null; accepted: number;
     }>;
@@ -92,6 +96,7 @@ export async function GET() {
         missingLaunchTimers,
         unarmedImminentJobs,
         blockWatcher: runsExecutionWorker(role) ? scheduler.blockWatcher : { healthy: runtime?.blockWatcherHealthy ?? false, intentionalIdle: runtime?.blockWatcherIntentionalIdle ?? false },
+        webSocketRedundancyHealthy,
       },
       rpc,
       jobs: Object.fromEntries(counts.map((item) => [item.status, item.count])),

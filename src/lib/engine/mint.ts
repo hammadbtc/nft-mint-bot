@@ -496,7 +496,7 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
   if (!adapter?.buildTransaction || !adapter.supportsArming || !job.phaseId || (adapter.canArmPhase && !adapter.canArmPhase(job.phaseId))) throw new Error("Armed adapter is unavailable for this phase");
   const provider = getProvider(collection.chainId);
   const signer = await getSigner(job.walletId, provider);
-  if (!adapter.prearmedPayloadProvesEligibility) {
+  if (!adapter.prearmedPayloadProvesEligibility?.(collection, job.phaseId)) {
     const plan = await traceMintStage(job.id, "final-revalidation", () => inspectWalletPhases(collection, wallet.address, job.quantity, undefined, { signer }));
     const phase = plan.phases.find((item) => item.id === job.phaseId);
     const eligibility = plan.eligibility.find((item) => item.phaseId === job.phaseId);
@@ -603,7 +603,9 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   }
   if (phase.status === "upcoming" && phase.startsAt) {
     if (job.dryRun) throw new MintNotOpenError(phase.startsAt);
-    if (adapter.warmTransaction && phase.kind === "signed") {
+    const requiresPayloadWarmup = adapter.requiresPayloadWarmup?.(collection, phase.id) === true;
+    if (requiresPayloadWarmup) {
+      if (!adapter.warmTransaction) throw new Error("Phase requires payload warming but its adapter does not implement it");
       const address = await signer.getAddress();
       try {
         await traceMintStage(job.id, "payload-acquisition", () => adapter.warmTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
@@ -614,8 +616,8 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
         // time for the operator to investigate or reschedule.
         throw new Error(`Signed mint could not be armed before launch: ${safeErrorMessage(error)}`);
       }
-      if (!adapter.supportsArming || (adapter.canArmPhase && !adapter.canArmPhase(phase.id))) throw new MintNotOpenError(phase.startsAt);
     }
+    if (!adapter.supportsArming || (adapter.canArmPhase && !adapter.canArmPhase(phase.id))) throw new MintNotOpenError(phase.startsAt);
     return armMint(job, collection, phase);
   }
   const manualRetryAt = manualOpenRetryAt(phase);

@@ -8,6 +8,7 @@ export type WorkerRuntimeHeartbeat = {
   revalidationTimers: number;
   blockWatcherHealthy: boolean;
   blockWatcherIntentionalIdle: boolean;
+  blockWatcherConfiguredProviders: number;
 };
 
 export function parseWorkerRuntimeHeartbeat(value: string | null | undefined): WorkerRuntimeHeartbeat | null {
@@ -21,9 +22,10 @@ export function parseWorkerRuntimeHeartbeat(value: string | null | undefined): W
       revalidationTimers: Number.isSafeInteger(parsed.revalidationTimers) ? parsed.revalidationTimers! : 0,
       blockWatcherHealthy: parsed.blockWatcherHealthy !== false,
       blockWatcherIntentionalIdle: parsed.blockWatcherIntentionalIdle === true,
+      blockWatcherConfiguredProviders: Number.isSafeInteger(parsed.blockWatcherConfiguredProviders) ? parsed.blockWatcherConfiguredProviders! : 0,
     };
   } catch {
-    return Number.isFinite(Date.parse(value)) ? { at: value, armedTimers: 0, revalidationTimers: 0, blockWatcherHealthy: true, blockWatcherIntentionalIdle: false } : null;
+    return Number.isFinite(Date.parse(value)) ? { at: value, armedTimers: 0, revalidationTimers: 0, blockWatcherHealthy: true, blockWatcherIntentionalIdle: false, blockWatcherConfiguredProviders: 0 } : null;
   }
 }
 

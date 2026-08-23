@@ -1,6 +1,6 @@
 # MintBot product and audit handoff
 
-Last updated: 2026-08-13
+Last updated: 2026-08-23
 
 ## Product promise
 
@@ -59,6 +59,9 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 - Pending unsigned mint tasks may change wallet or quantity; the server refreshes authoritative contract phase timing during the edit. Deletion requires fresh admin approval. Armed, running, submitted, or historical work remains immutable.
 - A wallet may queue multiple projects. The scheduler orders eligible work by authoritative launch time and permits only the first task per wallet to arm/run at once; later tasks do not reserve a nonce until that wallet is free.
 - External races, sell-outs, project pauses and provider outages mean a 100% hit rate cannot be guaranteed.
+- Adapter capability is phase-specific. Payload warming and payload-based eligibility proof must never be inferred from method presence, an adapter-wide flag, or another phase using the same adapter.
+- A project seed cannot reach production unless `npm run support:certify` proves its adapter registration, execution manifest, phase ordering, signed/public field separation, and per-phase arming/payload capability matrix. Railway runs this before seeding.
+- Read-only RPC checks and unit tests are necessary but do not certify the authenticated vault-wallet job lifecycle. When that rehearsal is unavailable, readiness must be reported as blocked rather than assumed.
 
 ## Armed FCFS launch engine
 
@@ -99,6 +102,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 ## Current reviewed project state
 
 - Incident record — Rekt Tradooor Phase 2, 2026-08-21: supply was 8,183/10,000 at 17:15:00 UTC and reached 10,000 at 17:15:29. Seven eligible jobs missed the window because `opensea-signed-seadrop-v1` prohibited signed-phase arming and repeated remote phase/eligibility work after opening. Exact simulation then correctly rejected supply 10,001 over maximum 10,000, but the critical-path architecture had already failed. The adapter now requires a validated pre-open payload and creates a genuinely armed raw signed transaction; final revalidation does not repeat OpenSea authentication/eligibility. Any competitive signed launch with jobs not visibly `armed` is no-go.
+- Incident record — BigD public stage, 2026-08-23: the mixed `opensea-signed-seadrop-v1` adapter exposed a provider-payload warmer for the whole adapter while the public phase required deterministic on-chain `mintPublic`. The scheduler called the signed warmer for public and failed before transaction construction. The adapter now declares payload warming and payload-as-eligibility-proof per phase; public is explicitly false, signed is explicitly true. A cross-project certification test checks every mixed OpenSea seed, and Railway predeploy blocks contradictory phase capabilities.
 - Active seed: Cash Rabbits, `0x5b05C950993705416C9069d43Ee70b564a875e40`, OpenSea slug `cash-rabbits`, Robinhood Chain.
 - Active upcoming public-phase seed: CHIMPS HOOD, `0x3a1ACd38650397e93765BCD2D2E9714B074A482e`, OpenSea slug `chimps-hood`, Robinhood Chain. Reviewed public stage: free, maximum 5 per wallet, 5,000 max supply, 2026-08-13 14:00 UTC through 2026-08-14 14:00 UTC.
 - Active upcoming public-phase seed: WEASELS IN STOCK, `0x808ef461a7982e0517ca647070BE251f6f115fCC`, OpenSea slug `weaselsinstock`, Robinhood Chain. Reviewed FCFS public stage: 0.00008 ETH, maximum 30 per wallet, 6,666 max supply, 2026-08-13 10:05 UTC through 2026-09-12 10:05 UTC.
@@ -112,6 +116,7 @@ Implemented platform support includes `opensea-seadrop-v1` for reviewed public S
 ## Verification completed
 
 - Full ESLint pass with zero errors or warnings.
+- `npm run support:certify` is a mandatory CI/predeploy gate for every supported seed and every phase of a mixed signed/public OpenSea adapter.
 - TypeScript and optimized Next.js production build pass.
 - Drizzle schema check passes.
 - Thirty-six unit tests pass, additionally covering destructive-action password fallback, immutable attempted/non-pending mint tasks, per-wallet queued-task arbitration, signing-key-derived wallet replacement, precise non-early launch timing, direct-sequencer route order/uniqueness, provider identification, exact raw-byte submission/hash verification, canonical signed-payload hashing, supported-project search, exact Squiggle Wuiggle calldata/payment, pre-open rejection, quantity bounds, and reviewed URL/contract bindings.

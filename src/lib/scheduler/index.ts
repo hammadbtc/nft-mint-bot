@@ -242,6 +242,7 @@ async function persistWorkerHeartbeat(): Promise<void> {
     revalidationTimers: state.revalidationTimers.size,
     blockWatcherHealthy: blockWatcherFresh(watcher),
     blockWatcherIntentionalIdle: watcher.intentionalIdle === true,
+    blockWatcherConfiguredProviders: watcher.configuredProviders,
   });
   await db.insert(schema.settings).values({ key: WORKER_HEARTBEAT_KEY, value })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: now } });
