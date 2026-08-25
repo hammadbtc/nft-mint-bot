@@ -786,5 +786,72 @@
         }
       ]
     }
+  },
+  {
+    "id": "6e58d8f0-cc87-4f6f-9256-40053d87a8ab",
+    "name": "Pepe VIP",
+    "slug": "pepe-vip-official",
+    "contractAddress": "0x14044a824c814eba2757a5d99643ec6aafbda771",
+    "chainId": 4663,
+    "mintMethod": "mintSigned",
+    "mintAbi": [
+      "function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"
+    ],
+    "mintPrice": "0",
+    "maxPerWallet": 1,
+    "maxSupply": 10000,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": [
+      "opensea.io",
+      "robinhoodchain.blockscout.com"
+    ],
+    "siteUrl": "https://opensea.io/collection/pepe-vip-official/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/pepe-vip-official/image_type_logo/8b301482561a88436bf72fd35bf799/908b301482561a88436bf72fd35bf799.png",
+    "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "pepe-vip-official",
+      "stages": [
+        {
+          "id": "vip-list-fcfs",
+          "name": "VIP list (FCFS)",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-25T20:00:03.000Z",
+          "endsAt": "2026-08-25T22:00:03.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 10000,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public stage",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-25T22:00:03.000Z",
+          "endsAt": "2026-09-01T22:00:03.000Z",
+          "priceWei": "500000000000000",
+          "maxPerWallet": 5
+        }
+      ],
+      "urlMatchers": [
+        {
+          "domain": "opensea.io",
+          "path": "/collection/pepe-vip-official"
+        },
+        {
+          "domain": "opensea.io",
+          "path": "/collection/pepe-vip-official/overview"
+        },
+        {
+          "domain": "robinhoodchain.blockscout.com",
+          "path": "/address/0x14044a824c814eba2757a5d99643ec6aafbda771"
+        }
+      ]
+    }
   }
 ]
