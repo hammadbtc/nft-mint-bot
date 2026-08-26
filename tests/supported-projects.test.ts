@@ -303,3 +303,24 @@ test("BigD pins Team, GTD, and public to the reviewed OpenSea drop", () => {
   assert.ok(bigD?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/bigd-6969/overview"));
   assert.ok(bigD?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/address/0x691bb24e010a7889879c66a311b6e2dbdfaa27a1"));
 });
+
+test("Low Quality Cats pins all signed stages and the Ethereum public sale", () => {
+  const cats = seeds.find((seed) => seed.slug === "low-quality-cats");
+  assert.equal(cats?.adapterKey, "opensea-signed-seadrop-v1");
+  assert.equal(cats?.contractAddress.toLowerCase(), "0x55afd2187d7c312bf7e4ca7393a139df19f1f096");
+  assert.equal(cats?.adapterConfig.openSeaSlug, "low-quality-cats");
+  assert.deepEqual(cats?.adapterConfig.stages?.map((stage) => [stage.id, stage.kind, stage.priceWei, stage.maxPerWallet]), [
+    ["team", "signed", "0", 100],
+    ["gtd", "signed", "0", 1],
+    ["fcfs", "signed", "3500000000000000", 3],
+    ["public", "public", "5000000000000000", 10],
+  ]);
+  assert.deepEqual(cats?.adapterConfig.stages?.map((stage) => stage.dropStageIndex), [1, 2, 3, undefined]);
+  assert.deepEqual(cats?.adapterConfig.stages?.filter((stage) => stage.kind === "signed").map((stage) => [stage.maxTokenSupplyForStage, stage.feeBps, stage.restrictFeeRecipients]), [
+    [4269, 1000, true],
+    [4269, 1000, true],
+    [4269, 1000, true],
+  ]);
+  assert.ok(cats?.adapterConfig.urlMatchers?.some((matcher) => matcher.path === "/collection/low-quality-cats/overview"));
+  assert.ok(cats?.adapterConfig.urlMatchers?.some((matcher) => matcher.domain === "etherscan.io" && matcher.path === "/address/0x55afd2187d7c312bf7e4ca7393a139df19f1f096"));
+});

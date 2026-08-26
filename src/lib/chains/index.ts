@@ -59,7 +59,7 @@ const CHAINS: Record<number, ChainConfig> = {
     id: 1,
     name: "Ethereum",
     symbol: "ETH",
-    rpcUrls: uniqueRpc(al("eth-mainnet"), ...configuredRpcList("ETHEREUM"), "https://eth.llamarpc.com", "https://rpc.ankr.com/eth"),
+    rpcUrls: uniqueRpc(al("eth-mainnet"), ...configuredRpcList("ETHEREUM")),
     explorerUrl: "https://etherscan.io",
   },
   137: {

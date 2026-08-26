@@ -853,5 +853,100 @@
         }
       ]
     }
+  },
+  {
+    "id": "51d78558-19a0-4b04-841c-2326e5f9eaca",
+    "name": "Low Quality Cats",
+    "slug": "low-quality-cats",
+    "contractAddress": "0x55afd2187d7c312bf7e4ca7393a139df19f1f096",
+    "chainId": 1,
+    "mintMethod": "mintSigned",
+    "mintAbi": [
+      "function mintSigned(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity,tuple(uint256 mintPrice,uint256 maxTotalMintableByWallet,uint256 startTime,uint256 endTime,uint256 dropStageIndex,uint256 maxTokenSupplyForStage,uint256 feeBps,bool restrictFeeRecipients) mintParams,uint256 salt,bytes signature) payable"
+    ],
+    "mintPrice": "5000000000000000",
+    "maxPerWallet": 10,
+    "maxSupply": 4269,
+    "adapterKey": "opensea-signed-seadrop-v1",
+    "domains": [
+      "opensea.io",
+      "etherscan.io"
+    ],
+    "siteUrl": "https://opensea.io/collection/low-quality-cats/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/low-quality-cats/image_type_logo/4c60daf32e9fd13ce52df324c5ea04/6b4c60daf32e9fd13ce52df324c5ea04.png",
+    "adapterConfig": {
+      "engine": "scheduled-server-signed-v1",
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "openSeaSlug": "low-quality-cats",
+      "stages": [
+        {
+          "id": "team",
+          "name": "Team",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-26T16:00:00.000Z",
+          "endsAt": "2026-08-26T16:15:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 100,
+          "dropStageIndex": 1,
+          "maxTokenSupplyForStage": 4269,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "gtd",
+          "name": "Stage 1 - GTD",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-26T16:15:00.000Z",
+          "endsAt": "2026-08-26T20:15:00.000Z",
+          "priceWei": "0",
+          "maxPerWallet": 1,
+          "dropStageIndex": 2,
+          "maxTokenSupplyForStage": 4269,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "fcfs",
+          "name": "Stage 2 - FCFS",
+          "kind": "signed",
+          "stageType": "signed_presale",
+          "startsAt": "2026-08-26T20:15:00.000Z",
+          "endsAt": "2026-08-27T00:15:00.000Z",
+          "priceWei": "3500000000000000",
+          "maxPerWallet": 3,
+          "dropStageIndex": 3,
+          "maxTokenSupplyForStage": 4269,
+          "feeBps": 1000,
+          "restrictFeeRecipients": true
+        },
+        {
+          "id": "public",
+          "name": "Public Stage",
+          "kind": "public",
+          "stageType": "public_sale",
+          "startsAt": "2026-08-27T00:15:00.000Z",
+          "endsAt": "2026-09-01T00:15:00.000Z",
+          "priceWei": "5000000000000000",
+          "maxPerWallet": 10
+        }
+      ],
+      "urlMatchers": [
+        {
+          "domain": "opensea.io",
+          "path": "/collection/low-quality-cats"
+        },
+        {
+          "domain": "opensea.io",
+          "path": "/collection/low-quality-cats/overview"
+        },
+        {
+          "domain": "etherscan.io",
+          "path": "/address/0x55afd2187d7c312bf7e4ca7393a139df19f1f096"
+        }
+      ]
+    }
   }
 ]
