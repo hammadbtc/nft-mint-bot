@@ -4,6 +4,7 @@ import { ethers } from "ethers";
 import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import { executionEngineFor, executionManifestFor } from "@/lib/engines";
+import { competitiveFeeFields, reviewedFallbackGasLimit } from "@/lib/gas-policy";
 import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
 import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
@@ -132,11 +133,13 @@ async function applyGas(
   if (!estimated) throw estimatedResult.ok ? new Error("Gas estimation failed") : estimatedResult.error;
   const gasLimit = overrides?.gasLimit ? BigInt(overrides.gasLimit) : (estimated * 120n) / 100n;
   const result: ethers.TransactionRequest = { ...request, gasLimit };
+  const chainId = Number(request.chainId);
+  const automaticFees = competitiveFeeFields(chainId, fees);
   if (overrides?.maxFeePerGas) result.maxFeePerGas = BigInt(overrides.maxFeePerGas);
-  else if (fees.maxFeePerGas != null) result.maxFeePerGas = fees.maxFeePerGas * 3n;
+  else if (automaticFees.maxFeePerGas != null) result.maxFeePerGas = automaticFees.maxFeePerGas;
   if (overrides?.maxPriorityFeePerGas) result.maxPriorityFeePerGas = BigInt(overrides.maxPriorityFeePerGas);
-  else if (fees.maxPriorityFeePerGas != null) result.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
-  if (result.maxFeePerGas == null && fees.gasPrice != null) result.gasPrice = fees.gasPrice;
+  else if (automaticFees.maxPriorityFeePerGas != null) result.maxPriorityFeePerGas = automaticFees.maxPriorityFeePerGas;
+  if (result.maxFeePerGas == null && automaticFees.gasPrice != null) result.gasPrice = automaticFees.gasPrice;
   return result;
 }
 
@@ -465,7 +468,8 @@ async function armMint(
   const signer = await getSigner(job.walletId, provider);
   const address = await signer.getAddress();
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: phase.id }));
-  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
+  const fallbackGasLimit = reviewedFallbackGasLimit(collection.chainId, collection.adapterKey, job.quantity, adapter.recommendedGasLimit);
+  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, fallbackGasLimit, engine.launchTimeGasEstimation));
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
   await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
@@ -509,11 +513,46 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
   const attempt = await latestRecoverableAttempt(job.id, "mint");
   if (!attempt?.rawTx || !attempt.txHash || attempt.nonce == null) throw new Error("Armed transaction is missing");
   if (attempt.preflightHash !== transactionIntentHash(request)) throw new Error("Reviewed mint transaction changed after arming");
-  const parsed = ethers.Transaction.from(attempt.rawTx);
+  let parsed = ethers.Transaction.from(attempt.rawTx);
   if (parsed.hash?.toLowerCase() !== attempt.txHash.toLowerCase()) throw new Error("Armed transaction hash no longer matches its payload");
   if (parsed.from?.toLowerCase() !== address.toLowerCase()) throw new Error("Armed transaction signer mismatch");
   const pendingNonce = await provider.getTransactionCount(address, "pending");
   if (pendingNonce !== attempt.nonce) throw new Error("Wallet nonce changed after arming; refusing a late or blocked launch");
+  if (collection.chainId === 1) {
+    const fallbackGasLimit = reviewedFallbackGasLimit(collection.chainId, collection.adapterKey, job.quantity, adapter.recommendedGasLimit);
+    const refreshed = await traceMintStage(job.id, "gas-preparation", () => applyGas(
+      request,
+      provider,
+      address,
+      {
+        gasLimit: job.gasLimit || attempt.gasLimit,
+        maxFeePerGas: job.maxFeePerGas,
+        maxPriorityFeePerGas: job.maxPriorityFeePerGas,
+      },
+      fallbackGasLimit,
+      false,
+    ));
+    const populated = await signer.populateTransaction({ ...refreshed, nonce: attempt.nonce, chainId: collection.chainId });
+    delete populated.from;
+    const rawTx = await signer.signTransaction(populated);
+    const txHash = ethers.keccak256(rawTx);
+    parsed = ethers.Transaction.from(rawTx);
+    if (transactionIntentHash(parsed) !== attempt.preflightHash) throw new Error("Ethereum fee refresh changed the reviewed mint intent");
+    const updated = await db.update(schema.mintAttempts).set({
+      rawTx,
+      txHash,
+      gasLimit: parsed.gasLimit.toString(),
+      maxFeePerGas: parsed.maxFeePerGas?.toString() || parsed.gasPrice?.toString() || null,
+      maxPriorityFeePerGas: parsed.maxPriorityFeePerGas?.toString() || null,
+      preparedAt: new Date().toISOString(),
+      error: null,
+    }).where(and(
+      eq(schema.mintAttempts.id, attempt.id),
+      eq(schema.mintAttempts.status, "prepared"),
+      eq(schema.mintAttempts.txHash, attempt.txHash),
+    )).returning({ id: schema.mintAttempts.id });
+    if (!updated.length) throw new Error("Ethereum armed transaction changed during final fee refresh");
+  }
   await assertBalanceAndSpendLimit(job.walletId, address, parsed, provider, { jobId: job.id, kind: "mint" });
   await warmBroadcastRoutes(collection.chainId);
   await db.update(schema.mintJobs).set({ preflightCheckedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), error: null })
@@ -634,7 +673,8 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
 
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
   const engine = executionEngineFor(collection);
-  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
+  const fallbackGasLimit = reviewedFallbackGasLimit(collection.chainId, collection.adapterKey, job.quantity, adapter.recommendedGasLimit);
+  request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, fallbackGasLimit, engine.launchTimeGasEstimation));
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
   await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
