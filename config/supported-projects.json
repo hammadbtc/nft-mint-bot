@@ -948,5 +948,56 @@
         }
       ]
     }
+  },
+  {
+    "id": "ca30ee67-4bfd-4228-b033-bc6f6ce91261",
+    "name": "DUNLAPS",
+    "slug": "netnet-dunlaps",
+    "contractAddress": "0xe801b3399193ad1af4e0bbcad72a45c2ff819a8f",
+    "chainId": 4663,
+    "mintMethod": "mintPublic",
+    "mintAbi": [
+      "function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"
+    ],
+    "mintPrice": "2000000000000000",
+    "maxPerWallet": 5,
+    "maxSupply": 1105,
+    "adapterKey": "opensea-seadrop-v1",
+    "domains": [
+      "opensea.io",
+      "robinhoodchain.blockscout.com"
+    ],
+    "siteUrl": "https://opensea.io/collection/netnet-dunlaps/overview",
+    "imageUrl": "https://i2c.seadn.io/collection/dunlaps-463652091/image_type_logo/e9a6fdeedab206f33f599860d0c940/67e9a6fdeedab206f33f599860d0c940.jpeg",
+    "adapterConfig": {
+      "engine": "scheduled-public-v1",
+      "seaDropAddress": "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5",
+      "feeRecipient": "0x0000a26b00c1F0DF003000390027140000fAa719",
+      "publicPhaseName": "Public Mint",
+      "phases": [
+        {
+          "id": "public",
+          "name": "Public Mint",
+          "startsAt": "2026-08-28T22:00:00.000Z",
+          "endsAt": "2026-08-29T04:00:00.000Z",
+          "priceWei": "2000000000000000",
+          "maxPerWallet": 5
+        }
+      ],
+      "urlMatchers": [
+        {
+          "domain": "opensea.io",
+          "path": "/collection/netnet-dunlaps"
+        },
+        {
+          "domain": "opensea.io",
+          "path": "/collection/netnet-dunlaps/overview"
+        },
+        {
+          "domain": "robinhoodchain.blockscout.com",
+          "path": "/address/0xe801b3399193ad1af4e0bbcad72a45c2ff819a8f"
+        }
+      ]
+    }
   }
 ]
