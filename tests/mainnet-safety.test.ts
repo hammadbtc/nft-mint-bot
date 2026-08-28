@@ -93,14 +93,18 @@ test("exact simulation always includes the signing wallet as from", () => {
   assert.equal(request.from, "0x0000000000000000000000000000000000000002");
 });
 
-test("live broadcasting requires two independent explicit gates", () => {
+test("live broadcasting requires the emergency stop override and two explicit gates", () => {
+  const previousEmergencyStop = process.env.MINTBOT_EMERGENCY_STOP;
   const previousEnabled = process.env.ENABLE_LIVE_TRANSACTIONS;
   const previousConfirmed = process.env.LIVE_TRANSACTIONS_CONFIRMED;
   process.env.ENABLE_LIVE_TRANSACTIONS = "true";
+  process.env.LIVE_TRANSACTIONS_CONFIRMED = "I_UNDERSTAND";
+  assert.equal(liveTransactionsEnabled(), false);
+  process.env.MINTBOT_EMERGENCY_STOP = "CLEARED_BY_OPERATOR";
+  assert.equal(liveTransactionsEnabled(), true);
   process.env.LIVE_TRANSACTIONS_CONFIRMED = "";
   assert.equal(liveTransactionsEnabled(), false);
-  process.env.LIVE_TRANSACTIONS_CONFIRMED = "I_UNDERSTAND";
-  assert.equal(liveTransactionsEnabled(), true);
+  if (previousEmergencyStop === undefined) delete process.env.MINTBOT_EMERGENCY_STOP; else process.env.MINTBOT_EMERGENCY_STOP = previousEmergencyStop;
   if (previousEnabled === undefined) delete process.env.ENABLE_LIVE_TRANSACTIONS; else process.env.ENABLE_LIVE_TRANSACTIONS = previousEnabled;
   if (previousConfirmed === undefined) delete process.env.LIVE_TRANSACTIONS_CONFIRMED; else process.env.LIVE_TRANSACTIONS_CONFIRMED = previousConfirmed;
 });

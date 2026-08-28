@@ -11,7 +11,10 @@ const SECRET_PATTERNS: RegExp[] = [
 ];
 
 export function liveTransactionsEnabled(): boolean {
-  return process.env.ENABLE_LIVE_TRANSACTIONS === "true"
+  // Fail closed after the 2026-08-28 operator emergency stop. Re-enabling
+  // broadcasting requires an additional, deliberate deployment-time override.
+  return process.env.MINTBOT_EMERGENCY_STOP === "CLEARED_BY_OPERATOR"
+    && process.env.ENABLE_LIVE_TRANSACTIONS === "true"
     && process.env.LIVE_TRANSACTIONS_CONFIRMED === "I_UNDERSTAND";
 }
 
