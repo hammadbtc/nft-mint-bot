@@ -26,7 +26,7 @@ Only the public phase is supported. Earlier Project Mint and Net Net Stakers sig
 - Signing wallet used for local certification: ephemeral offline test signer; production wallet rehearsal remains required
 - `to`: `0x00005EA00Ac477B1030CE78506496e8C2dE24bf5`
 - `chainId`: `4663`
-- `value`: `2000000000000000` wei per item; five items = `10000000000000000` wei
+- `value`: `2000000000000000` wei per item; two items = `4000000000000000` wei
 - Function: `mintPublic(collection, feeRecipient, address(0), quantity)`
 - Collection argument: `0xe801b3399193ad1af4e0bbcad72a45c2ff819a8f`
 - Fee recipient: `0x0000a26b00c1F0DF003000390027140000fAa719`; confirmed on-chain allowed
@@ -46,7 +46,7 @@ Only the public phase is supported. Earlier Project Mint and Net Net Stakers sig
 - Supply at review: 229 / 1,105
 - Public start/end: `2026-08-28T22:00:00.000Z` / `2026-08-29T04:00:00.000Z`
 - Price: 0.002 ETH
-- Public wallet cap: 5
+- Public wallet cap: 2 (updated on-chain/OpenSea after initial review)
 - Fee: 1,000 bps; restricted reviewed fee recipient is allowed
 - Batched public RPC read latency observed locally: 1,238 ms
 

@@ -960,7 +960,7 @@
       "function mintPublic(address nftContract,address feeRecipient,address minterIfNotPayer,uint256 quantity) payable"
     ],
     "mintPrice": "2000000000000000",
-    "maxPerWallet": 5,
+    "maxPerWallet": 2,
     "maxSupply": 1105,
     "adapterKey": "opensea-seadrop-v1",
     "domains": [
@@ -981,7 +981,7 @@
           "startsAt": "2026-08-28T22:00:00.000Z",
           "endsAt": "2026-08-29T04:00:00.000Z",
           "priceWei": "2000000000000000",
-          "maxPerWallet": 5
+          "maxPerWallet": 2
         }
       ],
       "urlMatchers": [
