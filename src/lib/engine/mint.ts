@@ -355,7 +355,13 @@ async function executeOnePerTransactionLadder(args: {
 
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, 1, provider, { phaseId: phase.id }));
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
-  await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
+  try {
+    await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
+  } catch (error) {
+    const retryAt = adapter.simulationRetryAt?.(error);
+    if (retryAt) throw new MintNotOpenError(retryAt, null);
+    throw error;
+  }
   if (adapter.revalidateBeforeSigning) {
     await traceMintStage(job.id, "final-revalidation", () => adapter.revalidateBeforeSigning!(collection, address, 1, provider, request, { phaseId: phase.id }));
   }
@@ -768,7 +774,10 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
           claimedAt: null,
           leaseExpiresAt: null,
         }).where(eq(schema.mintJobs.id, jobId));
-        await sendAlert("job_failed", `Mint job ${jobId.slice(0, 8)} failed: ${message}`, jobId);
+        const [collection] = await db.select().from(schema.collections)
+          .where(eq(schema.collections.id, initial.collectionId)).limit(1);
+        const suppressAlert = collection ? getMintAdapter(collection.adapterKey)?.suppressFailureAlerts === true : false;
+        if (!suppressAlert) await sendAlert("job_failed", `Mint job ${jobId.slice(0, 8)} failed: ${message}`, jobId);
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(8_000, 500 * 2 ** attempt)));

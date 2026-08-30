@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ethers } from "ethers";
-import { cookiezFreeV1, encodeCookiezFreeClaim } from "../src/lib/adapters/cookiez-free-v1";
+import { cookiezFreeV1, cookiezSimulationRetryAt, encodeCookiezFreeClaim } from "../src/lib/adapters/cookiez-free-v1";
 import { executionEngineFor, executionManifestFor } from "../src/lib/engines";
 
 const contractAddress = "0x4ba87e60e52c19c1da7dab74414deac4e237c23a";
@@ -74,4 +74,13 @@ test("COOKIEZ fails closed when mint is shut or conservative wallet room is exha
   await assert.rejects(() => cookiezFreeV1.buildTransaction!(collection, signer, 1, fakeProvider({ mintOpen: false }), { phaseId: "free" }), /not open/);
   await assert.rejects(() => cookiezFreeV1.buildTransaction!(collection, signer, 1, fakeProvider({ balance: 5n }), { phaseId: "free" }), /capacity/);
   await assert.rejects(() => cookiezFreeV1.buildTransaction!(collection, signer, 2, fakeProvider(), { phaseId: "free" }), /Unsupported/);
+});
+
+test("COOKIEZ retries only the exact TooSoon throttle error and suppresses its failure webhook", () => {
+  const now = Date.parse("2026-08-30T23:46:00.000Z");
+  assert.equal(cookiezSimulationRetryAt({ data: "0x6fed7d85" }, now), "2026-08-30T23:46:00.350Z");
+  assert.equal(cookiezSimulationRetryAt({ info: { error: { data: "0x6FED7D85" } } }, now), "2026-08-30T23:46:00.350Z");
+  assert.equal(cookiezSimulationRetryAt(new Error('execution reverted (data="0x6fed7d85")'), now), "2026-08-30T23:46:00.350Z");
+  assert.equal(cookiezSimulationRetryAt({ data: "0x951b974f" }, now), null);
+  assert.equal(cookiezFreeV1.suppressFailureAlerts, true);
 });

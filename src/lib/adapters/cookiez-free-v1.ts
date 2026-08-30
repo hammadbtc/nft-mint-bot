@@ -10,6 +10,7 @@ const READ_ABI = [
   "function balanceOf(address) view returns (uint256)",
 ];
 const MINT_ABI = ["function claimFree()"];
+const TOO_SOON_ERROR = ethers.id("TooSoon()").slice(0, 10).toLowerCase();
 
 type CookiezConfig = {
   expectedMaxSupply: number;
@@ -71,8 +72,13 @@ function assertRequest(collection: SupportedCollection, request: ethers.Transact
 
 export const cookiezFreeV1: MintAdapter = {
   key: "cookiez-free-v1",
+  suppressFailureAlerts: true,
   supportsArming: false,
   recommendedGasLimit: 240_000n,
+
+  simulationRetryAt(error, nowMs = Date.now()) {
+    return cookiezSimulationRetryAt(error, nowMs);
+  },
 
   async pollPhaseReady(collection, phaseId, provider) {
     if (phaseId !== "free") return false;
@@ -142,4 +148,20 @@ export const cookiezFreeV1: MintAdapter = {
 
 export function encodeCookiezFreeClaim(): string {
   return new ethers.Interface(MINT_ABI).encodeFunctionData("claimFree");
+}
+
+export function cookiezSimulationRetryAt(error: unknown, nowMs = Date.now()): string | null {
+  const seen = new Set<unknown>();
+  const visit = (value: unknown, depth = 0): boolean => {
+    if (depth > 5 || value == null || seen.has(value)) return false;
+    seen.add(value);
+    if (typeof value === "string") return value.toLowerCase().includes(TOO_SOON_ERROR);
+    if (typeof value !== "object") return false;
+    const record = value as Record<string, unknown>;
+    return [record.data, record.message, record.shortMessage, record.reason, record.error, record.info]
+      .some((item) => visit(item, depth + 1));
+  };
+  // One global free claim is released each second. A 350ms poll avoids a busy
+  // loop while still reaching the first eligible block quickly.
+  return visit(error) ? new Date(nowMs + 350).toISOString() : null;
 }
