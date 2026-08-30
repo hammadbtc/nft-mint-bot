@@ -24,6 +24,9 @@ type Seed = {
     expectedInventory?: number;
     expectedMintPriceWei?: string;
     expectedMaxPerWallet?: number;
+    expectedFreePerWallet?: number;
+    expectedValueWei?: string;
+    engine?: string;
     expectedMerkleRoot?: string;
     expectedMaxSupply?: number;
     expectedReserveSupply?: number;
@@ -57,7 +60,7 @@ test("reviewed project seeds have unique identities and exact URL matchers", () 
   assert.equal(new Set(resolvableContracts).size, resolvableContracts.length);
   for (const seed of seeds) {
     assert.equal(ethers.isAddress(seed.contractAddress), true);
-    assert.ok(["opensea-seadrop-v1", "opensea-signed-seadrop-v1", "squiggle-wuiggle-v1", "bulls-runners-v1", "terminal-assistants-v1"].includes(seed.adapterKey));
+    assert.ok(["opensea-seadrop-v1", "opensea-signed-seadrop-v1", "squiggle-wuiggle-v1", "bulls-runners-v1", "terminal-assistants-v1", "cookiez-free-v1"].includes(seed.adapterKey));
     if (seed.adapterKey.startsWith("opensea-")) {
       assert.equal(typeof seed.adapterConfig.seaDropAddress === "string" && ethers.isAddress(seed.adapterConfig.seaDropAddress), true);
       assert.equal(typeof seed.adapterConfig.feeRecipient === "string" && ethers.isAddress(seed.adapterConfig.feeRecipient), true);
@@ -74,6 +77,11 @@ test("reviewed project seeds have unique identities and exact URL matchers", () 
       assert.equal(seed.adapterConfig.expectedReserveSupply, 420);
       assert.equal(seed.adapterConfig.expectedWhitelistCount, 4880);
       assert.equal(seed.adapterConfig.whitelistUrl, "https://bullsrunners.com/whitelist.json");
+    } else if (seed.adapterKey === "cookiez-free-v1") {
+      assert.equal(seed.adapterConfig.expectedMaxSupply, 10000);
+      assert.equal(seed.adapterConfig.expectedFreePerWallet, 5);
+      assert.equal(seed.adapterConfig.expectedValueWei, "0");
+      assert.equal(seed.adapterConfig.engine, "sequential-confirmed-v1");
     } else {
       assert.equal(seed.adapterConfig.expectedMaxSupply, 6666);
       assert.equal(seed.adapterConfig.expectedMintPriceWei, "1300000000000000");

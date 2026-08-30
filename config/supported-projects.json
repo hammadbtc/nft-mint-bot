@@ -1,5 +1,40 @@
 [
   {
+    "id": "c00c1e20-7ba1-4663-9000-000000000005",
+    "name": "COOKIEZ — Free BAKER Claim",
+    "slug": "cookiez-free-baker",
+    "contractAddress": "0x4ba87e60e52c19c1da7dab74414deac4e237c23a",
+    "chainId": 4663,
+    "mintMethod": "claimFree",
+    "mintAbi": [
+      "function claimFree()"
+    ],
+    "mintPrice": "0",
+    "maxPerWallet": 5,
+    "maxSupply": 10000,
+    "adapterKey": "cookiez-free-v1",
+    "domains": [
+      "cookiez.fun",
+      "www.cookiez.fun",
+      "robinhoodchain.blockscout.com"
+    ],
+    "siteUrl": "https://www.cookiez.fun/#mint",
+    "imageUrl": null,
+    "adapterConfig": {
+      "engine": "sequential-confirmed-v1",
+      "onePerTransaction": true,
+      "maxPreparedTransactions": 5,
+      "expectedMaxSupply": 10000,
+      "expectedFreePerWallet": 5,
+      "expectedValueWei": "0",
+      "urlMatchers": [
+        { "domain": "cookiez.fun", "path": "/" },
+        { "domain": "www.cookiez.fun", "path": "/" },
+        { "domain": "robinhoodchain.blockscout.com", "path": "/address/0x4ba87e60e52c19c1da7dab74414deac4e237c23a" }
+      ]
+    }
+  },
+  {
     "id": "14a790d9-1ad8-42e4-8bb8-f8d6ae903915",
     "name": "Cash Rabbits",
     "slug": "cash-rabbits",

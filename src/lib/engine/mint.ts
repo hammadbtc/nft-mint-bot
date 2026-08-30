@@ -325,6 +325,10 @@ async function executeOnePerTransactionLadder(args: {
   const manifest = executionManifestFor(collection);
   const engine = executionEngineFor(collection);
   if (!manifest.onePerTransaction || !job.batchId || !job.phaseId) return null;
+  // Sequential-confirmed engines intentionally let the wallet scheduler run
+  // one sibling at a time. The next claim is not signed until the previous
+  // receipt is confirmed, which is required for globally throttled mints.
+  if (!engine.supportsNonceLadder && engine.supportsSequentialTransactions) return null;
   const siblings = await db.select().from(schema.mintJobs).where(and(
     eq(schema.mintJobs.batchId, job.batchId), eq(schema.mintJobs.walletId, job.walletId),
     eq(schema.mintJobs.collectionId, job.collectionId), eq(schema.mintJobs.phaseId, job.phaseId),
@@ -790,6 +794,7 @@ export async function batchMint(
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
   if (quantity < 1) throw new Error("Mint quantity must be positive");
   const manifest = executionManifestFor(collection);
+  const engine = executionEngineFor(collection);
   const transactionsPerPlan = manifest.onePerTransaction ? quantity : 1;
   const transactionQuantity = manifest.onePerTransaction ? 1 : quantity;
   if (manifest.onePerTransaction && transactionsPerPlan > (manifest.maxPreparedTransactions || 1)) {
@@ -799,7 +804,7 @@ export async function batchMint(
     ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, uniqueWalletIds))
     : [];
   if (wallets.length !== uniqueWalletIds.length) throw new Error("One or more selected wallets were not found");
-  if (manifest.onePerTransaction && transactionsPerPlan > 1 && wallets.some((wallet) => wallet.role !== "worker")) {
+  if (manifest.onePerTransaction && transactionsPerPlan > 1 && engine.requiresDedicatedWalletForLadder && wallets.some((wallet) => wallet.role !== "worker")) {
     throw new Error("Sequential nonce-ladder mode requires dedicated worker wallets; main wallets may schedule one transaction only");
   }
   const parentIds = [...new Set(wallets.flatMap((wallet) => wallet.role === "worker" && wallet.parentWalletId ? [wallet.parentWalletId] : []))];

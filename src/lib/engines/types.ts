@@ -2,6 +2,7 @@ export type ExecutionEngineKey =
   | "scheduled-public-v1"
   | "scheduled-server-signed-v1"
   | "stealth-owner-switch-v1"
+  | "sequential-confirmed-v1"
   | "custom-reviewed-v1";
 
 export type DetectionMode = "precise-timer" | "provider-payload" | "owner-switch";
@@ -14,6 +15,7 @@ export type ExecutionEngineProfile = {
   preparation: PreparationMode;
   broadcast: BroadcastMode;
   supportsNonceLadder: boolean;
+  supportsSequentialTransactions?: boolean;
   requiresDedicatedWalletForLadder: boolean;
   launchTimeGasEstimation: boolean;
   finalPinnedStateRequired: boolean;
