@@ -11,6 +11,7 @@ const READ_ABI = [
 ];
 const MINT_ABI = ["function claimFree()"];
 const TOO_SOON_ERROR = ethers.id("TooSoon()").slice(0, 10).toLowerCase();
+const CLAIM_FREE_SELECTOR = ethers.id("claimFree()").slice(0, 10).toLowerCase();
 
 type CookiezConfig = {
   expectedMaxSupply: number;
@@ -26,7 +27,7 @@ function configFor(collection: SupportedCollection): CookiezConfig {
   const config = value as Partial<CookiezConfig>;
   if (config.expectedMaxSupply !== 10_000) throw new Error("COOKIEZ reviewed maximum supply must be 10,000");
   if (config.expectedFreePerWallet !== 5) throw new Error("COOKIEZ reviewed free wallet cap must be five");
-  if (config.expectedMintIntervalSecs !== 5) throw new Error("COOKIEZ reviewed free interval must be five seconds");
+  if (config.expectedMintIntervalSecs !== 10) throw new Error("COOKIEZ reviewed free interval must be ten seconds");
   if (config.expectedValueWei !== "0") throw new Error("COOKIEZ free claim value must be zero");
   return config as CookiezConfig;
 }
@@ -154,16 +155,24 @@ export function encodeCookiezFreeClaim(): string {
 
 export function cookiezSimulationRetryAt(error: unknown, nowMs = Date.now()): string | null {
   const seen = new Set<unknown>();
-  const visit = (value: unknown, depth = 0): boolean => {
-    if (depth > 5 || value == null || seen.has(value)) return false;
+  const messages: string[] = [];
+  const visit = (value: unknown, depth = 0): void => {
+    if (depth > 5 || value == null || seen.has(value)) return;
     seen.add(value);
-    if (typeof value === "string") return value.toLowerCase().includes(TOO_SOON_ERROR);
-    if (typeof value !== "object") return false;
+    if (typeof value === "string") { messages.push(value.toLowerCase()); return; }
+    if (typeof value !== "object") return;
     const record = value as Record<string, unknown>;
-    return [record.data, record.message, record.shortMessage, record.reason, record.cause, record.error, record.info]
-      .some((item) => visit(item, depth + 1));
+    [record.data, record.message, record.shortMessage, record.reason, record.cause, record.error, record.info, record.transaction]
+      .forEach((item) => visit(item, depth + 1));
   };
-  // One global free claim is currently released every five seconds. Poll once
+  visit(error);
+  const exactTooSoon = messages.some((message) => message.includes(TOO_SOON_ERROR));
+  // Robinhood RPC occasionally strips custom-error revert data. Accept that
+  // narrow transport failure only when the error still identifies the exact
+  // reviewed claimFree() calldata; arbitrary missing-data reverts fail closed.
+  const strippedClaimRevert = messages.some((message) => message.includes("missing revert data"))
+    && messages.some((message) => message.includes(CLAIM_FREE_SELECTOR));
+  // One global free claim is currently released every ten seconds. Poll once
   // per second so the bot stays responsive without hammering the RPC.
-  return visit(error) ? new Date(nowMs + 1_000).toISOString() : null;
+  return exactTooSoon || strippedClaimRevert ? new Date(nowMs + 1_000).toISOString() : null;
 }

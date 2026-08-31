@@ -78,7 +78,7 @@ export default function CookiezQuickClaimPage() {
     <section className="panel mint-card">
       <div className="mint-body"><div className="mint-grid">
         <div className="phase-list">
-          <div className="phase"><div className="phase-top"><h3>FREE BAKER AUTOMATION</h3><span className="status">Live</span></div><p className="muted">One global claim opens every five seconds. MintBot simulates from your wallet, treats only <span className="mono">TooSoon()</span> as a wait, signs locally and waits for confirmation before continuing.</p></div>
+          <div className="phase"><div className="phase-top"><h3>FREE BAKER AUTOMATION</h3><span className="status">Live</span></div><p className="muted">One global claim opens every ten seconds. MintBot simulates from your wallet, treats only the exact throttle response as a wait, signs locally and waits for confirmation before continuing.</p></div>
           <div className="phase"><div className="phase-top"><h3>Current selection</h3><span className="muted">Gas only</span></div><div className="summary-line"><span>Wallet</span><b>{selectedWallet ? `${selectedWallet.label} · ${short(selectedWallet.address)}` : "None"}</b></div><div className="summary-line"><span>Confirmed in recent tasks</span><b>{confirmed}</b></div><div className="summary-line"><span>Queued / armed / active</span><b>{active}</b></div><div className="summary-line"><span>Failed recent tasks</span><b>{failed}</b></div></div>
         </div>
         <div className="schedule-box">

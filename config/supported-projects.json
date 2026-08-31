@@ -26,7 +26,7 @@
       "maxPreparedTransactions": 5,
       "expectedMaxSupply": 10000,
       "expectedFreePerWallet": 5,
-      "expectedMintIntervalSecs": 5,
+      "expectedMintIntervalSecs": 10,
       "expectedValueWei": "0",
       "urlMatchers": [
         { "domain": "cookiez.fun", "path": "/" },

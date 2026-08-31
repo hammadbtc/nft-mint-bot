@@ -767,7 +767,7 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
         return;
       }
 
-      // COOKIEZ can lose the single global five-second slot between any two
+      // COOKIEZ can lose the single global ten-second slot between any two
       // RPC stages (gas estimation, simulation, signing, or broadcast). Treat
       // the adapter's exact TooSoon() selector as a scheduler wait regardless
       // of which stage surfaced it; every other revert still fails closed.
