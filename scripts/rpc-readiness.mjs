@@ -8,6 +8,10 @@ const chains = [
   { id: 56, name: "BNB Chain", env: "BNB_RPC_URLS" },
   { id: 43114, name: "Avalanche", env: "AVALANCHE_RPC_URLS" },
 ];
+if (process.env.EXTRA_CHAINS_JSON?.trim()) {
+  const extras = JSON.parse(process.env.EXTRA_CHAINS_JSON);
+  for (const entry of extras) chains.push({ id: entry.id, name: entry.name, urls: entry.rpcUrls });
+}
 
 const list = (name) => (process.env[name] || "").split(",").map((value) => value.trim()).filter(Boolean);
 const label = (raw) => {
@@ -38,7 +42,7 @@ async function call(url, method) {
 
 let failed = false;
 for (const chain of chains) {
-  const urls = [...new Set([...(chain.named || []).flatMap(list), ...list(chain.env), ...(chain.public ? [chain.public] : [])])];
+  const urls = [...new Set([...(chain.named || []).flatMap(list), ...(chain.env ? list(chain.env) : []), ...(chain.urls || []), ...(chain.public ? [chain.public] : [])])];
   if (!urls.length) continue;
   for (const url of urls) {
     const started = performance.now();

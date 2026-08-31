@@ -34,3 +34,47 @@ test("proxy rejects cross-site browser mutations even with valid auth", () => {
     if (previousPassword === undefined) delete process.env.APP_ACCESS_PASSWORD; else process.env.APP_ACCESS_PASSWORD = previousPassword;
   }
 });
+
+test("proxy applies nonce-based script and style-element CSP without unsafe inline scripts", () => {
+  const response = proxy(new NextRequest("https://mint.example/api/live"));
+  const policy = response.headers.get("content-security-policy") || "";
+  assert.match(policy, /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/);
+  assert.match(policy, /style-src-elem 'self' 'nonce-[^']+'/);
+  assert.doesNotMatch(policy, /script-src[^;]*'unsafe-inline'/);
+  assert.match(response.headers.get("x-middleware-request-content-security-policy") || "", /nonce-/);
+});
+
+test("proxy caps authenticated mutation bodies before route parsing", () => {
+  const previousPassword = process.env.APP_ACCESS_PASSWORD;
+  process.env.APP_ACCESS_PASSWORD = "a-secure-test-password";
+  try {
+    const authorization = `Basic ${Buffer.from("mintbot:a-secure-test-password").toString("base64")}`;
+    const response = proxy(new NextRequest("https://mint.example/api/jobs/batch", {
+      method: "POST",
+      headers: { authorization, "content-length": "1000001" },
+    }));
+    assert.equal(response.status, 413);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+  } finally {
+    if (previousPassword === undefined) delete process.env.APP_ACCESS_PASSWORD; else process.env.APP_ACCESS_PASSWORD = previousPassword;
+  }
+});
+
+test("proxy rejects unbounded mutation streams", () => {
+  const response = proxy(new NextRequest("https://mint.example/api/jobs/batch", {
+    method: "POST",
+    body: "{}",
+    headers: { "transfer-encoding": "chunked" },
+  }));
+  assert.equal(response.status, 411);
+});
+
+test("proxy rate-limits unauthenticated public health probe floods", () => {
+  const headers = { "x-forwarded-for": "203.0.113.77" };
+  for (let index = 0; index < 120; index += 1) {
+    assert.notEqual(proxy(new NextRequest("https://mint.example/api/health", { headers })).status, 429);
+  }
+  const response = proxy(new NextRequest("https://mint.example/api/health", { headers }));
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "60");
+});

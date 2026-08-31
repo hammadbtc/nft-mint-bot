@@ -18,7 +18,7 @@ for a one-service migration, but it is not the final V2 production layout.
 
 `railway.json` configures Railpack, one replica, the production build, pre-deploy environment validation/schema sync, `/api/health`, and restart-on-failure behavior. Generate a public domain for the MintBot service after the first successful deployment.
 
-Predeploy runs `npm run support:certify` before any supported-project seed is written. A phase-capability contradiction, unregistered adapter, invalid execution manifest, malformed signed stage, or mixed signed/public classification error must fail deployment and leave the previous production release active.
+Predeploy runs the regression gates and database hardening before supported-project drafts are staged. A phase-capability contradiction, unregistered adapter, invalid execution manifest, malformed signed stage, or mixed signed/public classification error must fail deployment and leave the previous production release active. Staging is intake-only: it cannot overwrite live execution fields, certify, activate, or release a project.
 
 ## Required variables
 
@@ -53,6 +53,10 @@ Use the first hex value for `VAULT_PASSPHRASE`, the second for `SUPPORT_ADMIN_TO
 
 Never change `VAULT_PASSPHRASE` after wallets have been imported or generated; changing it makes existing encrypted keys unreadable. Store it outside Railway as a secure backup.
 
+The first hardened rollout encrypts any persisted mint and Disperse signed payloads before either service starts. Historical database backups taken before that rollout may still contain broadcastable raw transactions; retain or expire those backups according to the secret-backup policy, and keep broadcasting paused until both web and worker run the hardened commit.
+
+That rollout also pauses collections whose only authority is a legacy deploy-time seed certificate. This does not fail infrastructure health while the collection is safely paused, but the collection cannot schedule, execute, or be released until `support:certify-definition` produces a fresh certificate for the deployed commit.
+
 ## Recommended variables
 
 ```env
@@ -69,7 +73,7 @@ ROBINHOOD_CHAINSTACK_WS_URL=<optional independent Chainstack WebSocket endpoint>
 
 Named endpoints are used for both read failover and concurrent same-hash writes and appear by provider name in latency telemetry. Robinhood provider order is Alchemy first, QuickNode second, additional configured routes next, and the official public HTTPS RPC last. The public endpoint does not provide the launch WebSocket subscription. Quota and rate-limit responses temporarily quarantine only the affected HTTPS route. Never commit provider URLs: credentials are commonly embedded in the path or query string. Only configure a dRPC URL when the account has an actual Robinhood endpoint; an account balance without Robinhood network access is not usable.
 
-When live transactions are enabled, environment validation and readiness require at least two independent WebSocket providers, and readiness requires at least two healthy Robinhood HTTPS routes. Intentional WebSocket idle remains healthy only outside launch demand; lack of configured redundancy does not.
+When live transactions are enabled, environment validation and readiness require at least two independent WebSocket providers, and readiness requires at least two healthy HTTPS routes for every active chain. Intentional WebSocket idle remains healthy only outside launch demand; lack of configured redundancy does not.
 
 ## Demand-aware WebSocket usage
 
@@ -81,7 +85,7 @@ The scheduler remains online continuously, but the paid `newHeads` WebSocket sub
 - an `armed`, `running`, or `confirming` job: stay connected until terminal;
 - several jobs: disconnect only after all launch-critical work is terminal.
 
-This state is derived from PostgreSQL, so a worker restart inside the one-hour window reconnects automatically. A database error also fails toward launch safety by connecting. Intentional idle is reported separately from a provider outage in `/api/health`; it must not make Railway reject a healthy deployment.
+This state is derived from PostgreSQL, so a worker restart inside the one-hour window reconnects automatically. A database error also fails toward launch safety by connecting. Intentional idle is accounted for by the aggregate `/api/health` result and is reported separately in authenticated `/api/status` diagnostics.
 
 Use the per-chain `<CHAIN>_RPC_URLS` variables from `.env.example` for independent HTTPS routes on Ethereum, Polygon, Arbitrum, Optimism, Base, BNB Chain, and Avalanche. Before launch, run `npm run rpc:check`; it performs only `eth_chainId` and `eth_blockNumber` reads and never signs or broadcasts a transaction.
 
@@ -126,7 +130,7 @@ Scheduling and Disperse queueing remain available while this gate is locked. The
 8. Open the domain and sign in with `APP_ACCESS_USER` / `APP_ACCESS_PASSWORD`.
 9. Keep one replica and live transactions disabled until testnet validation.
 
-For every newly supported live mint, also verify the deployed commit in `/api/health`, complete `docs/MINT_SUPPORT_CERTIFICATION_TEMPLATE.md`, and inspect the intended jobs. A scheduled competitive launch is not ready until each intended job is `armed`, the raw transaction/hash is persisted, timers are present, the worker heartbeat is fresh, and WebSocket demand is active. Public health with zero armed jobs is evidence of infrastructure health only, not launch certification.
+For every newly supported live mint, verify the deployed commit in authenticated `/api/status`, complete `docs/MINT_SUPPORT_CERTIFICATION_TEMPLATE.md`, and inspect the intended jobs. `/api/health` intentionally exposes only aggregate status, service, and version. A scheduled competitive launch is not ready until each intended job is `armed`, its encrypted signed transaction and public hash are persisted, timers are present, the worker heartbeat is fresh, and WebSocket demand is active. Public health with zero armed jobs is evidence of infrastructure health only, not launch certification.
 
 ## Troubleshooting
 

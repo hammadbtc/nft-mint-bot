@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import ClientLayout from "./client-layout";
+import { connection } from "next/server";
 
 export const metadata: Metadata = {
   title: "MintBot — effortless multi-wallet minting",
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
   icons: { icon: "/logo.png", apple: "/logo.png" },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await connection();
   return <ClientLayout>{children}</ClientLayout>;
 }

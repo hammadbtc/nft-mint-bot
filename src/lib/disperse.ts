@@ -6,6 +6,7 @@ import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
 import { broadcastPreparedTransaction, prepareSignedTransaction, prepareSignedTransactionBatch, waitForReceipt } from "@/lib/transactions";
 import { liveTransactionsEnabled, requireLiveTransactions, safeErrorMessage, stableHash, stableJson } from "@/lib/safety";
+import { openSignedTransaction, sealSignedTransaction } from "@/lib/signed-transaction-vault";
 
 const PREVIEW_TTL_MS = 60_000;
 const OPERATION_LEASE_MS = 120_000;
@@ -262,7 +263,7 @@ async function runTransfer(transferId: string, chainId: number): Promise<"confir
   const currentFee = fees.maxFeePerGas ?? fees.gasPrice;
   if (currentFee == null || currentFee > BigInt(transfer.maxFeePerGas || "0")) throw new Error("Network fee exceeded the reviewed cap; create a fresh Disperse preview");
 
-  let rawTx = transfer.rawTx;
+  let rawTx = transfer.rawTx ? openSignedTransaction(transfer.rawTx) : null;
   let txHash = transfer.txHash;
   if (!rawTx || !txHash) {
     const request: ethers.TransactionRequest = {
@@ -282,7 +283,7 @@ async function runTransfer(transferId: string, chainId: number): Promise<"confir
       const updated = await tx.update(schema.disperseTransfers).set({
         status: "prepared",
         nonce: signed.nonce,
-        rawTx: signed.rawTx,
+        rawTx: sealSignedTransaction(signed.rawTx),
         txHash: signed.txHash,
         preparedAt: new Date().toISOString(),
         error: null,
@@ -365,7 +366,7 @@ async function submitFundingNonceLadder(
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
       const updated = await tx.update(schema.disperseTransfers).set({
-        status: "prepared", nonce: item.nonce, rawTx: item.rawTx, txHash: item.txHash,
+        status: "prepared", nonce: item.nonce, rawTx: sealSignedTransaction(item.rawTx), txHash: item.txHash,
         preparedAt: new Date().toISOString(), error: null,
       }).where(and(eq(schema.disperseTransfers.id, pending[index]!.id), eq(schema.disperseTransfers.status, "pending"), isNull(schema.disperseTransfers.nonce)))
         .returning({ id: schema.disperseTransfers.id });

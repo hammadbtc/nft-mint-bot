@@ -58,7 +58,13 @@ export async function POST(req: NextRequest) {
           WALLET_ELIGIBILITY_TIMEOUT_MS,
           "OpenSea eligibility check timed out",
         );
-        const displayedPhases = plan.phases.map((phase) => ({ ...phase, eligibility: plan.eligibility.find((item) => item.phaseId === phase.id) }));
+        const displayedPhases = plan.phases.map((phase) => {
+          const result = plan.eligibility.find((item) => item.phaseId === phase.id);
+          return {
+            ...phase,
+            eligibility: result ? { phaseId: result.phaseId, status: result.status, reason: result.reason } : undefined,
+          };
+        });
         const unavailable = plan.eligibility.find((item) => ["unknown", "unsupported"].includes(item.status));
         try {
           const selectedPhase = selectEligibleExecutionPhase(plan.phases, plan.eligibility);

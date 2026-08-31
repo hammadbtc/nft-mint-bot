@@ -3,6 +3,9 @@ import { getProvider } from "@/lib/chains";
 import { getOpenSeaDropEligibilityForSigner, withOpenSeaApi } from "@/lib/opensea-auth";
 import { openseaSeaDropV1 } from "./opensea-seadrop-v1";
 import { stableHash } from "@/lib/safety";
+import { loadMintPayload, persistMintPayload } from "@/lib/mint-payload-store";
+import { MINT_ERROR_CODES, MintSafetyError } from "@/lib/mint-errors";
+import { hashMintDefinition, snapshotCollectionDefinition } from "@/lib/mint-definitions";
 import type { MintAdapter, MintPhase, MintPhaseEligibility, ResolvedMint, SupportedCollection } from "./types";
 
 const SIGNED_MINT_ABI = [
@@ -108,7 +111,29 @@ function cachedPromise<T>(cache: Map<string, TimedPromise<T>>, key: string, ttlM
 }
 
 function payloadCacheKey(collection: SupportedCollection, signerAddress: string, quantity: number, phaseId: string): string {
-  return `${collection.id}:${signerAddress.toLowerCase()}:${quantity}:${phaseId}`;
+  const definitionHash = hashMintDefinition(snapshotCollectionDefinition(collection));
+  return `${collection.id}:${definitionHash}:${signerAddress.toLowerCase()}:${quantity}:${phaseId}`;
+}
+
+async function cachedOrDurablePayload(
+  collection: SupportedCollection,
+  signerAddress: string,
+  quantity: number,
+  phaseId: string,
+): Promise<{ expiresAt: number; request: ethers.TransactionRequest } | null> {
+  const key = payloadCacheKey(collection, signerAddress, quantity, phaseId);
+  const memory = signedPayloadCache.get(key);
+  if (memory && memory.expiresAt > Date.now()) return memory;
+  if (memory) signedPayloadCache.delete(key);
+  const durable = await loadMintPayload({
+    collectionId: collection.id,
+    definitionHash: hashMintDefinition(snapshotCollectionDefinition(collection)),
+    walletAddress: signerAddress,
+    phaseId,
+    quantity,
+  });
+  if (durable) signedPayloadCache.set(key, durable);
+  return durable;
 }
 
 async function acquireSignedPayload(
@@ -120,6 +145,15 @@ async function acquireSignedPayload(
 ): Promise<ethers.TransactionRequest> {
   const response = await withOpenSeaApi((api) => api.buildDropMintTransaction(config.openSeaSlug, { minter: signerAddress, quantity }));
   const request = validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, response);
+  await persistMintPayload({
+    collectionId: collection.id,
+    definitionHash: hashMintDefinition(snapshotCollectionDefinition(collection)),
+    walletAddress: signerAddress,
+    phaseId: stage.id,
+    quantity,
+    expiresAt: stage.endsAt,
+    request,
+  });
   signedPayloadCache.set(payloadCacheKey(collection, signerAddress, quantity, stage.id), {
     expiresAt: Date.parse(stage.endsAt),
     request,
@@ -325,8 +359,7 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     // on-chain state by buildTransaction. It has no wallet-bound OpenSea
     // payload to acquire, so warming is intentionally a no-op for this phase.
     if (stage.kind === "public") return;
-    const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
-    if ((signedPayloadCache.get(key)?.expiresAt || 0) > Date.now()) return;
+    if (await cachedOrDurablePayload(collection, signerAddress, quantity, stage.id)) return;
     await acquireSignedPayload(collection, config, stage, signerAddress, quantity);
   },
 
@@ -390,11 +423,10 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const stage = config.stages.find((item) => item.id === phaseId);
     if (!stage) throw new Error("Unsupported OpenSea drop phase selected");
     if (stage.kind === "public") return openseaSeaDropV1.buildTransaction!(collection, signerAddress, quantity, provider, options);
-    const key = payloadCacheKey(collection, signerAddress, quantity, stage.id);
     if (options?.allowBeforeStart) {
-      const warmed = signedPayloadCache.get(key);
-      if (!warmed || warmed.expiresAt <= Date.now()) {
-        throw new Error("Signed SeaDrop payload was not warmed and cannot be armed safely");
+      const warmed = await cachedOrDurablePayload(collection, signerAddress, quantity, stage.id);
+      if (!warmed) {
+        throw new MintSafetyError(MINT_ERROR_CODES.payloadUnavailable, "Signed SeaDrop payload was not warmed and cannot be armed safely");
       }
       return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, {
         ...warmed.request,
@@ -407,8 +439,8 @@ export const openseaSignedSeaDropV1: MintAdapter = {
     const now = Number(latest.timestamp) * 1000;
     if (now < Date.parse(stage.startsAt)) throw new Error(`${stage.name} has not started`);
     if (now >= Date.parse(stage.endsAt)) throw new Error(`${stage.name} has ended`);
-    const warmed = signedPayloadCache.get(key);
-    if (warmed && warmed.expiresAt > Date.now()) {
+    const warmed = await cachedOrDurablePayload(collection, signerAddress, quantity, stage.id);
+    if (warmed) {
       // Validate again on every use so a future cache refactor cannot weaken
       // target, recipient, price, stage, or signature binding.
       return validateOpenSeaSignedTransaction(collection, config, stage, signerAddress, quantity, {

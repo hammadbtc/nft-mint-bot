@@ -24,7 +24,7 @@ function deriveKey(passphrase: string, salt: Buffer): Buffer {
  * Encrypt a private key (or mnemonic) string.
  * Returns a hex-encoded payload: salt + iv + authTag + ciphertext
  */
-export function encryptPrivateKey(plaintext: string): string {
+export function encryptSecret(plaintext: string): string {
   const salt = randomBytes(SALT_LENGTH);
   const iv = randomBytes(IV_LENGTH);
   const key = deriveKey(getPassphrase(), salt);
@@ -40,7 +40,7 @@ export function encryptPrivateKey(plaintext: string): string {
 /**
  * Decrypt the payload produced by encryptPrivateKey.
  */
-export function decryptPrivateKey(hexPayload: string): string {
+export function decryptSecret(hexPayload: string): string {
   const payload = Buffer.from(hexPayload, "hex");
 
   const salt = payload.subarray(0, SALT_LENGTH);
@@ -58,3 +58,7 @@ export function decryptPrivateKey(hexPayload: string): string {
   const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   return decrypted.toString("utf8");
 }
+
+// Backwards-compatible wallet-vault names.
+export const encryptPrivateKey = encryptSecret;
+export const decryptPrivateKey = decryptSecret;

@@ -7,7 +7,7 @@
   "deploy": {
     "preDeployCommand": "npm run railway:predeploy",
     "startCommand": "npm start",
-    "healthcheckPath": "/api/live",
+    "healthcheckPath": "/api/health",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10

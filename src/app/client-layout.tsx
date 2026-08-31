@@ -57,7 +57,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
               <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">{dark ? "☀" : "☾"}</button>
             </div>
           </header>
-          <div className="notice">Mint didn&apos;t work? Found a bug? <a href="https://x.com/hammadbtc" target="_blank">Report an issue</a></div>
+          <div className="notice">Mint didn&apos;t work? Found a bug? <a href="https://x.com/hammadbtc" target="_blank" rel="noreferrer noopener">Report an issue</a></div>
           <main className="page-wrap">{children}</main>
           <nav className="bottom-nav">
             {nav.map((item) => {

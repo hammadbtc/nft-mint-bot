@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { batchMint } from "@/lib/engine/mint";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
+import { mintErrorCode } from "@/lib/mint-errors";
 
 const schema = z.object({
   collectionId:z.string().uuid(), walletIds:z.array(z.string().uuid()).min(1).max(500),
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success:true, ...batch, idempotencyKey }, { status:202, headers:{"Cache-Control":"no-store"} });
   } catch (error: unknown) {
     const message = error instanceof z.ZodError ? error.issues[0]?.message : safeErrorMessage(error, "Could not create mint tasks");
-    return NextResponse.json({ error:message }, { status:400, headers:{"Cache-Control":"no-store"} });
+    const code = mintErrorCode(error);
+    return NextResponse.json({ error:message, ...(code ? { code } : {}) }, { status:code ? 409 : 400, headers:{"Cache-Control":"no-store"} });
   }
 }

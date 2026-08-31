@@ -1,7 +1,16 @@
 import type { ethers } from "ethers";
 import type { collections } from "@/lib/db/schema";
 
-export type SupportedCollection = typeof collections.$inferSelect;
+// Optional in the adapter-facing type so legacy fixtures and external adapter
+// packages remain source-compatible. Database rows always provide the field.
+export type SupportedCollection = Omit<
+  typeof collections.$inferSelect,
+  "broadcastPaused" | "broadcastPauseReason" | "broadcastPauseUpdatedAt"
+> & {
+  broadcastPaused?: boolean;
+  broadcastPauseReason?: string | null;
+  broadcastPauseUpdatedAt?: string | null;
+};
 
 export type MintPhase = {
   id: string;
@@ -20,6 +29,9 @@ export type MintPhaseEligibility = {
   phaseId: string;
   status: "eligible" | "ineligible" | "unknown" | "unsupported";
   reason?: string;
+  artifactId?: string;
+  artifactHash?: string;
+  artifactExpiresAt?: string;
 };
 
 export type ResolvedMint = {
@@ -82,7 +94,7 @@ export interface MintAdapter {
     signerAddress: string,
     quantity: number,
     provider: ethers.Provider,
-    options?: { allowBeforeStart?: boolean; phaseId?: string },
+    options?: { allowBeforeStart?: boolean; phaseId?: string; eligibilityArtifactId?: string | null; eligibilityArtifactHash?: string | null },
   ) => Promise<ethers.TransactionRequest>;
   /** Acquire and fully validate a wallet-bound provider payload before the
    * stage opens. Implementations must fail closed when the provider does not
@@ -100,7 +112,7 @@ export interface MintAdapter {
     quantity: number,
     provider: ethers.Provider,
     request: ethers.TransactionRequest,
-    options?: { phaseId?: string },
+    options?: { phaseId?: string; eligibilityArtifactId?: string | null; eligibilityArtifactHash?: string | null },
   ) => Promise<void>;
   recommendedGasLimit?: bigint;
 }

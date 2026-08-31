@@ -2,6 +2,8 @@
 
 This is the durable operator playbook for future MintBot sessions. A user should only paste a URL and choose wallets; all protocol research, transaction construction, and safety review happen before the project becomes searchable.
 
+For a known launchpad, begin with the authenticated `POST /api/resolvers` inspection described in `PHASE_5_6_RESOLVERS_AND_CUTOVER.md`. Treat its result as evidence-backed draft input only; `needs-input` is a hard stop, and no resolver replaces the certification/activation gates below.
+
 ## Start every project-support session here
 
 1. Read this file and `docs/PRODUCT_AND_AUDIT_HANDOFF.md`.
@@ -46,6 +48,7 @@ Current adapters:
 - `opensea-seadrop-v1`: public SeaDrop only. It rereads price, start/end, wallet cap, fee-recipient permission, wallet mint stats, and supply on-chain at execution.
 - `opensea-signed-seadrop-v1`: reviewed OpenSea SeaDrop schedules containing signed presales plus public. Dashboard eligibility uses encrypted reusable wallet sessions. Before a scheduled launch, the engine must obtain and validate the wallet-bound signed payload, construct the transaction, reserve its nonce, sign it, persist its exact raw bytes/hash, and show the job as `armed`. OpenSea authentication and eligibility requests are forbidden from the launch-time path. Prefer a permanent server-only `OPENSEA_API_KEY`; an official instant key is only a preparation fallback.
 - `evm-contract-v1`: only a verified payable function with either no arguments or one integer quantity argument and a static reviewed price.
+- `reviewed-call-v1`: the default for new direct-contract support. It requires exact canonical function signatures, typed server-side bindings, an explicit value policy, and one reviewed eligibility strategy per phase. Merkle and server-signature artifacts are encrypted and pinned into jobs.
 - `squiggle-wuiggle-v1`: project-specific Robinhood adapter for the verified preminted-inventory contract. It supports deterministic arming but must not be reused for another collection merely because its ABI looks similar.
 
 SeaDrop Merkle allowlists, token-gated phases, and other launchpads are not covered merely because OpenSea displays the collection. The signed adapter is limited to explicitly reviewed stages and the official OpenSea Drops API.
@@ -169,7 +172,7 @@ export interface MintAdapter {
   canArmPhase?(phaseId: string): boolean;
   resolve(collection, source): Promise<ResolvedMint>;
   checkEligibility?(collection, signerAddress, quantity, provider, phases, context?: { signer?: Signer }): Promise<MintPhaseEligibility[]>;
-  buildTransaction?(collection, signerAddress, quantity, provider, options?: { allowBeforeStart?: boolean; phaseId?: string }): Promise<TransactionRequest>;
+  buildTransaction?(collection, signerAddress, quantity, provider, options?: { allowBeforeStart?: boolean; phaseId?: string; eligibilityArtifactId?: string | null; eligibilityArtifactHash?: string | null }): Promise<TransactionRequest>;
   recommendedGasLimit?: bigint;
 }
 ```
@@ -232,9 +235,9 @@ Before live support:
 
 ## Project registration
 
-Register through `POST /api/collections`, protected by Basic Auth and `X-Support-Admin-Token`, or add a non-secret public record to `config/supported-projects.json` for idempotent deployment seeding.
+Register through `POST /api/collections`, protected by Basic Auth and `X-Support-Admin-Token`, or add a non-secret public record to `config/supported-projects.json` for idempotent draft staging. Configuration staging never changes an existing live definition, certifies, activates, or unpauses a project.
 
-Example for the deliberately limited generic adapter:
+Example for the strict reviewed-call adapter. This request creates a **draft**, never a verified/live project:
 
 ```json
 {
@@ -242,26 +245,38 @@ Example for the deliberately limited generic adapter:
   "slug": "example-collection",
   "contractAddress": "0x0000000000000000000000000000000000000001",
   "chainId": 1,
-  "mintMethod": "mint",
-  "mintAbi": ["function mint(uint256 quantity) payable"],
+  "mintMethod": "mint(address,uint256)",
+  "mintAbi": ["function mint(address recipient,uint256 quantity) payable"],
   "mintPrice": "10000000000000000",
   "maxPerWallet": 2,
   "maxSupply": 10000,
-  "adapterKey": "evm-contract-v1",
+  "adapterKey": "reviewed-call-v1",
   "domains": ["mint.example.com"],
   "siteUrl": "https://mint.example.com/mint",
   "adapterConfig": {
+    "schemaVersion": 1,
+    "engine": "custom-reviewed-v1",
     "urlMatchers": [{ "domain": "mint.example.com", "path": "/mint" }],
     "phases": [{
       "id": "public",
       "name": "Public",
-      "startsAt": "2026-08-20T18:00:00.000Z",
-      "endsAt": "2026-08-21T18:00:00.000Z",
-      "priceWei": "10000000000000000",
-      "maxPerWallet": 2
+      "kind": "public",
+      "opening": {
+        "mode": "time",
+        "startsAt": "2026-09-20T18:00:00.000Z",
+        "endsAt": "2026-09-21T18:00:00.000Z"
+      },
+      "unitPriceWei": "10000000000000000",
+      "maxPerWallet": 2,
+      "eligibility": { "strategy": "public" },
+      "call": {
+        "target": { "source": "collection" },
+        "function": "mint(address,uint256)",
+        "args": [{ "source": "wallet" }, { "source": "quantity" }],
+        "value": { "source": "unit-price-times-quantity" }
+      }
     }]
-  },
-  "verified": true
+  }
 }
 ```
 
@@ -293,6 +308,7 @@ Then run:
 
 ```bash
 npm test
+npm run test:coverage
 npm run support:certify
 npm run lint
 npm run build
@@ -303,7 +319,7 @@ git diff --check
 
 ## Safe rollout
 
-1. Register/seed the project without enqueueing anything.
+1. Register/stage the project as an immutable draft without enqueueing anything.
 2. Paste every official input form—URL, contract, exact name—and inspect displayed chain, contract, phase, time, price, cap, and supply.
 3. Confirm lookalike inputs remain unsupported.
 4. Run eligible and ineligible dry-runs where the phase/protocol permits simulation.
@@ -314,7 +330,7 @@ git diff --check
 
 ## Updating and emergency disabling
 
-Use the same project UUID with `POST /api/collections` to update a record. Seeded projects must be changed in Git so the next deploy does not restore an old value.
+Use the same project UUID with `POST /api/collections` to propose a new immutable definition. Staged projects should also be changed in Git for reproducible intake, but deployment will never overwrite the active execution snapshot.
 
 Immediately disable support if the official domain, implementation, router/drop address, API schema, authorized signer, phase configuration, or transaction shape changes unexpectedly:
 

@@ -7,6 +7,7 @@ import { openseaSignedSeaDropV1 } from "./opensea-signed-seadrop-v1";
 import { squiggleWuiggleV1 } from "./squiggle-wuiggle-v1";
 import { bullsRunnersV1 } from "./bulls-runners-v1";
 import { terminalAssistantsV1 } from "./terminal-assistants-v1";
+import { reviewedCallV1 } from "./reviewed-call-v1";
 import type { MintAdapter, ResolvedMint, SupportedCollection } from "./types";
 import { executionManifestFor } from "@/lib/engines";
 
@@ -17,6 +18,7 @@ const registry = new Map<string, MintAdapter>([
   [squiggleWuiggleV1.key, squiggleWuiggleV1],
   [bullsRunnersV1.key, bullsRunnersV1],
   [terminalAssistantsV1.key, terminalAssistantsV1],
+  [reviewedCallV1.key, reviewedCallV1],
 ]);
 
 function normalizeDomain(value: string) {

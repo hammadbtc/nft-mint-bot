@@ -51,6 +51,7 @@ const LEGACY_ADAPTER_ENGINE: Record<string, ExecutionEngineKey> = {
   "terminal-assistants-v1": "stealth-owner-switch-v1",
   "squiggle-wuiggle-v1": "custom-reviewed-v1",
   "evm-contract-v1": "custom-reviewed-v1",
+  "reviewed-call-v1": "custom-reviewed-v1",
 };
 
 function parseManifest(collection: SupportedCollection): Partial<ExecutionManifest> {

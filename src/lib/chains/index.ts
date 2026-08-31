@@ -135,6 +135,37 @@ const CHAINS: Record<number, ChainConfig> = {
   },
 };
 
+// Additional EVM chains and provider routes can be added without a code
+// release. Built-in chain metadata is preserved; extra entries may only add
+// routes to an existing chain or define a complete new chain.
+function loadExtraChains(): void {
+  const raw = process.env.EXTRA_CHAINS_JSON?.trim();
+  if (!raw) return;
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new Error("EXTRA_CHAINS_JSON is invalid JSON"); }
+  if (!Array.isArray(value)) throw new Error("EXTRA_CHAINS_JSON must be an array");
+  for (const item of value) {
+    if (!item || typeof item !== "object") throw new Error("EXTRA_CHAINS_JSON contains an invalid entry");
+    const entry = item as Partial<ChainConfig>;
+    if (!Number.isSafeInteger(entry.id) || Number(entry.id) < 1 || !entry.name?.trim() || !entry.symbol?.trim() || !Array.isArray(entry.rpcUrls) || !entry.rpcUrls.length) {
+      throw new Error("Every extra chain requires id, name, symbol, and at least one RPC URL");
+    }
+    const rpcUrls = entry.rpcUrls.map((url) => {
+      if (typeof url !== "string") throw new Error("Extra chain RPC URLs must be strings");
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:") throw new Error("Extra chain RPC URLs must use HTTPS");
+      return url;
+    });
+    if (entry.explorerUrl && new URL(entry.explorerUrl).protocol !== "https:") throw new Error("Extra chain explorers must use HTTPS");
+    const existing = CHAINS[entry.id!];
+    CHAINS[entry.id!] = existing
+      ? { ...existing, rpcUrls: uniqueRpc(...rpcUrls, ...existing.rpcUrls) }
+      : { id: entry.id!, name: entry.name.trim(), symbol: entry.symbol.trim(), rpcUrls: uniqueRpc(...rpcUrls), explorerUrl: entry.explorerUrl };
+  }
+}
+
+loadExtraChains();
+
 // ─── Provider management ──────────────────────────────────────────────
 
 // In-memory provider cache
@@ -167,13 +198,33 @@ export function clearRpcQuarantine(): void {
 }
 
 class RateAwareJsonRpcProvider extends ethers.JsonRpcProvider {
-  constructor(request: ethers.FetchRequest, chainId: number, private readonly rpcUrl: string) {
-    super(request, chainId, { staticNetwork: true, batchMaxCount: 1 });
+  private chainVerifiedAt = 0;
+  private chainVerification: Promise<void> | null = null;
+
+  constructor(request: ethers.FetchRequest, private readonly expectedChainId: number, private readonly rpcUrl: string) {
+    super(request, expectedChainId, { staticNetwork: true, batchMaxCount: 1 });
+  }
+
+  private async verifyChainIdentity(): Promise<void> {
+    if (Date.now() - this.chainVerifiedAt < RPC_HEALTH_CACHE_MS) return;
+    this.chainVerification ||= (async () => {
+      const [result] = await super._send({ jsonrpc: "2.0", id: Date.now(), method: "eth_chainId", params: [] });
+      const observed = "result" in result ? Number(BigInt(String(result.result))) : NaN;
+      const expected = this.expectedChainId;
+      if (observed !== expected) {
+        quarantineRpcUrl(this.rpcUrl);
+        throw new Error(`RPC route reported chain ${observed}; expected ${expected}`);
+      }
+      this.chainVerifiedAt = Date.now();
+    })().finally(() => { this.chainVerification = null; });
+    await this.chainVerification;
   }
 
   override async _send(payload: ethers.JsonRpcPayload | Array<ethers.JsonRpcPayload>): Promise<Array<ethers.JsonRpcResult>> {
     if (rpcUrlQuarantined(this.rpcUrl)) throw new Error("RPC route is temporarily quarantined after a quota or rate-limit response");
     try {
+      const calls = Array.isArray(payload) ? payload : [payload];
+      if (!calls.every((item) => item.method === "eth_chainId")) await this.verifyChainIdentity();
       return await super._send(payload);
     } catch (error) {
       if (rpcQuotaError(error)) quarantineRpcUrl(this.rpcUrl);
@@ -204,6 +255,7 @@ export function getPrimaryProvider(chainId: number): ethers.JsonRpcProvider {
 
   const chain = CHAINS[chainId];
   if (!chain) throw new Error(`Unknown chain ID: ${chainId}`);
+  if (!chain.rpcUrls.length) throw new Error(`Chain ${chainId} has no configured RPC routes`);
 
   // Use first (primary) RPC URL
   const provider = providerForUrl(chain.rpcUrls[0], chainId);
@@ -220,6 +272,7 @@ export function getFailoverProvider(chainId: number): ethers.FallbackProvider {
   if (cached) return cached;
   const chain = CHAINS[chainId];
   if (!chain) throw new Error(`Unknown chain ID: ${chainId}`);
+  if (!chain.rpcUrls.length) throw new Error(`Chain ${chainId} has no configured RPC routes`);
 
   const providers = chain.rpcUrls.map((url, index) => ({
     provider: providerForUrl(url, chainId),
@@ -313,7 +366,8 @@ export async function checkRpcHealth(chainId: number, now = Date.now()): Promise
       if (rpcUrlQuarantined(url, now)) return { ...identity, status: "quarantined" as const, latencyMs: null };
       const start = Date.now();
       const provider = providerForUrl(url, chainId);
-      await provider.getBlockNumber();
+      const [network] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
+      if (Number(network.chainId) !== chainId) throw new Error("RPC route is on the wrong chain");
       return { ...identity, status: "up" as const, latencyMs: Date.now() - start };
     })
   );

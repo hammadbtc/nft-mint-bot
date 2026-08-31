@@ -12,6 +12,7 @@ import { getMintAdapter } from "@/lib/adapters";
 import { getProvider } from "@/lib/chains";
 import { getSigner } from "@/lib/vault";
 import { manualOpenRetryAt, selectEligibleExecutionPhase, selectRequestedExecutionPhase } from "@/lib/mint-policy";
+import { assertMintControls, validatedJobCollection } from "@/lib/mint-definitions";
 
 type Context = { params: Promise<{ id: string }> };
 const noStore = { "Cache-Control": "no-store" };
@@ -28,11 +29,12 @@ export async function GET(_req: NextRequest, { params }: Context) {
     const { id } = await params;
     const [job] = await db.select().from(schema.mintJobs).where(eq(schema.mintJobs.id, id)).limit(1);
     if (!job) return NextResponse.json({ error: "Mint task not found" }, { status: 404, headers: noStore });
-    const [[collection], [wallet]] = await Promise.all([
+    const [[collectionControl], [wallet]] = await Promise.all([
       db.select().from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1),
       db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1),
     ]);
-    if (!collection?.active || !collection.verified || !wallet) throw new Error("Mint task configuration is unavailable");
+    if (!collectionControl?.active || !collectionControl.verified || !wallet) throw new Error("Mint task configuration is unavailable");
+    const collection = await validatedJobCollection(collectionControl, job);
     const adapter = getMintAdapter(collection.adapterKey);
     if (!adapter) throw new Error("The reviewed mint adapter is unavailable");
     const phases = (await adapter.resolve(collection, "name")).phases;
@@ -63,11 +65,13 @@ export async function PATCH(req: NextRequest, { params }: Context) {
     const walletId = input.walletId || job.walletId;
     const phaseId = input.phaseId || job.phaseId;
     const quantity = input.quantity || job.quantity;
-    const [[collection], [wallet]] = await Promise.all([
+    const [[collectionControl], [wallet]] = await Promise.all([
       db.select().from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1),
       db.select().from(schema.wallets).where(eq(schema.wallets.id, walletId)).limit(1),
     ]);
-    if (!collection?.active || !collection.verified) throw new Error("Mint support is disabled or no longer verified");
+    if (!collectionControl?.active || !collectionControl.verified) throw new Error("Mint support is disabled or no longer verified");
+    await assertMintControls(collectionControl);
+    const collection = await validatedJobCollection(collectionControl, job);
     if (!wallet) throw new Error("Selected wallet was not found");
     const [parent] = wallet.role === "worker" && wallet.parentWalletId
       ? await db.select().from(schema.wallets).where(eq(schema.wallets.id, wallet.parentWalletId)).limit(1)
@@ -84,6 +88,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
       : selectEligibleExecutionPhase(inspected.phases, inspected.eligibility);
     const addedPhaseIds = [...new Set(input.addPhaseIds || [])].filter((id) => id !== phase.id);
     const addedPhases = addedPhaseIds.map((id) => selectRequestedExecutionPhase(inspected.phases, inspected.eligibility, id));
+    await Promise.all([phase, ...addedPhases].map((selectedPhase) => assertMintControls(collectionControl, selectedPhase.id)));
     for (const selectedPhase of [phase, ...addedPhases]) {
       if (quantity > (selectedPhase.maxPerWallet || collection.maxPerWallet || 100)) {
         throw new Error(`Quantity exceeds the ${selectedPhase.name} limit`);
@@ -91,6 +96,11 @@ export async function PATCH(req: NextRequest, { params }: Context) {
     }
 
     const scheduledAt = phase.status === "upcoming" ? phase.startsAt || manualOpenRetryAt(phase) : null;
+    const definitionPin = {
+      definitionVersionId: job.definitionVersionId!,
+      definitionHash: job.definitionHash!,
+      definitionSnapshot: job.definitionSnapshot!,
+    };
     const result = await db.transaction(async (tx) => {
       for (const lockWalletId of [...new Set([job.walletId, walletId])].sort()) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mint-schedule:${lockWalletId}`}))`);
@@ -121,6 +131,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         phaseEndsAt: phase.endsAt || null,
         updatedAt: new Date().toISOString(),
         error: null,
+        ...definitionPin,
       })
         .where(and(eq(schema.mintJobs.id, id), eq(schema.mintJobs.status, "pending")))
         .returning();
@@ -137,6 +148,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
         batchId,
         walletId,
         collectionId: fresh.collectionId,
+        ...definitionPin,
         quantity,
         useFlashbots: fresh.useFlashbots,
         dryRun: fresh.dryRun,

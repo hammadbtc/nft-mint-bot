@@ -27,6 +27,15 @@ import {
   safeErrorMessage,
   stableHash,
 } from "@/lib/safety";
+import {
+  assertMintControls,
+  scheduleMintDefinition,
+  validatedJobCollection,
+} from "@/lib/mint-definitions";
+import { MINT_ERROR_CODES, mintErrorCode } from "@/lib/mint-errors";
+import { recordShadowMintIntent } from "@/lib/mint-cutover";
+import { createIncidentReplayBundle } from "@/lib/incident-replay";
+import { openSignedTransaction, sealSignedTransaction } from "@/lib/signed-transaction-vault";
 
 const ERC20_ABI = [
   "function allowance(address owner,address spender) view returns (uint256)",
@@ -75,6 +84,15 @@ class MintNotOpenError extends Error {
 type JobRow = typeof schema.mintJobs.$inferSelect;
 type AttemptRow = typeof schema.mintAttempts.$inferSelect;
 
+function jobAdapterOptions(job: JobRow, phaseId: string, allowBeforeStart = false) {
+  return {
+    phaseId,
+    allowBeforeStart,
+    eligibilityArtifactId: job.eligibilityArtifactId,
+    eligibilityArtifactHash: job.eligibilityArtifactHash,
+  };
+}
+
 type ExecutionResult = {
   status: "confirmed" | "failed" | "confirming" | "simulation_passed" | "armed";
   txHash?: string;
@@ -94,11 +112,13 @@ async function resolvePhase(collection: SupportedCollection, signerAddress: stri
 async function loadExecutionState(jobId: string) {
   const [job] = await db.select().from(schema.mintJobs).where(eq(schema.mintJobs.id, jobId)).limit(1);
   if (!job) throw new Error(`Mint job ${jobId} was not found`);
-  const [[collection], [wallet]] = await Promise.all([
+  const [[collectionControl], [wallet]] = await Promise.all([
     db.select().from(schema.collections).where(eq(schema.collections.id, job.collectionId)).limit(1),
     db.select().from(schema.wallets).where(eq(schema.wallets.id, job.walletId)).limit(1),
   ]);
-  if (!collection || !collection.active || !collection.verified) throw new Error("Mint support is disabled or no longer verified");
+  if (!collectionControl || !collectionControl.active || !collectionControl.verified) throw new Error("Mint support is disabled or no longer verified");
+  await assertMintControls(collectionControl, job.phaseId);
+  const collection = await validatedJobCollection(collectionControl, job);
   // Re-validate at execution time as well as discovery time. A stale queued
   // task must not bypass a manifest edit or accidentally enter a different
   // launch strategy after deployment.
@@ -203,7 +223,7 @@ async function latestRecoverableAttempt(jobId: string, kind: "approval" | "mint"
     .where(and(eq(schema.mintAttempts.jobId, jobId), eq(schema.mintAttempts.kind, kind)))
     .orderBy(desc(schema.mintAttempts.createdAt)).limit(1);
   return attempt && attempt.txHash && attempt.rawTx && ["prepared", "submitted", "confirming"].includes(attempt.status)
-    ? attempt
+    ? { ...attempt, rawTx: openSignedTransaction(attempt.rawTx) }
     : undefined;
 }
 
@@ -247,7 +267,7 @@ async function prepareDurableAttempt(args: {
         status: "prepared",
         nonce: signed.nonce,
         txHash: signed.txHash,
-        rawTx: signed.rawTx,
+        rawTx: sealSignedTransaction(signed.rawTx),
         toAddress: String(signed.request.to || ""),
         value: BigInt(signed.request.value ?? 0).toString(),
         dataHash: stableHash(String(signed.request.data || "0x")),
@@ -349,7 +369,9 @@ async function executeOnePerTransactionLadder(args: {
   }
   if (!selected.length) throw new Error("No safe mint capacity remains for this wallet");
 
-  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, 1, provider, { phaseId: phase.id }));
+  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, 1, provider, jobAdapterOptions(job, phase.id)));
+  void recordShadowMintIntent({ jobId: job.id, collection, walletAddress: address, quantity: 1, phaseId: phase.id, provider, legacyRequest: request })
+    .catch(() => undefined);
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
   await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
   if (adapter.revalidateBeforeSigning) {
@@ -368,7 +390,7 @@ async function executeOnePerTransactionLadder(args: {
     async (items, tx) => {
       await tx.insert(schema.mintAttempts).values(items.map((item, index) => ({
         id: attemptIds[index], jobId: selected[index]!.id, kind: "mint", status: "prepared",
-        nonce: item.nonce, txHash: item.txHash, rawTx: item.rawTx,
+        nonce: item.nonce, txHash: item.txHash, rawTx: sealSignedTransaction(item.rawTx),
         toAddress: String(item.request.to || ""), value: BigInt(item.request.value ?? 0).toString(),
         dataHash: stableHash(String(item.request.data || "0x")), preflightHash: transactionIntentHash(item.request),
         gasLimit: item.request.gasLimit?.toString() || null,
@@ -426,6 +448,7 @@ async function finalizeAttempt(attemptId: string, receipt: ethers.TransactionRec
 async function ensureErc20Approval(
   job: JobRow,
   collection: SupportedCollection,
+  phase: MintPhase,
   request: ethers.TransactionRequest,
   signer: ethers.Signer,
   provider: ethers.Provider,
@@ -433,7 +456,9 @@ async function ensureErc20Approval(
   if (!collection.paymentToken) return null;
   const owner = await signer.getAddress();
   const spender = String(request.to || collection.contractAddress);
-  const needed = BigInt(collection.mintPrice || "0") * BigInt(job.quantity);
+  if (!phase.priceWei || !/^\d+$/.test(phase.priceWei)) throw new Error("Selected payment-token phase has no exact reviewed unit price");
+  const needed = BigInt(phase.priceWei) * BigInt(job.quantity);
+  if (needed <= 0n) throw new Error("Selected payment-token phase requires a positive reviewed approval amount");
   const token = new ethers.Contract(collection.paymentToken, ERC20_ABI, provider);
   const [balance, allowance] = await Promise.all([
     token.getFunction("balanceOf").staticCall(owner).then(BigInt),
@@ -467,10 +492,12 @@ async function armMint(
   const engine = executionEngineFor(collection);
   const signer = await getSigner(job.walletId, provider);
   const address = await signer.getAddress();
-  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: phase.id }));
+  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, jobAdapterOptions(job, phase.id, true)));
+  void recordShadowMintIntent({ jobId: job.id, collection, walletAddress: address, quantity: job.quantity, phaseId: phase.id, provider, legacyRequest: request, allowBeforeStart: true })
+    .catch(() => undefined);
   const fallbackGasLimit = reviewedFallbackGasLimit(collection.chainId, collection.adapterKey, job.quantity, adapter.recommendedGasLimit);
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, fallbackGasLimit, engine.launchTimeGasEstimation));
-  const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
+  const approvalResult = await ensureErc20Approval(job, collection, phase, request, signer, provider);
   if (approvalResult) return approvalResult;
   await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
   const attempt = await prepareDurableAttempt({ job, kind: "mint", request, signer, provider });
@@ -509,7 +536,7 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
     if (phase.startsAt !== job.launchTargetAt) throw new Error("The on-chain launch time changed after arming");
   }
   const address = await signer.getAddress();
-  const request = await adapter.buildTransaction(collection, address, job.quantity, provider, { allowBeforeStart: true, phaseId: job.phaseId });
+  const request = await adapter.buildTransaction(collection, address, job.quantity, provider, jobAdapterOptions(job, job.phaseId, true));
   const attempt = await latestRecoverableAttempt(job.id, "mint");
   if (!attempt?.rawTx || !attempt.txHash || attempt.nonce == null) throw new Error("Armed transaction is missing");
   if (attempt.preflightHash !== transactionIntentHash(request)) throw new Error("Reviewed mint transaction changed after arming");
@@ -539,7 +566,7 @@ export async function revalidateArmedJob(jobId: string): Promise<void> {
     parsed = ethers.Transaction.from(rawTx);
     if (transactionIntentHash(parsed) !== attempt.preflightHash) throw new Error("Ethereum fee refresh changed the reviewed mint intent");
     const updated = await db.update(schema.mintAttempts).set({
-      rawTx,
+      rawTx: sealSignedTransaction(rawTx),
       txHash,
       gasLimit: parsed.gasLimit.toString(),
       maxFeePerGas: parsed.maxFeePerGas?.toString() || parsed.gasPrice?.toString() || null,
@@ -567,6 +594,7 @@ export async function failArmedJob(jobId: string, error: unknown): Promise<void>
     completedAt: now,
     updatedAt: now,
   }).where(and(eq(schema.mintJobs.id, jobId), eq(schema.mintJobs.status, "armed")));
+  await createIncidentReplayBundle(jobId, "armed-final-revalidation").catch(() => undefined);
 }
 
 export async function launchArmedJob(jobId: string, firedAt = Date.now()): Promise<ExecutionResult | undefined> {
@@ -671,11 +699,13 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   const ladderResult = await executeOnePerTransactionLadder({ job, collection, wallet, phase, signer, provider });
   if (ladderResult) return ladderResult;
 
-  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, { phaseId: phase.id }));
+  let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, job.quantity, provider, jobAdapterOptions(job, phase.id)));
+  void recordShadowMintIntent({ jobId: job.id, collection, walletAddress: address, quantity: job.quantity, phaseId: phase.id, provider, legacyRequest: request })
+    .catch(() => undefined);
   const engine = executionEngineFor(collection);
   const fallbackGasLimit = reviewedFallbackGasLimit(collection.chainId, collection.adapterKey, job.quantity, adapter.recommendedGasLimit);
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, fallbackGasLimit, engine.launchTimeGasEstimation));
-  const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
+  const approvalResult = await ensureErc20Approval(job, collection, phase, request, signer, provider);
   if (approvalResult) return approvalResult;
   await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
 
@@ -698,7 +728,7 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   }
   await assertBalanceAndSpendLimit(job.walletId, address, request, provider, { jobId: job.id, kind: "mint" });
   if (adapter.revalidateBeforeSigning) {
-    await traceMintStage(job.id, "final-revalidation", () => adapter.revalidateBeforeSigning!(collection, address, job.quantity, provider, request, { phaseId: phase.id }));
+    await traceMintStage(job.id, "final-revalidation", () => adapter.revalidateBeforeSigning!(collection, address, job.quantity, provider, request, jobAdapterOptions(job, phase.id)));
   }
   return sendDurableAttempt({ job, kind: "mint", request, signer, provider });
 }
@@ -745,6 +775,20 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
         return;
       }
 
+      const safetyCode = mintErrorCode(error);
+      if (safetyCode === MINT_ERROR_CODES.projectPaused || safetyCode === MINT_ERROR_CODES.phasePaused) {
+        await db.update(schema.mintJobs).set({
+          status: "pending",
+          scheduledAt: new Date(Date.now() + 15_000).toISOString(),
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          updatedAt: new Date().toISOString(),
+          error: message,
+        }).where(eq(schema.mintJobs.id, jobId));
+        return;
+      }
+
       const recoverable = await latestRecoverableAttempt(jobId, "mint") || await latestRecoverableAttempt(jobId, "approval");
       if (!liveTransactionsEnabled() && recoverable) {
         await db.update(schema.mintJobs).set({ status: "confirming", error: message, updatedAt: new Date().toISOString() })
@@ -753,7 +797,9 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
       }
 
       attempt += 1;
-      const permanent = isPermanentMintError(message);
+      const permanent = isPermanentMintError(message)
+        || safetyCode === MINT_ERROR_CODES.definitionMismatch
+        || safetyCode === MINT_ERROR_CODES.definitionUncertified;
       await db.update(schema.mintJobs).set({ retryCount: attempt, error: message, updatedAt: new Date().toISOString() })
         .where(eq(schema.mintJobs.id, jobId));
       if (permanent || attempt >= initial.maxRetries) {
@@ -765,6 +811,7 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
           leaseExpiresAt: null,
         }).where(eq(schema.mintJobs.id, jobId));
         await sendAlert("job_failed", `Mint job ${jobId.slice(0, 8)} failed: ${message}`, jobId);
+        await createIncidentReplayBundle(jobId, permanent ? "permanent-execution-failure" : "retry-exhausted").catch(() => undefined);
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(8_000, 500 * 2 ** attempt)));
@@ -788,6 +835,8 @@ export async function batchMint(
   const uniqueWalletIds = [...new Set(uniqueRequests?.map((item) => item.walletId) || walletIds)];
   const [collection] = await db.select().from(schema.collections).where(eq(schema.collections.id, collectionId)).limit(1);
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
+  await assertMintControls(collection);
+  const definitionPin = await scheduleMintDefinition(collection);
   if (quantity < 1) throw new Error("Mint quantity must be positive");
   const manifest = executionManifestFor(collection);
   const transactionsPerPlan = manifest.onePerTransaction ? quantity : 1;
@@ -829,19 +878,30 @@ export async function batchMint(
       ? await resolveWalletSelectedPhase(collection, wallet.address, transactionQuantity, phaseId, phases, { signer })
       : await resolveWalletPhasePlan(collection, wallet.address, transactionQuantity, phases, { signer });
     const phase = plan.selectedPhase;
+    const eligibility = plan.eligibility.find((item) => item.phaseId === phase.id);
+    if (!eligibility || eligibility.status !== "eligible") throw new Error(`${wallet.label} eligibility was not verified for ${phase.name}`);
+    const scheduledAt = phase.status === "upcoming" ? phase.startsAt || manualOpenRetryAt(phase) : null;
+    if (eligibility.artifactExpiresAt && scheduledAt && Date.parse(eligibility.artifactExpiresAt) <= Date.parse(scheduledAt)) {
+      throw new Error(`${wallet.label} eligibility artifact expires before ${phase.name} opens`);
+    }
     if (transactionQuantity > (phase.maxPerWallet || collection.maxPerWallet || 100)) {
       throw new Error(`${wallet.label} exceeds the ${phase.name} wallet limit`);
     }
     return {
       walletId,
       phase,
-      scheduledAt: phase.status === "upcoming" ? phase.startsAt || manualOpenRetryAt(phase) : null,
+      eligibilityArtifactId: eligibility.artifactId || null,
+      eligibilityArtifactHash: eligibility.artifactHash || null,
+      scheduledAt,
     };
   }));
+  await Promise.all([...new Set(plans.map((plan) => plan.phase.id))].map((phaseId) => assertMintControls(collection, phaseId)));
   const batchId = randomUUID();
-  const values = plans.flatMap(({ walletId, phase, scheduledAt }) => Array.from({ length: transactionsPerPlan }, (_, sequence) => ({
+  const values = plans.flatMap(({ walletId, phase, scheduledAt, eligibilityArtifactId, eligibilityArtifactHash }) => Array.from({ length: transactionsPerPlan }, (_, sequence) => ({
     id: randomUUID(), batchId, walletId, collectionId, quantity: transactionQuantity,
+    ...definitionPin,
     useFlashbots, dryRun, scheduledAt, phaseId: phase.id,
+    eligibilityArtifactId, eligibilityArtifactHash,
     phaseStartsAt: phase.startsAt || null, phaseEndsAt: phase.endsAt || null,
     status: "pending", idempotencyKey: `${idempotencyBase}:${walletId}:${collectionId}:${phase.id}:${sequence}`,
   })));
@@ -900,6 +960,7 @@ export async function recoverMintJob(jobId: string): Promise<void> {
   if (!job || !["running", "confirming"].includes(job.status)) return;
   const [attempt] = await db.select().from(schema.mintAttempts).where(eq(schema.mintAttempts.jobId, jobId))
     .orderBy(desc(schema.mintAttempts.createdAt)).limit(1);
+  if (attempt?.rawTx) attempt.rawTx = openSignedTransaction(attempt.rawTx);
   if (attempt?.txHash) {
     const execution = await loadExecutionState(jobId);
     const provider = getProvider(execution.collection.chainId);

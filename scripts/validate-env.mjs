@@ -1,4 +1,4 @@
-const required = ["DATABASE_URL", "VAULT_PASSPHRASE", "SUPPORT_ADMIN_TOKEN"];
+const required = ["DATABASE_URL", "VAULT_PASSPHRASE", "SUPPORT_ADMIN_TOKEN", "CERTIFICATION_ATTESTATION_KEY"];
 const missing = required.filter((name) => !process.env[name]?.trim());
 
 const executionRole = (process.env.MINTBOT_EXECUTION_ROLE || "combined").trim().toLowerCase();
@@ -19,6 +19,11 @@ if (process.env.VAULT_PASSPHRASE.length < 32) {
 
 if (process.env.SUPPORT_ADMIN_TOKEN.length < 32) {
   console.error("SUPPORT_ADMIN_TOKEN must be at least 32 characters");
+  process.exit(1);
+}
+
+if (process.env.CERTIFICATION_ATTESTATION_KEY.length < 32) {
+  console.error("CERTIFICATION_ATTESTATION_KEY must be at least 32 characters");
   process.exit(1);
 }
 
@@ -82,6 +87,19 @@ const liveWebSocketProviderCount = new Set([
 if (process.env.ENABLE_LIVE_TRANSACTIONS === "true" && liveWebSocketProviderCount < 2) {
   console.error("Live Robinhood operation requires at least two independent WebSocket providers");
   process.exit(1);
+}
+
+if (process.env.EXTRA_CHAINS_JSON?.trim()) {
+  let extraChains;
+  try { extraChains = JSON.parse(process.env.EXTRA_CHAINS_JSON); } catch { console.error("EXTRA_CHAINS_JSON must be valid JSON"); process.exit(1); }
+  if (!Array.isArray(extraChains) || extraChains.some((entry) => !Number.isSafeInteger(entry?.id) || entry.id < 1 || !entry.name || !entry.symbol || !Array.isArray(entry.rpcUrls) || !entry.rpcUrls.length)) {
+    console.error("EXTRA_CHAINS_JSON must contain complete EVM chain entries");
+    process.exit(1);
+  }
+  for (const entry of extraChains) for (const rawUrl of entry.rpcUrls) {
+    try { if (new URL(rawUrl).protocol !== "https:") throw new Error(); }
+    catch { console.error(`Extra chain ${entry.id} has a non-HTTPS RPC URL`); process.exit(1); }
+  }
 }
 
 console.log("Environment validation passed");
