@@ -17,7 +17,8 @@ test("signed transactions are randomized, authenticated, and never accepted as p
     assert.notEqual(left, right);
     assert.equal(openSignedTransaction(left), rawTx);
     assert.throws(() => openSignedTransaction(rawTx), /not encrypted at rest/);
-    assert.throws(() => openSignedTransaction(`${left.slice(0, -1)}0`));
+    const replacement = left.endsWith("0") ? "1" : "0";
+    assert.throws(() => openSignedTransaction(`${left.slice(0, -1)}${replacement}`));
   } finally {
     if (previous === undefined) delete process.env.VAULT_PASSPHRASE; else process.env.VAULT_PASSPHRASE = previous;
   }

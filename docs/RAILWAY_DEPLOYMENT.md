@@ -26,11 +26,13 @@ Add these to the MintBot service:
 
 ```env
 DATABASE_URL=${{Postgres.DATABASE_URL}}
-MINTBOT_EXECUTION_ROLE=web # use worker on the execution service
+# Use combined for one Railway service. Use web/worker only for a split deployment.
+MINTBOT_EXECUTION_ROLE=combined
 VAULT_PASSPHRASE=<64 random hex characters or stronger>
 APP_ACCESS_USER=mintbot
 APP_ACCESS_PASSWORD=<strong password, at least 16 characters>
 SUPPORT_ADMIN_TOKEN=<64 random hex characters or stronger>
+CERTIFICATION_ATTESTATION_KEY=<64 random hex characters or stronger>
 # Optional separate confirmation secret for destructive UI actions.
 # If omitted, the existing APP_ACCESS_PASSWORD is used.
 ADMIN_ACTION_PASSWORD=<strong password, at least 16 characters>
@@ -44,10 +46,11 @@ Generate independent secrets locally:
 ```bash
 openssl rand -hex 32
 openssl rand -hex 32
+openssl rand -hex 32
 openssl rand -base64 24
 ```
 
-Use the first hex value for `VAULT_PASSPHRASE`, the second for `SUPPORT_ADMIN_TOKEN`, and the Base64 value for `APP_ACCESS_PASSWORD`.
+Use the first hex value for `VAULT_PASSPHRASE`, the second for `SUPPORT_ADMIN_TOKEN`, the third for `CERTIFICATION_ATTESTATION_KEY`, and the Base64 value for `APP_ACCESS_PASSWORD`.
 
 `ADMIN_ACTION_PASSWORD` is optional. Set it when wallet/task deletion and wallet signing-key replacement should use a secret separate from the browser login. When it is blank, those confirmations use `APP_ACCESS_PASSWORD`.
 

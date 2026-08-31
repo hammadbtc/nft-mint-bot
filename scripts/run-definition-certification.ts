@@ -13,7 +13,7 @@ import {
   type UnsignedCertificationEvidence,
 } from "../src/lib/mint-certification";
 import { hashMintDefinition, parseMintDefinition } from "../src/lib/mint-definitions";
-import { stableHash } from "../src/lib/safety";
+import { safeErrorMessage, stableHash } from "../src/lib/safety";
 import { compileReviewedTransaction, phaseTarget, reviewedContractAddresses, validateReviewedCallConfig } from "../src/lib/reviewed-call-config";
 import { canonicalCertificationIntent, certificationPhaseIds, assertExactCertificationIntent } from "../src/lib/adapter-certification";
 import { getMintAdapter } from "../src/lib/adapters";
@@ -44,6 +44,7 @@ const transactionFileSchema = z.union([
   }).strict(),
 ]);
 
+async function main(): Promise<void> {
 const [versionId, transactionPath] = process.argv.slice(2);
 if (!versionId || !transactionPath) throw new Error("Usage: npm run support:certify-definition -- <definition-version-id> <transaction.json>");
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
@@ -264,3 +265,9 @@ try {
 } finally {
   await sql.end();
 }
+}
+
+void main().catch((error) => {
+  console.error(safeErrorMessage(error, "Definition certification failed"));
+  process.exitCode = 1;
+});
