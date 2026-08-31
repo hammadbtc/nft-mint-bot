@@ -50,6 +50,7 @@ export default function CookiezQuickClaimPage() {
   const confirmed = walletJobs.filter((job) => job.status === "completed" && job.attempts.some((attempt) => attempt.status === "confirmed")).length;
   const active = walletJobs.filter((job) => ["pending", "armed", "running", "confirming"].includes(job.status)).length;
   const failed = walletJobs.filter((job) => job.status === "failed").length;
+  const latestFailure = walletJobs.find((job) => job.status === "failed" && job.error)?.error;
 
   const start = async () => {
     if (!walletId) return;
@@ -84,6 +85,7 @@ export default function CookiezQuickClaimPage() {
           <div className="field"><label>MintBot wallet</label><select value={walletId} onChange={(event)=>{setWalletId(event.target.value);keyRef.current=""}}>{wallets.map((wallet)=><option key={wallet.id} value={wallet.id}>{wallet.label} · {wallet.role} · {short(wallet.address)}</option>)}</select></div>
           <div className="field"><label>Target final BAKER balance</label><div className="amount-row"><input type="number" min="1" max="5" value={target} onChange={(event)=>{setTarget(Math.min(5,Math.max(1,Number(event.target.value)||1)));keyRef.current=""}}/><button className="secondary-btn" onClick={()=>setTarget(5)}>Max</button></div><small className="muted">The server reads the wallet’s current BAKER balance and queues only what is still needed.</small></div>
           <button className="primary-btn" disabled={busy||!walletId||active>0} onClick={()=>void start()}>{busy?"Starting…":active>0?"Automation already running":`Start → claim until ${target}`}</button>
+          {latestFailure && <div className="alert"><b>Latest failure:</b> {latestFailure}</div>}
           <div className="alert">No private key input. No MetaMask. No COOKIEZ Discord failure alerts. Unknown reverts still stop safely.</div>
         </div>
       </div></div>

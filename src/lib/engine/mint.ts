@@ -767,6 +767,28 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
         return;
       }
 
+      // COOKIEZ can lose the single global five-second slot between any two
+      // RPC stages (gas estimation, simulation, signing, or broadcast). Treat
+      // the adapter's exact TooSoon() selector as a scheduler wait regardless
+      // of which stage surfaced it; every other revert still fails closed.
+      const [retryCollection] = await db.select().from(schema.collections)
+        .where(eq(schema.collections.id, initial.collectionId)).limit(1);
+      const adapterRetryAt = retryCollection
+        ? getMintAdapter(retryCollection.adapterKey)?.simulationRetryAt?.(error)
+        : null;
+      if (adapterRetryAt) {
+        await db.update(schema.mintJobs).set({
+          status: "pending",
+          scheduledAt: adapterRetryAt,
+          claimToken: null,
+          claimedAt: null,
+          leaseExpiresAt: null,
+          updatedAt: new Date().toISOString(),
+          error: null,
+        }).where(eq(schema.mintJobs.id, jobId));
+        return;
+      }
+
       const recoverable = await latestRecoverableAttempt(jobId, "mint") || await latestRecoverableAttempt(jobId, "approval");
       if (!liveTransactionsEnabled() && recoverable) {
         await db.update(schema.mintJobs).set({ status: "confirming", error: message, updatedAt: new Date().toISOString() })
