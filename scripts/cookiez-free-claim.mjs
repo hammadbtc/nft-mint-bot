@@ -3,6 +3,7 @@ import { ethers } from "ethers";
 const CHAIN_ID = 4663n;
 const CONTRACT = "0x4BA87E60e52C19C1da7Dab74414dEaC4e237c23a";
 const TOO_SOON = ethers.id("TooSoon()").slice(0, 10).toLowerCase();
+const THROTTLE_POLL_MS = 1_000;
 const ABI = [
   "function claimFree()",
   "function balanceOf(address) view returns (uint256)",
@@ -63,7 +64,7 @@ async function waitForClaimWindow() {
     } catch (error) {
       if (errorData(error) !== TOO_SOON) throw error;
       process.stdout.write(".");
-      await sleep(350);
+      await sleep(THROTTLE_POLL_MS);
     }
   }
 }
@@ -118,7 +119,7 @@ async function main() {
         if (revertedRaces > maxRevertedRaces) throw new Error(`Stopped after ${maxRevertedRaces} reverted claim races to protect gas balance`);
         console.log(`Another bot likely won the slot; reverted races ${revertedRaces}/${maxRevertedRaces}`);
       }
-      await sleep(350);
+      await sleep(THROTTLE_POLL_MS);
     }
   }
 

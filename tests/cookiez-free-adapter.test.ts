@@ -17,7 +17,7 @@ const collection = {
   domains: '["cookiez.fun","www.cookiez.fun"]', siteUrl: "https://www.cookiez.fun/#mint", imageUrl: null,
   adapterConfig: JSON.stringify({
     engine: "sequential-confirmed-v1", onePerTransaction: true, maxPreparedTransactions: 5,
-    expectedMaxSupply: 10000, expectedFreePerWallet: 5, expectedValueWei: "0",
+    expectedMaxSupply: 10000, expectedFreePerWallet: 5, expectedMintIntervalSecs: 5, expectedValueWei: "0",
   }),
   createdAt: new Date().toISOString(),
 };
@@ -79,9 +79,9 @@ test("COOKIEZ fails closed when mint is shut or conservative wallet room is exha
 
 test("COOKIEZ retries only the exact TooSoon throttle error and suppresses its failure webhook", () => {
   const now = Date.parse("2026-08-30T23:46:00.000Z");
-  assert.equal(cookiezSimulationRetryAt({ data: "0x6fed7d85" }, now), "2026-08-30T23:46:00.350Z");
-  assert.equal(cookiezSimulationRetryAt({ info: { error: { data: "0x6FED7D85" } } }, now), "2026-08-30T23:46:00.350Z");
-  assert.equal(cookiezSimulationRetryAt(new Error('execution reverted (data="0x6fed7d85")'), now), "2026-08-30T23:46:00.350Z");
+  assert.equal(cookiezSimulationRetryAt({ data: "0x6fed7d85" }, now), "2026-08-30T23:46:01.000Z");
+  assert.equal(cookiezSimulationRetryAt({ info: { error: { data: "0x6FED7D85" } } }, now), "2026-08-30T23:46:01.000Z");
+  assert.equal(cookiezSimulationRetryAt(new Error('execution reverted (data="0x6fed7d85")'), now), "2026-08-30T23:46:01.000Z");
   assert.equal(cookiezSimulationRetryAt({ data: "0x951b974f" }, now), null);
   assert.equal(cookiezFreeV1.suppressFailureAlerts, true);
 });

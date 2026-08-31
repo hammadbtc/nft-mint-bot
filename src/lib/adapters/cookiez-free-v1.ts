@@ -15,6 +15,7 @@ const TOO_SOON_ERROR = ethers.id("TooSoon()").slice(0, 10).toLowerCase();
 type CookiezConfig = {
   expectedMaxSupply: number;
   expectedFreePerWallet: number;
+  expectedMintIntervalSecs: number;
   expectedValueWei: string;
 };
 
@@ -25,6 +26,7 @@ function configFor(collection: SupportedCollection): CookiezConfig {
   const config = value as Partial<CookiezConfig>;
   if (config.expectedMaxSupply !== 10_000) throw new Error("COOKIEZ reviewed maximum supply must be 10,000");
   if (config.expectedFreePerWallet !== 5) throw new Error("COOKIEZ reviewed free wallet cap must be five");
+  if (config.expectedMintIntervalSecs !== 5) throw new Error("COOKIEZ reviewed free interval must be five seconds");
   if (config.expectedValueWei !== "0") throw new Error("COOKIEZ free claim value must be zero");
   return config as CookiezConfig;
 }
@@ -161,7 +163,7 @@ export function cookiezSimulationRetryAt(error: unknown, nowMs = Date.now()): st
     return [record.data, record.message, record.shortMessage, record.reason, record.cause, record.error, record.info]
       .some((item) => visit(item, depth + 1));
   };
-  // One global free claim is released each second. A 350ms poll avoids a busy
-  // loop while still reaching the first eligible block quickly.
-  return visit(error) ? new Date(nowMs + 350).toISOString() : null;
+  // One global free claim is currently released every five seconds. Poll once
+  // per second so the bot stays responsive without hammering the RPC.
+  return visit(error) ? new Date(nowMs + 1_000).toISOString() : null;
 }

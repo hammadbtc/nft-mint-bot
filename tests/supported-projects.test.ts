@@ -25,6 +25,7 @@ type Seed = {
     expectedMintPriceWei?: string;
     expectedMaxPerWallet?: number;
     expectedFreePerWallet?: number;
+    expectedMintIntervalSecs?: number;
     expectedValueWei?: string;
     engine?: string;
     expectedMerkleRoot?: string;
@@ -80,6 +81,7 @@ test("reviewed project seeds have unique identities and exact URL matchers", () 
     } else if (seed.adapterKey === "cookiez-free-v1") {
       assert.equal(seed.adapterConfig.expectedMaxSupply, 10000);
       assert.equal(seed.adapterConfig.expectedFreePerWallet, 5);
+      assert.equal(seed.adapterConfig.expectedMintIntervalSecs, 5);
       assert.equal(seed.adapterConfig.expectedValueWei, "0");
       assert.equal(seed.adapterConfig.engine, "sequential-confirmed-v1");
     } else {
