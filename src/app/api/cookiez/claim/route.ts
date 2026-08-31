@@ -9,7 +9,7 @@ import { getProvider } from "@/lib/chains";
 import { liveTransactionsEnabled, safeErrorMessage } from "@/lib/safety";
 
 const COOKIEZ_COLLECTION_ID = "c00c1e20-7ba1-4663-9000-000000000005";
-const COOKIEZ_CONTRACT = "0x4BA87E60e52C19c1da7Dab74414dEaC4e237c23a";
+const COOKIEZ_CONTRACT = "0x4ba87e60e52c19c1da7dab74414deac4e237c23a";
 const inputSchema = z.object({ walletId: z.string().uuid(), target: z.coerce.number().int().min(1).max(5).default(5) });
 
 export async function POST(req: NextRequest) {

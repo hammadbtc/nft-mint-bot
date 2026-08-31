@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 
 const CHAIN_ID = 4663n;
-const CONTRACT = "0x4BA87E60e52C19C1da7Dab74414dEaC4e237c23a";
+const CONTRACT = "0x4ba87e60e52c19c1da7dab74414deac4e237c23a";
 const TOO_SOON = ethers.id("TooSoon()").slice(0, 10).toLowerCase();
 const THROTTLE_POLL_MS = 1_000;
 const ABI = [
