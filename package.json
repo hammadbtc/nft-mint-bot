@@ -17,6 +17,7 @@
     "lint": "eslint",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "rpc:check": "node scripts/rpc-readiness.mjs",
+    "cookiez:claim": "node scripts/cookiez-free-claim.mjs",
     "support:certify": "node --import tsx --test tests/support-certification.test.ts"
   },
   "dependencies": {
