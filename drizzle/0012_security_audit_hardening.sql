@@ -112,6 +112,21 @@ CREATE TRIGGER mint_broadcast_release_valid_trigger
   BEFORE UPDATE ON "collections"
   FOR EACH ROW EXECUTE FUNCTION mint_broadcast_release_valid();
 
+-- Legacy collections can predate definition versioning entirely. Keep their
+-- metadata visible, but fail closed until a reviewed draft is certified and
+-- activated. Deploy-time seeding must not manufacture that authority.
+UPDATE collections c
+SET broadcast_paused = true,
+    broadcast_pause_reason = 'Active definition required after security hardening',
+    broadcast_pause_updated_at = now()
+WHERE c.active = true
+  AND c.verified = true
+  AND c.broadcast_paused = false
+  AND NOT EXISTS (
+    SELECT 1 FROM mint_definition_versions v
+    WHERE v.collection_id = c.id AND v.status = 'active'
+  );
+
 -- Grandfathered seed certificates are intake evidence, never runtime authority.
 -- Pause them without changing the active snapshot so an operator can produce a
 -- fresh fork certificate for the same bytes after the hardened code deploys.

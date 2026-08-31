@@ -84,6 +84,7 @@ test("certification enumerates every executable phase and compares exact adapter
 test("security migration makes activation, cutover, and broadcast release fail closed", async () => {
   const phase2 = await readFile(new URL("../drizzle/0007_phase02_certification.sql", import.meta.url), "utf8");
   const migration = await readFile(new URL("../drizzle/0012_security_audit_hardening.sql", import.meta.url), "utf8");
+  const verifier = await readFile(new URL("../scripts/verify-mint-foundation.mjs", import.meta.url), "utf8");
   assert.match(phase2, /runner_version = 'mint-certifier-v1'/);
   assert.match(phase2, /replacement mint definition requires a ready exact-parity cutover/);
   assert.match(migration, /runner_version = 'mint-certifier-v1'/);
@@ -93,6 +94,9 @@ test("security migration makes activation, cutover, and broadcast release fail c
   assert.match(migration, /mint_cutover_status_transition_valid_trigger/);
   assert.match(migration, /mint_broadcast_release_valid_trigger/);
   assert.match(migration, /broadcast release requires completed exact-parity cutover/);
+  assert.match(migration, /Active definition required after security hardening/);
+  assert.match(verifier, /c\.broadcast_paused = false/);
+  assert.match(verifier, /released_collections_without_active_definition/);
 });
 
 test("deploy-time project seeding stages immutable drafts and cannot certify or activate", async () => {

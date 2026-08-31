@@ -82,4 +82,4 @@ Definitions and redacted certificate metadata are available from `GET /api/colle
 
 Legacy `seed-certifier-v1` records remain readable as historical evidence but have no runtime authority. The hardening migration automatically pauses any seed-only released collection. Scheduling, execution, cutover, and broadcast release require a fresh, expiring `mint-certifier-v1` certificate for the deployed commit.
 
-After seeding, Railway runs `npm run db:verify-mint-foundation`. Deployment fails if required tables/triggers are absent, a non-terminal job is unpinned, an enabled collection lacks an active definition, or an active definition lacks a trusted valid certificate.
+After seeding, Railway runs `npm run db:verify-mint-foundation`. Deployment fails if required tables/triggers are absent, a non-terminal job is unpinned, a broadcast-released collection lacks an active definition, or an active unpaused definition lacks a trusted valid certificate. Legacy collections without an active definition are automatically broadcast-paused; their staged drafts still require certification and explicit activation.

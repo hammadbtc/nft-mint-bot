@@ -51,9 +51,9 @@ try {
         where status in ('pending','armed','running','confirming')
           and (definition_version_id is null or definition_hash is null or definition_snapshot is null)) as unpinned_jobs,
       (select count(*)::int from collections c
-        where c.active and c.verified and not exists (
+        where c.active and c.verified and c.broadcast_paused = false and not exists (
           select 1 from mint_definition_versions v where v.collection_id = c.id and v.status = 'active'
-        )) as collections_without_active_definition,
+        )) as released_collections_without_active_definition,
       (select count(*)::int from mint_definition_versions v
         join collections c0 on c0.id = v.collection_id
         where v.status = 'active' and c0.broadcast_paused = false and not exists (
