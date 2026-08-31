@@ -52,6 +52,14 @@ test("per-wallet readiness fails closed but distinguishes non-blocking warnings"
   assert.equal(summarizeReadiness([{ key: "rpc", status: "pass", detail: "up" }]).status, "ready");
 });
 
+test("deployment health probes RPC only for broadcast-released collections", async () => {
+  const health = await readFile(new URL("../src/app/api/health/route.ts", import.meta.url), "utf8");
+  const status = await readFile(new URL("../src/app/api/status/route.ts", import.meta.url), "utf8");
+  assert.match(health, /eq\(schema\.collections\.broadcastPaused, false\)/);
+  assert.match(status, /eq\(schema\.collections\.broadcastPaused, false\)/);
+  assert.match(status, /broadcast_paused = false and adapter_key <> 'reviewed-call-v1'/);
+});
+
 test("Phase 6 database constraints make duplicate worker comparisons idempotent", async () => {
   const migration = await readFile(new URL("../drizzle/0011_phase06_cutover_hardening.sql", import.meta.url), "utf8");
   assert.match(migration, /mint_shadow_comparison_job_candidate_phase_cycle_unique/);

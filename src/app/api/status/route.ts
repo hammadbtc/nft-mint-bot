@@ -14,7 +14,11 @@ export async function GET() {
     if (runsExecutionWorker(role)) ensureSchedulerRunning();
     const collections = await db.selectDistinct({ chainId: schema.collections.chainId })
       .from(schema.collections)
-      .where(and(eq(schema.collections.active, true), eq(schema.collections.verified, true)));
+      .where(and(
+        eq(schema.collections.active, true),
+        eq(schema.collections.verified, true),
+        eq(schema.collections.broadcastPaused, false),
+      ));
     const chainIds = collections.map((item) => item.chainId);
     const rpc = await Promise.all(chainIds.map(async (chainId) => {
       const checks = await checkRpcHealth(chainId);
@@ -97,7 +101,8 @@ export async function GET() {
       completed_cutovers: number; shadow_mismatches: number; incident_bundles_24h: number;
     }>`
       select
-        (select count(*)::int from collections where active and verified and adapter_key <> 'reviewed-call-v1') as legacy_active_collections,
+        (select count(*)::int from collections
+          where active and verified and broadcast_paused = false and adapter_key <> 'reviewed-call-v1') as legacy_active_collections,
         (select count(*)::int from mint_cutover_states where status = 'shadow') as shadow_audits,
         (select count(*)::int from mint_cutover_states where status = 'ready') as ready_cutovers,
         (select count(*)::int from mint_cutover_states where status = 'cutover') as completed_cutovers,

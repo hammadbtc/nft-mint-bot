@@ -29,7 +29,11 @@ export async function GET() {
     const missingLaunchTimers = Math.max(0, (armed?.count || 0) - armedTimers);
     const activeCollections = await db.selectDistinct({ chainId: schema.collections.chainId })
       .from(schema.collections)
-      .where(and(eq(schema.collections.active, true), eq(schema.collections.verified, true)));
+      .where(and(
+        eq(schema.collections.active, true),
+        eq(schema.collections.verified, true),
+        eq(schema.collections.broadcastPaused, false),
+      ));
     const rpcChecks = await Promise.all(activeCollections.map(async ({ chainId }) => {
       const endpoints = await checkRpcHealth(chainId);
       const healthyRoutes = endpoints.filter((endpoint) => endpoint.status === "up").length;
