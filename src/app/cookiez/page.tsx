@@ -48,7 +48,8 @@ export default function CookiezQuickClaimPage() {
   const selectedWallet = wallets.find((wallet) => wallet.id === walletId);
   const walletJobs = useMemo(() => jobs.filter((job) => job.walletId === walletId), [jobs, walletId]);
   const confirmed = walletJobs.filter((job) => job.status === "completed" && job.attempts.some((attempt) => attempt.status === "confirmed")).length;
-  const active = walletJobs.filter((job) => ["pending", "running", "confirming"].includes(job.status)).length;
+  const active = walletJobs.filter((job) => ["pending", "armed", "running", "confirming"].includes(job.status)).length;
+  const failed = walletJobs.filter((job) => job.status === "failed").length;
 
   const start = async () => {
     if (!walletId) return;
@@ -77,7 +78,7 @@ export default function CookiezQuickClaimPage() {
       <div className="mint-body"><div className="mint-grid">
         <div className="phase-list">
           <div className="phase"><div className="phase-top"><h3>FREE BAKER AUTOMATION</h3><span className="status">Live</span></div><p className="muted">One global claim opens every five seconds. MintBot simulates from your wallet, treats only <span className="mono">TooSoon()</span> as a wait, signs locally and waits for confirmation before continuing.</p></div>
-          <div className="phase"><div className="phase-top"><h3>Current selection</h3><span className="muted">Gas only</span></div><div className="summary-line"><span>Wallet</span><b>{selectedWallet ? `${selectedWallet.label} · ${short(selectedWallet.address)}` : "None"}</b></div><div className="summary-line"><span>Confirmed in recent tasks</span><b>{confirmed}</b></div><div className="summary-line"><span>Active claim steps</span><b>{active}</b></div></div>
+          <div className="phase"><div className="phase-top"><h3>Current selection</h3><span className="muted">Gas only</span></div><div className="summary-line"><span>Wallet</span><b>{selectedWallet ? `${selectedWallet.label} · ${short(selectedWallet.address)}` : "None"}</b></div><div className="summary-line"><span>Confirmed in recent tasks</span><b>{confirmed}</b></div><div className="summary-line"><span>Queued / armed / active</span><b>{active}</b></div><div className="summary-line"><span>Failed recent tasks</span><b>{failed}</b></div></div>
         </div>
         <div className="schedule-box">
           <div className="field"><label>MintBot wallet</label><select value={walletId} onChange={(event)=>{setWalletId(event.target.value);keyRef.current=""}}>{wallets.map((wallet)=><option key={wallet.id} value={wallet.id}>{wallet.label} · {wallet.role} · {short(wallet.address)}</option>)}</select></div>
