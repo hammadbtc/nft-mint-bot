@@ -3,6 +3,7 @@ import test from "node:test";
 import { ethers } from "ethers";
 import { cookiezFreeV1, cookiezSimulationRetryAt, encodeCookiezFreeClaim } from "../src/lib/adapters/cookiez-free-v1";
 import { executionEngineFor, executionManifestFor } from "../src/lib/engines";
+import { simulateMintForAdapter } from "../src/lib/engine/mint";
 
 const contractAddress = "0x4ba87e60e52c19c1da7dab74414deac4e237c23a";
 const signer = "0x1111111111111111111111111111111111111111";
@@ -83,4 +84,14 @@ test("COOKIEZ retries only the exact TooSoon throttle error and suppresses its f
   assert.equal(cookiezSimulationRetryAt(new Error('execution reverted (data="0x6fed7d85")'), now), "2026-08-30T23:46:00.350Z");
   assert.equal(cookiezSimulationRetryAt({ data: "0x951b974f" }, now), null);
   assert.equal(cookiezFreeV1.suppressFailureAlerts, true);
+});
+
+test("the shared sequential simulation path converts COOKIEZ TooSoon into a scheduler wait", async () => {
+  const provider = {
+    call: async () => { throw Object.assign(new Error("execution reverted"), { data: "0x6fed7d85" }); },
+  } as unknown as ethers.Provider;
+  await assert.rejects(
+    () => simulateMintForAdapter(cookiezFreeV1, { to: contractAddress, data: "0xf366afc9", value: 0n }, provider, signer),
+    /Mint is scheduled for/,
+  );
 });

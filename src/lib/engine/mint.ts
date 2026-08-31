@@ -5,7 +5,7 @@ import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import { executionEngineFor, executionManifestFor } from "@/lib/engines";
 import { competitiveFeeFields, reviewedFallbackGasLimit } from "@/lib/gas-policy";
-import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
+import type { MintAdapter, MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
 import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
@@ -147,7 +147,25 @@ async function simulateExact(request: ethers.TransactionRequest, provider: ether
   try {
     await provider.call(exactSimulationRequest(request, from));
   } catch (error) {
-    throw new Error(explainMintSimulationError(error) || `Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`);
+    throw new Error(
+      explainMintSimulationError(error) || `Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`,
+      { cause: error },
+    );
+  }
+}
+
+export async function simulateMintForAdapter(
+  adapter: MintAdapter,
+  request: ethers.TransactionRequest,
+  provider: ethers.Provider,
+  from: string,
+): Promise<void> {
+  try {
+    await simulateExact(request, provider, from);
+  } catch (error) {
+    const retryAt = adapter.simulationRetryAt?.(error);
+    if (retryAt) throw new MintNotOpenError(retryAt, null);
+    throw error;
   }
 }
 
@@ -355,13 +373,7 @@ async function executeOnePerTransactionLadder(args: {
 
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, 1, provider, { phaseId: phase.id }));
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
-  try {
-    await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
-  } catch (error) {
-    const retryAt = adapter.simulationRetryAt?.(error);
-    if (retryAt) throw new MintNotOpenError(retryAt, null);
-    throw error;
-  }
+  await traceMintStage(job.id, "simulation", () => simulateMintForAdapter(adapter, request, provider, address));
   if (adapter.revalidateBeforeSigning) {
     await traceMintStage(job.id, "final-revalidation", () => adapter.revalidateBeforeSigning!(collection, address, 1, provider, request, { phaseId: phase.id }));
   }
@@ -687,7 +699,7 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, fallbackGasLimit, engine.launchTimeGasEstimation));
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
-  await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
+  await traceMintStage(job.id, "simulation", () => simulateMintForAdapter(adapter, request, provider, address));
 
   if (job.dryRun) {
     await db.insert(schema.mintAttempts).values({

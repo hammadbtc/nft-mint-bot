@@ -158,7 +158,7 @@ export function cookiezSimulationRetryAt(error: unknown, nowMs = Date.now()): st
     if (typeof value === "string") return value.toLowerCase().includes(TOO_SOON_ERROR);
     if (typeof value !== "object") return false;
     const record = value as Record<string, unknown>;
-    return [record.data, record.message, record.shortMessage, record.reason, record.error, record.info]
+    return [record.data, record.message, record.shortMessage, record.reason, record.cause, record.error, record.info]
       .some((item) => visit(item, depth + 1));
   };
   // One global free claim is released each second. A 350ms poll avoids a busy
