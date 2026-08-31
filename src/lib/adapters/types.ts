@@ -44,9 +44,6 @@ export type ResolvedMint = {
 
 export interface MintAdapter {
   key: string;
-  /** Some high-frequency automations intentionally retry expected contract
-   * throttle states and should not send terminal failure webhooks. */
-  suppressFailureAlerts?: boolean;
   supportsArming?: boolean;
   requiresSignerForEligibility?: boolean;
   canArmPhase?: (phaseId: string) => boolean;
@@ -105,8 +102,5 @@ export interface MintAdapter {
     request: ethers.TransactionRequest,
     options?: { phaseId?: string },
   ) => Promise<void>;
-  /** Convert a narrowly identified simulation revert into a scheduler wait.
-   * Unknown reverts must return null and continue to fail closed. */
-  simulationRetryAt?: (error: unknown, nowMs?: number) => string | null;
   recommendedGasLimit?: bigint;
 }

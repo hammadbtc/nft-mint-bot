@@ -32,17 +32,6 @@ const PROFILES: Record<ExecutionEngineKey, ExecutionEngineProfile> = {
     launchTimeGasEstimation: false,
     finalPinnedStateRequired: true,
   },
-  "sequential-confirmed-v1": {
-    key: "sequential-confirmed-v1",
-    detection: "owner-switch",
-    preparation: "switch-gated",
-    broadcast: "standard",
-    supportsNonceLadder: false,
-    supportsSequentialTransactions: true,
-    requiresDedicatedWalletForLadder: false,
-    launchTimeGasEstimation: true,
-    finalPinnedStateRequired: true,
-  },
   "custom-reviewed-v1": {
     key: "custom-reviewed-v1",
     detection: "precise-timer",
@@ -60,7 +49,6 @@ const LEGACY_ADAPTER_ENGINE: Record<string, ExecutionEngineKey> = {
   "opensea-signed-seadrop-v1": "scheduled-server-signed-v1",
   "bulls-runners-v1": "stealth-owner-switch-v1",
   "terminal-assistants-v1": "stealth-owner-switch-v1",
-  "cookiez-free-v1": "sequential-confirmed-v1",
   "squiggle-wuiggle-v1": "custom-reviewed-v1",
   "evm-contract-v1": "custom-reviewed-v1",
 };
@@ -83,8 +71,8 @@ export function executionManifestFor(collection: SupportedCollection): Execution
   if (config.maxPreparedTransactions != null && (!Number.isSafeInteger(config.maxPreparedTransactions) || config.maxPreparedTransactions < 1 || config.maxPreparedTransactions > 100)) {
     throw new Error(`${collection.name} has an invalid prepared-transaction limit`);
   }
-  if (config.onePerTransaction && !PROFILES[config.engine].supportsNonceLadder && !PROFILES[config.engine].supportsSequentialTransactions) {
-    throw new Error(`${collection.name} requests sequential transactions on an engine that does not support them`);
+  if (config.onePerTransaction && !PROFILES[config.engine].supportsNonceLadder) {
+    throw new Error(`${collection.name} requests a nonce ladder on an engine that does not support it`);
   }
   return {
     engine: config.engine,

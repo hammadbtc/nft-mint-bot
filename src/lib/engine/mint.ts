@@ -5,7 +5,7 @@ import { db, schema } from "@/lib/db";
 import { getMintAdapter } from "@/lib/adapters";
 import { executionEngineFor, executionManifestFor } from "@/lib/engines";
 import { competitiveFeeFields, reviewedFallbackGasLimit } from "@/lib/gas-policy";
-import type { MintAdapter, MintPhase, SupportedCollection } from "@/lib/adapters/types";
+import type { MintPhase, SupportedCollection } from "@/lib/adapters/types";
 import { isTransientRpcReadError, manualOpenRetryAt, recoveredJobStatus } from "@/lib/mint-policy";
 import { inspectWalletPhases, resolveWalletPhasePlan, resolveWalletSelectedPhase } from "@/lib/phase-planning";
 import { mintWalletEligibilityError } from "@/lib/mint-wallet-policy";
@@ -147,25 +147,7 @@ async function simulateExact(request: ethers.TransactionRequest, provider: ether
   try {
     await provider.call(exactSimulationRequest(request, from));
   } catch (error) {
-    throw new Error(
-      explainMintSimulationError(error) || `Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`,
-      { cause: error },
-    );
-  }
-}
-
-export async function simulateMintForAdapter(
-  adapter: MintAdapter,
-  request: ethers.TransactionRequest,
-  provider: ethers.Provider,
-  from: string,
-): Promise<void> {
-  try {
-    await simulateExact(request, provider, from);
-  } catch (error) {
-    const retryAt = adapter.simulationRetryAt?.(error);
-    if (retryAt) throw new MintNotOpenError(retryAt, null);
-    throw error;
+    throw new Error(explainMintSimulationError(error) || `Exact wallet simulation failed: ${safeErrorMessage(error, "transaction reverted")}`);
   }
 }
 
@@ -343,10 +325,6 @@ async function executeOnePerTransactionLadder(args: {
   const manifest = executionManifestFor(collection);
   const engine = executionEngineFor(collection);
   if (!manifest.onePerTransaction || !job.batchId || !job.phaseId) return null;
-  // Sequential-confirmed engines intentionally let the wallet scheduler run
-  // one sibling at a time. The next claim is not signed until the previous
-  // receipt is confirmed, which is required for globally throttled mints.
-  if (!engine.supportsNonceLadder && engine.supportsSequentialTransactions) return null;
   const siblings = await db.select().from(schema.mintJobs).where(and(
     eq(schema.mintJobs.batchId, job.batchId), eq(schema.mintJobs.walletId, job.walletId),
     eq(schema.mintJobs.collectionId, job.collectionId), eq(schema.mintJobs.phaseId, job.phaseId),
@@ -373,7 +351,7 @@ async function executeOnePerTransactionLadder(args: {
 
   let request = await traceMintStage(job.id, "payload-acquisition", () => adapter.buildTransaction!(collection, address, 1, provider, { phaseId: phase.id }));
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, adapter.recommendedGasLimit, engine.launchTimeGasEstimation));
-  await traceMintStage(job.id, "simulation", () => simulateMintForAdapter(adapter, request, provider, address));
+  await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
   if (adapter.revalidateBeforeSigning) {
     await traceMintStage(job.id, "final-revalidation", () => adapter.revalidateBeforeSigning!(collection, address, 1, provider, request, { phaseId: phase.id }));
   }
@@ -699,7 +677,7 @@ export async function executeMint(jobId: string): Promise<ExecutionResult> {
   request = await traceMintStage(job.id, "gas-preparation", () => applyGas(request, provider, address, job, fallbackGasLimit, engine.launchTimeGasEstimation));
   const approvalResult = await ensureErc20Approval(job, collection, request, signer, provider);
   if (approvalResult) return approvalResult;
-  await traceMintStage(job.id, "simulation", () => simulateMintForAdapter(adapter, request, provider, address));
+  await traceMintStage(job.id, "simulation", () => simulateExact(request, provider, address));
 
   if (job.dryRun) {
     await db.insert(schema.mintAttempts).values({
@@ -767,28 +745,6 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
         return;
       }
 
-      // COOKIEZ can lose the single global ten-second slot between any two
-      // RPC stages (gas estimation, simulation, signing, or broadcast). Treat
-      // the adapter's exact TooSoon() selector as a scheduler wait regardless
-      // of which stage surfaced it; every other revert still fails closed.
-      const [retryCollection] = await db.select().from(schema.collections)
-        .where(eq(schema.collections.id, initial.collectionId)).limit(1);
-      const adapterRetryAt = retryCollection
-        ? getMintAdapter(retryCollection.adapterKey)?.simulationRetryAt?.(error)
-        : null;
-      if (adapterRetryAt) {
-        await db.update(schema.mintJobs).set({
-          status: "pending",
-          scheduledAt: adapterRetryAt,
-          claimToken: null,
-          claimedAt: null,
-          leaseExpiresAt: null,
-          updatedAt: new Date().toISOString(),
-          error: null,
-        }).where(eq(schema.mintJobs.id, jobId));
-        return;
-      }
-
       const recoverable = await latestRecoverableAttempt(jobId, "mint") || await latestRecoverableAttempt(jobId, "approval");
       if (!liveTransactionsEnabled() && recoverable) {
         await db.update(schema.mintJobs).set({ status: "confirming", error: message, updatedAt: new Date().toISOString() })
@@ -808,10 +764,7 @@ export async function runMintJob(jobId: string): Promise<ExecutionResult | undef
           claimedAt: null,
           leaseExpiresAt: null,
         }).where(eq(schema.mintJobs.id, jobId));
-        const [collection] = await db.select().from(schema.collections)
-          .where(eq(schema.collections.id, initial.collectionId)).limit(1);
-        const suppressAlert = collection ? getMintAdapter(collection.adapterKey)?.suppressFailureAlerts === true : false;
-        if (!suppressAlert) await sendAlert("job_failed", `Mint job ${jobId.slice(0, 8)} failed: ${message}`, jobId);
+        await sendAlert("job_failed", `Mint job ${jobId.slice(0, 8)} failed: ${message}`, jobId);
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(8_000, 500 * 2 ** attempt)));
@@ -837,7 +790,6 @@ export async function batchMint(
   if (!collection || !collection.active || !collection.verified) throw new Error("Mint is not supported or is disabled");
   if (quantity < 1) throw new Error("Mint quantity must be positive");
   const manifest = executionManifestFor(collection);
-  const engine = executionEngineFor(collection);
   const transactionsPerPlan = manifest.onePerTransaction ? quantity : 1;
   const transactionQuantity = manifest.onePerTransaction ? 1 : quantity;
   if (manifest.onePerTransaction && transactionsPerPlan > (manifest.maxPreparedTransactions || 1)) {
@@ -847,7 +799,7 @@ export async function batchMint(
     ? await db.select().from(schema.wallets).where(inArray(schema.wallets.id, uniqueWalletIds))
     : [];
   if (wallets.length !== uniqueWalletIds.length) throw new Error("One or more selected wallets were not found");
-  if (manifest.onePerTransaction && transactionsPerPlan > 1 && engine.requiresDedicatedWalletForLadder && wallets.some((wallet) => wallet.role !== "worker")) {
+  if (manifest.onePerTransaction && transactionsPerPlan > 1 && wallets.some((wallet) => wallet.role !== "worker")) {
     throw new Error("Sequential nonce-ladder mode requires dedicated worker wallets; main wallets may schedule one transaction only");
   }
   const parentIds = [...new Set(wallets.flatMap((wallet) => wallet.role === "worker" && wallet.parentWalletId ? [wallet.parentWalletId] : []))];
